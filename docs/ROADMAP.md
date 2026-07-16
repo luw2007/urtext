@@ -1,0 +1,56 @@
+# 路线图（每期独立可合、独立有值）
+
+> 规则：任何一期结束系统处于可用状态；下一期永不作为上一期的前提被"预支"。
+> 每期验收 = 该期新增子句在 `specs/urtext/` 中全绿。
+
+## M1 验证器（已完成 ✅）
+
+clause/checklist 语法、不可变修订链注册表、oracle runner
+（test/cmd/diff-scope/manual）、append-only 证据、`index/check/verify` CLI、
+自举 feature 单元。
+
+验收（已达成）：`urtext verify` 对本仓库 5 pass / 1 pending manual / exit 0；
+负向路径（无 oracle 子句、失败 oracle）分别 exit 1。
+
+## M2 Linker：影响分析
+
+- `refs` 建子句引用图（`clause_refs` 表），跨文件解析，`unknown_ref` fail-closed。
+- 子句 text_hash 变更 → stale 沿反向闭包传播；stale 子句证据作废。
+- `urtext impact <spec-path>#<clause-id>`：机械输出受影响子句/任务清单。
+
+独立价值：改一条 spec 能回答"波及什么"——现有一切 SDD 工具都做不到。
+
+## M3 DWARF：clause↔code↔evidence
+
+- `clause_code_map` + `clause_outputs` 落库（diff 交叉验证，见 DECISIONS D4）。
+- `urtext blame <file>:<line>`：反查代码行由哪条子句约束。
+- unmapped change 检测进入 `urtext check --diff`。
+
+独立价值：事实源翻转开始执法；失败归因到子句。
+
+## M4 元验证 + 自动通过
+
+- 跨模型证据覆盖审计（agent 协议：读证据→逐子句 agree/disagree）。
+- 风险分级自动通过规则（low+全绿+一致+无 stale → 自动过）。
+
+独立价值：人工量收敛到高危与分歧。
+
+## M5 unsafe lane + 多模态 oracle
+
+- `risk:high` 子句强制人工代码级审查的工作流接口。
+- visual（截图 diff 对设计稿）/ interaction（demo 回放）oracle kind。
+
+## 种子验证策略（贯穿 M2-M4）
+
+- 找 **10 个 design partner**：日常使用 Claude Code/Codex、AI 代码占比高的
+  个人开发者或 2-5 人团队；亲自辅助完成首次接入。
+- 通过标准：
+  - ≥7 人在 10 分钟内为真实 feature 写出第一条带 oracle 的子句并跑通 verify；
+  - 第二周 ≥4 人不经提醒主动运行 ≥3 次；
+  - manual oracle 占比中位数 <50%（承重假设成立，VISION P9）；
+  - ≥3 人明确愿为稳定版付费。
+- 停止条件：
+  - 用户反馈集中在"写 oracle 比 review 代码还贵" → 假设失败，停止扩建，
+    不允许靠加功能挽救；
+  - manual 占比持续 >50% → 同上；
+  - 用户认为 spec-kit/CodeRabbit 已足够 → 差异不成立，重新判断赛道。

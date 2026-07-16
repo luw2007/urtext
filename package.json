@@ -1,6 +1,6 @@
 {
   "name": "urtext",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Urtext — the ur-text of your system. Code is just an interpretation. Spec-first development toolchain where humans maintain system intent and AI maintains the projection.",
   "license": "MIT",
   "author": "luw2007",
@@ -18,10 +18,30 @@
     "verification"
   ],
   "type": "module",
-  "main": "index.js",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "urtext": "dist/cli.js"
+  },
+  "main": "dist/index.js",
   "files": [
-    "index.js",
+    "dist/",
     "README.md",
     "LICENSE"
-  ]
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.4.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.15.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.4"
+  }
 }
