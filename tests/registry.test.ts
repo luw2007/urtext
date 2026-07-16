@@ -143,6 +143,11 @@ describe('scanWorkspace', () => {
   test('a workspace without specs/ yields no units', () => {
     const root = mkdtempSync(join(tmpdir(), 'urtext-scan-'))
     tempDirs.push(root)
-    expect(scanWorkspace(db, root)).toEqual({ units: [], outcomes: [] })
+    expect(scanWorkspace(db, root)).toEqual({
+      units: [],
+      outcomes: [],
+      linkErrors: [],
+      stale: { staleClauses: [], invalidatedEvidence: 0 },
+    })
   })
 })

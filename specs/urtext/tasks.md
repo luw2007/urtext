@@ -4,5 +4,5 @@
     unchanged / indexed(ready|building) / tombstoned；unknown_clause 跨引用检查。
 - [x] T003 oracle runner 与证据库 <!-- role:coder depends:T002 gate:true clauses:C004 -->
     test/cmd/diff-scope 执行，manual pending，metric 显式 fail；evidence append-only。
-- [ ] T004 linker 与影响分析 <!-- role:coder depends:T003 clauses:C003 -->
-    refs 建图、stale 传播、urtext impact。（下一里程碑）
+- [x] T004 linker 与影响分析 <!-- role:coder depends:T003 clauses:C007,C008 -->
+    refs 建图（clause_refs）、unknown_ref fail-closed、text_hash stale 传播、urtext impact。

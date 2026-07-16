@@ -99,10 +99,16 @@ GFM 任务列表 + anchor 元数据，`clauses` 为多值字段：
 - 每文件一条修订链：`(spec_path, revision)`，`content_hash = sha256:<hex>`。
 - 内容未变 → no-op；变更 → 追加新修订（`ready` 或 `building`）。
 - 文件删除 → 追加 `tombstoned` 修订（content_hash NULL），**从不改写历史修订**。
+- 每条子句另记 `text_hash = sha256(标题 + 正文)`：anchor 元数据变更不算文本变更。
+- `refs` 边落 `clause_refs` 表（随修订链版本化）；linker 在每次 scan 后对
+  **全 workspace 最新活跃修订**解析引用（`unknown_ref` 属 check 阶段错误，
+  不改单文件修订状态——目标被删而引用方未变的悬空引用只有全量校验能捕获）。
+- 上游子句 text_hash 变更 → 反向闭包内依赖子句的既有证据打 `invalidated_at`
+  （evidence 唯一可变列；作废不删除）。
 
 ## v0 边界（后续版本处理）
 
 - anchor 值不含空格（whitespace 分词，v1 再评估引号转义）。
 - 设计稿引用（Figma）、demo 快照、visual/interaction oracle：VISION P7 范畴，v1 扩展
   `oracle` kind 与 `refs` 目标类型，不改本文既有语法。
-- linker 的 stale 传播与 DWARF 映射不在 v0 语法内，注册表 schema 已为其预留修订链。
+- DWARF 映射（clause↔code）不在 v0 语法内，注册表 schema 已为其预留修订链。

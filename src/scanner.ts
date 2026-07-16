@@ -13,6 +13,7 @@ import { join } from 'node:path'
 import type { Database } from 'better-sqlite3'
 
 import { parseClauseFile } from './clause-parser.js'
+import { linkWorkspace, propagateStale, type LinkError, type StaleReport } from './linker.js'
 import { indexClauseFile, indexTaskFile, type IndexOutcome } from './registry.js'
 
 export interface FeatureUnit {
@@ -27,6 +28,10 @@ export interface FeatureUnit {
 export interface ScanReport {
   units: FeatureUnit[]
   outcomes: { specPath: string; outcome: IndexOutcome }[]
+  /** Workspace-level `unknown_ref` errors (SYNTAX.md: check-stage, fail-closed). */
+  linkErrors: LinkError[]
+  /** Dependents of text-changed clauses; their evidence was invalidated. */
+  stale: StaleReport
 }
 
 /** Discover `specs/<feature>/` units. Non-recursive below the feature dir (v0). */
@@ -67,6 +72,7 @@ export const scanWorkspace = (db: Database, workspaceRoot: string): ScanReport =
   const outcomes: ScanReport['outcomes'] = []
   const timestamp = Date.now()
 
+  const changed: { specPath: string; clauseId: string }[] = []
   for (const unit of units) {
     // Clause files first — collect the unit's declared ids for the checklist check.
     const unitClauseIds = new Set<string>()
@@ -75,10 +81,11 @@ export const scanWorkspace = (db: Database, workspaceRoot: string): ScanReport =
       for (const clause of parseClauseFile(content).clauses) {
         unitClauseIds.add(clause.clauseId)
       }
-      outcomes.push({
-        specPath,
-        outcome: indexClauseFile(db, { specPath, content, timestamp }),
-      })
+      const outcome = indexClauseFile(db, { specPath, content, timestamp })
+      if (outcome.kind === 'indexed') {
+        for (const clauseId of outcome.changedClauses) changed.push({ specPath, clauseId })
+      }
+      outcomes.push({ specPath, outcome })
     }
 
     if (unit.taskFile) {
@@ -90,5 +97,10 @@ export const scanWorkspace = (db: Database, workspaceRoot: string): ScanReport =
     }
   }
 
-  return { units, outcomes }
+  // Link pass over the reconciled snapshot: cross-file ref validation, then
+  // stale propagation from every clause whose normative text changed.
+  const linkErrors = linkWorkspace(db)
+  const stale = propagateStale(db, changed, timestamp)
+
+  return { units, outcomes, linkErrors, stale }
 }

@@ -21,9 +21,25 @@ CREATE TABLE IF NOT EXISTS evidence (
   verdict     TEXT    NOT NULL CHECK (verdict IN ('pass', 'fail', 'pending')),
   exit_code   INTEGER,
   output      TEXT    NOT NULL DEFAULT '',
-  created_at  INTEGER NOT NULL
+  created_at  INTEGER NOT NULL,
+  invalidated_at INTEGER
 );
 `
+
+/**
+ * Evidence is append-only except `invalidated_at` — the single mutable audit
+ * column, set by the linker when an upstream clause's text changes (stale
+ * propagation). Includes the additive migration for M1-era ledgers.
+ */
+export const ensureEvidenceLedger = (db: Database): void => {
+  db.exec(EVIDENCE_SCHEMA)
+  const columns = db
+    .prepare(`SELECT name FROM pragma_table_info('evidence')`)
+    .all() as { name: string }[]
+  if (!columns.some((column) => column.name === 'invalidated_at')) {
+    db.exec('ALTER TABLE evidence ADD COLUMN invalidated_at INTEGER')
+  }
+}
 
 export interface ClauseVerdict {
   specPath: string
@@ -75,7 +91,7 @@ const readyClauses = (db: Database): ReadyClauseRow[] =>
     .all() as ReadyClauseRow[]
 
 export const verifyWorkspace = (db: Database, workspaceRoot: string): VerifyReport => {
-  db.exec(EVIDENCE_SCHEMA)
+  ensureEvidenceLedger(db)
   const insert = db.prepare(
     `INSERT INTO evidence
        (spec_path, revision, clause_id, oracle_kind, oracle_ref, verdict, exit_code, output, created_at)

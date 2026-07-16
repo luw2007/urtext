@@ -12,11 +12,15 @@ clause/checklist 语法、不可变修订链注册表、oracle runner
 验收（已达成）：`urtext verify` 对本仓库 5 pass / 1 pending manual / exit 0；
 负向路径（无 oracle 子句、失败 oracle）分别 exit 1。
 
-## M2 Linker：影响分析
+## M2 Linker：影响分析（已完成 ✅）
 
-- `refs` 建子句引用图（`clause_refs` 表），跨文件解析，`unknown_ref` fail-closed。
-- 子句 text_hash 变更 → stale 沿反向闭包传播；stale 子句证据作废。
+- `refs` 建子句引用图（`clause_refs` 表，随修订链版本化），跨文件解析，
+  `unknown_ref` fail-closed（check 阶段全量校验，捕获目标被删的悬空引用）。
+- 子句 text_hash 变更 → stale 沿反向闭包传播；stale 子句证据打 `invalidated_at` 作废。
 - `urtext impact <spec-path>#<clause-id>`：机械输出受影响子句/任务清单。
+
+验收（已达成）：C007/C008 绑定 tests/linker.test.ts 全绿；自举单元
+（specs/urtext/）8 条子句 7 pass / 1 pending manual / exit 0。
 
 独立价值：改一条 spec 能回答"波及什么"——现有一切 SDD 工具都做不到。
 

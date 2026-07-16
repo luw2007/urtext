@@ -27,9 +27,19 @@ export {
   type CrossRefError,
 } from './registry.js'
 export { discoverUnits, scanWorkspace, type FeatureUnit, type ScanReport } from './scanner.js'
+export {
+  linkWorkspace,
+  propagateStale,
+  impact,
+  type LinkError,
+  type ClauseKey,
+  type StaleReport,
+  type ImpactReport,
+} from './linker.js'
 export { runOracle, type OracleResult, type Verdict } from './oracle-runner.js'
 export {
   verifyWorkspace,
+  ensureEvidenceLedger,
   EVIDENCE_SCHEMA,
   type VerifyReport,
   type ClauseVerdict,

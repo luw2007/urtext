@@ -30,6 +30,12 @@ export type IndexOutcome =
       revision: number
       status: 'ready' | 'building'
       errors: (ClauseParseError | TaskParseError | CrossRefError)[]
+      /**
+       * Clause ids whose normative text (title+body) differs from the prior
+       * live revision — added and removed ids included. Always [] for task
+       * files. The linker propagates stale along the refs graph from these.
+       */
+      changedClauses: string[]
     }
   | { kind: 'tombstoned'; revision: number }
 
@@ -62,6 +68,7 @@ CREATE TABLE IF NOT EXISTS clauses (
   clause_id   TEXT    NOT NULL,
   seq         INTEGER NOT NULL,
   title       TEXT    NOT NULL,
+  text_hash   TEXT    NOT NULL DEFAULT '',
   oracle_kind TEXT,
   oracle_ref  TEXT,
   risk        TEXT    NOT NULL DEFAULT 'low' CHECK (risk IN ('low', 'high')),
@@ -88,10 +95,28 @@ CREATE TABLE IF NOT EXISTS tasks (
   PRIMARY KEY (spec_path, revision, file_id),
   FOREIGN KEY (spec_path, revision) REFERENCES revisions (spec_path, revision) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS clause_refs (
+  spec_path   TEXT    NOT NULL,
+  revision    INTEGER NOT NULL,
+  clause_id   TEXT    NOT NULL,
+  to_spec     TEXT    NOT NULL,
+  to_clause   TEXT    NOT NULL,
+  line        INTEGER NOT NULL,
+  PRIMARY KEY (spec_path, revision, clause_id, to_spec, to_clause),
+  FOREIGN KEY (spec_path, revision) REFERENCES revisions (spec_path, revision) ON DELETE CASCADE
+);
 `
 
 export const openRegistry = (db: Database): void => {
   db.exec(REGISTRY_SCHEMA)
+  // Additive migration for M1-era registries (predating text_hash).
+  const columns = db
+    .prepare(`SELECT name FROM pragma_table_info('clauses')`)
+    .all() as { name: string }[]
+  if (!columns.some((column) => column.name === 'text_hash')) {
+    db.exec(`ALTER TABLE clauses ADD COLUMN text_hash TEXT NOT NULL DEFAULT ''`)
+  }
 }
 
 const latestRevision = (
@@ -107,9 +132,14 @@ const latestRevision = (
     | { revision: number; content_hash: string | null; status: string }
     | undefined
 
+const clauseTextHash = (title: string, body: string | null): string =>
+  `sha256:${createHash('sha256').update(`${title}\n${body ?? ''}`, 'utf8').digest('hex')}`
+
 /**
- * Reconcile one clause-file snapshot into its revision chain. `featureClauses`
- * is unused today but reserved for same-unit ref checks in a later unit.
+ * Reconcile one clause-file snapshot into its revision chain. Persists per-
+ * clause `text_hash` (title+body — anchor edits alone are not text changes)
+ * and the outgoing `clause_refs` edges, and reports which clause ids changed
+ * text versus the prior live revision so the linker can propagate stale.
  */
 export const indexClauseFile = (
   db: Database,
@@ -126,6 +156,17 @@ export const indexClauseFile = (
   const nextRevision = (latest?.revision ?? 0) + 1
   const status: 'ready' | 'building' = parsed.errors.length === 0 ? 'ready' : 'building'
 
+  // text_hash of the prior live revision, keyed by clause id ([] for rev 1
+  // or after a tombstone — nothing existed before, so nothing "changed").
+  const priorHashes = new Map<string, string>()
+  if (latest && latest.status !== 'tombstoned') {
+    const rows = db
+      .prepare('SELECT clause_id, text_hash FROM clauses WHERE spec_path = ? AND revision = ?')
+      .all(specPath, latest.revision) as { clause_id: string; text_hash: string }[]
+    for (const row of rows) priorHashes.set(row.clause_id, row.text_hash)
+  }
+
+  const changedClauses: string[] = []
   db.transaction(() => {
     db.prepare(
       `INSERT INTO revisions (spec_path, revision, file_kind, content_hash, status, created_at)
@@ -134,8 +175,12 @@ export const indexClauseFile = (
 
     const insert = db.prepare(
       `INSERT INTO clauses
-         (spec_path, revision, clause_id, seq, title, oracle_kind, oracle_ref, risk, refs, body, line)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         (spec_path, revision, clause_id, seq, title, text_hash, oracle_kind, oracle_ref, risk, refs, body, line)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    const insertRef = db.prepare(
+      `INSERT OR IGNORE INTO clause_refs (spec_path, revision, clause_id, to_spec, to_clause, line)
+       VALUES (?, ?, ?, ?, ?, ?)`
     )
     // Duplicate clause ids keep the revision at `building`; insert first-wins
     // so the PK holds and the broken edit is recorded rather than crashing.
@@ -143,12 +188,15 @@ export const indexClauseFile = (
     for (const clause of parsed.clauses) {
       if (inserted.has(clause.clauseId)) continue
       inserted.add(clause.clauseId)
+      const textHash = clauseTextHash(clause.title, clause.body)
+      if (priorHashes.get(clause.clauseId) !== textHash) changedClauses.push(clause.clauseId)
       insert.run(
         specPath,
         nextRevision,
         clause.clauseId,
         clause.seq,
         clause.title,
+        textHash,
         clause.oracle?.kind ?? null,
         clause.oracle?.ref ?? null,
         clause.risk,
@@ -156,10 +204,17 @@ export const indexClauseFile = (
         clause.body,
         clause.line
       )
+      for (const ref of clause.refs) {
+        insertRef.run(specPath, nextRevision, clause.clauseId, ref.path, ref.clauseId, clause.line)
+      }
+    }
+    // Removed clauses changed too — their dependents must re-verify.
+    for (const clauseId of priorHashes.keys()) {
+      if (!inserted.has(clauseId)) changedClauses.push(clauseId)
     }
   })()
 
-  return { kind: 'indexed', revision: nextRevision, status, errors: parsed.errors }
+  return { kind: 'indexed', revision: nextRevision, status, errors: parsed.errors, changedClauses }
 }
 
 /**
@@ -230,7 +285,7 @@ export const indexTaskFile = (
     }
   })()
 
-  return { kind: 'indexed', revision: nextRevision, status, errors }
+  return { kind: 'indexed', revision: nextRevision, status, errors, changedClauses: [] }
 }
 
 /**
