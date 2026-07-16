@@ -1,0 +1,27 @@
+{
+  "name": "urtext",
+  "version": "0.0.1",
+  "description": "Urtext — the ur-text of your system. Code is just an interpretation. Spec-first development toolchain where humans maintain system intent and AI maintains the projection.",
+  "license": "MIT",
+  "author": "luw2007",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/luw2007/urtext.git"
+  },
+  "homepage": "https://github.com/luw2007/urtext#readme",
+  "keywords": [
+    "spec",
+    "sdd",
+    "spec-driven-development",
+    "ai-coding",
+    "single-source-of-truth",
+    "verification"
+  ],
+  "type": "module",
+  "main": "index.js",
+  "files": [
+    "index.js",
+    "README.md",
+    "LICENSE"
+  ]
+}
