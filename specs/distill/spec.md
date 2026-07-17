@@ -30,7 +30,7 @@ Then it accepts existing files, directories, and globs as implementation evidenc
 
 Given a user invokes CLI help,
 When the distill feature is present,
-Then help documents `distill discover`, `distill coverage`, `distill validate`, and `distill promote` with their output boundary.
+Then help documents `distill discover`, `distill coverage`, `distill validate`, `distill cluster`, and `distill promote` with their output boundary.
 
 ## C006 Codebase-to-spec synthesis produces review-only candidates <!-- oracle:cmd:sh%20scripts/oracle-skill.sh%20codebase-to-spec risk:high refs:specs/distill/spec.md#C001,specs/distill/spec.md#C002 -->
 
@@ -43,3 +43,9 @@ Then it writes only staged candidate specs, separates observed facts from infere
 Given a current codebase-to-spec draft with a facts-manifest HEAD,
 When `urtext distill promote` receives a target feature directory,
 Then it appends only observed candidates with runnable low-risk oracles and no human-decision marker, retains inferred/manual/high-risk/decision-required candidates in staging, and rejects stale drafts without changing canonical specs.
+
+## C008 Domain clustering inventories every observed code, test, and contract file <!-- oracle:test:tests/distill.test.ts risk:high refs:specs/distill/spec.md#C001 -->
+
+Given a current facts manifest,
+When `urtext distill cluster` runs,
+Then it writes a deterministic domain manifest in which every observed source, test, and machine-contract file belongs to exactly one transparent structural domain bucket without asserting product intent.

@@ -16,6 +16,7 @@ export interface DistillFacts {
   observed: {
     sourceFiles: string[]
     testFiles: string[]
+    contractFiles: string[]
     entrypoints: string[]
   }
   declared: {
@@ -35,6 +36,20 @@ export interface ValidationReport {
 export interface PromotionReport {
   promoted: string[]
   retained: string[]
+}
+
+export interface DomainCluster {
+  id: string
+  sourceFiles: string[]
+  testFiles: string[]
+  contractFiles: string[]
+}
+
+export interface DomainManifest {
+  schema: 'urtext-distill-domains/v1'
+  workspaceHead: string | null
+  domains: DomainCluster[]
+  unclassified: string[]
 }
 
 const toPosix = (path: string): string => path.split(sep).join('/')
@@ -124,6 +139,20 @@ const featureDeclarations = (root: string): FeatureDeclaration[] =>
     })
     .sort((a, b) => a.path.localeCompare(b.path))
 
+const isContractFile = (path: string): boolean =>
+  path.endsWith('.proto') || path.endsWith('.sql') || path.endsWith('.yaml') || path.endsWith('.yml')
+
+const domainFor = (path: string): string => {
+  const parts = path.split('/')
+  const [first, second, third, fourth] = parts
+  if (first === 'internal' && ['app', 'domain', 'infra'].includes(second ?? '') && third) return third
+  if (first === 'internal' && second) return second
+  if (first === 'cmd' && second) return second
+  if (first === 'web' && second === 'src' && third === 'modules' && fourth) return fourth
+  if ((first === 'contracts' || first === 'api') && second) return second
+  return `platform/${first ?? 'root'}`
+}
+
 export const discover = (workspaceRoot: string): DistillFacts => {
   const sourceFiles = listFiles(workspaceRoot, '.')
     .filter((path) => (path.endsWith('.ts') || path.endsWith('.go')) && !path.endsWith('.test.ts') && !path.endsWith('_test.go'))
@@ -131,12 +160,14 @@ export const discover = (workspaceRoot: string): DistillFacts => {
   const testFiles = listFiles(workspaceRoot, '.')
     .filter((path) => path.endsWith('.test.ts') || path.endsWith('_test.go'))
     .sort()
+  const contractFiles = listFiles(workspaceRoot, '.').filter(isContractFile).sort()
   const facts: DistillFacts = {
     schema: 'urtext-distill-facts/v1',
     workspaceHead: gitHead(workspaceRoot),
     observed: {
       sourceFiles,
       testFiles,
+      contractFiles,
       entrypoints: sourceFiles.filter((path) => path.endsWith('/cli.ts') || /^cmd\/[^/]+\/main\.go$/.test(path)),
     },
     declared: { features: featureDeclarations(workspaceRoot) },
@@ -145,6 +176,38 @@ export const discover = (workspaceRoot: string): DistillFacts => {
   mkdirSync(outputDir, { recursive: true })
   writeFileSync(join(outputDir, 'facts.json'), `${JSON.stringify(facts, null, 2)}\n`)
   return facts
+}
+
+export const cluster = (facts: DistillFacts, workspaceRoot?: string): DomainManifest => {
+  const buckets = new Map<string, DomainCluster>()
+  const add = (path: string, kind: keyof Omit<DomainCluster, 'id'>) => {
+    const id = domainFor(path)
+    const bucket = buckets.get(id) ?? { id, sourceFiles: [], testFiles: [], contractFiles: [] }
+    bucket[kind].push(path)
+    buckets.set(id, bucket)
+  }
+  for (const path of facts.observed.sourceFiles) add(path, 'sourceFiles')
+  for (const path of facts.observed.testFiles) add(path, 'testFiles')
+  for (const path of facts.observed.contractFiles) add(path, 'contractFiles')
+  const domains = [...buckets.values()]
+    .map((domain) => ({
+      ...domain,
+      sourceFiles: domain.sourceFiles.sort(),
+      testFiles: domain.testFiles.sort(),
+      contractFiles: domain.contractFiles.sort(),
+    }))
+    .sort((a, b) => a.id.localeCompare(b.id))
+  const manifest: DomainManifest = {
+    schema: 'urtext-distill-domains/v1',
+    workspaceHead: facts.workspaceHead,
+    domains,
+    unclassified: [],
+  }
+  const root = workspaceRoot ?? process.cwd()
+  const outputDir = join(root, '.urtext/distill')
+  mkdirSync(outputDir, { recursive: true })
+  writeFileSync(join(outputDir, 'domains.json'), `${JSON.stringify(manifest, null, 2)}\n`)
+  return manifest
 }
 
 export const coverage = (facts: DistillFacts, workspaceRoot?: string): CoverageReport => {
@@ -298,6 +361,8 @@ export const distillUsage = (): string =>
     '                   Report missing declared evidence and unowned observed files.',
     '  urtext distill validate',
     '                   Fail on missing declared evidence or test-oracle targets.',
+    '  urtext distill cluster',
+    '                   Write a deterministic domain inventory to .urtext/distill/domains.json without asserting behavior.',
     '  urtext distill promote <draft> --target <feature> --confirm',
     '                   Promote only observed low-risk runnable draft clauses after one feature-level confirmation.'
   ].join('\n')

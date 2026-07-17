@@ -10,3 +10,5 @@
     Consume facts.json into staged Feature/FR/clause drafts with evidence, confidence, and explicit human decisions.
 - [x] T006 Add fast distill promotion lane <!-- role:coder depends:T005 gate:true clauses:C007 -->
     Promote eligible observed low-risk runnable candidates after one feature-level confirmation; retain all other candidates in staging.
+- [ ] T007 Cluster observed facts into domain inventory <!-- role:coder depends:T001 gate:true clauses:C008 -->
+    Write a deterministic L0 manifest that assigns every observed source, test, and machine-contract file to one domain bucket.

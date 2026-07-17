@@ -134,6 +134,13 @@ Rebuild the facts manifest, then validate declared implementation evidence and
 `oracle:test:` targets. **Exit 1** for missing paths. It verifies references, not
 semantic equivalence between prose and code.
 
+### `urtext distill cluster`
+Write `.urtext/distill/domains.json`, an L0 inventory that assigns every observed
+source, test, and machine-contract file to exactly one deterministic structural
+domain bucket. Buckets reflect path structure, not product intent; fallback
+`platform/<top-level>` buckets are explicit ownership rather than an inferred domain.
+The command does not create or modify canonical specs.
+
 ### `urtext distill promote <draft> --target <feature> --confirm`
 Promote a current staged draft after one feature-level acceptance. The command
 requires a draft beneath `.urtext/distill/spec-drafts/`, a matching facts-manifest
@@ -160,5 +167,6 @@ authoritative):
 | `review` | unknown or non-high-risk clause, bad arguments, or git failure |
 | `decide` | unknown or non-manual clause, bad arguments, or git failure |
 | `distill promote` | missing `--confirm`/target, invalid or stale draft, invalid distill declaration, duplicate target clause ID, or invalid path |
+| `distill cluster` | filesystem write failure |
 
 All other commands exit 0 on success.

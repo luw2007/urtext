@@ -5,7 +5,7 @@ import { join } from 'node:path'
 
 import { afterEach, describe, expect, test } from 'vitest'
 
-import { coverage, discover, distillUsage, promote, validate } from '../src/distill.js'
+import { cluster, coverage, discover, distillUsage, promote, validate } from '../src/distill.js'
 
 const tempDirs: string[] = []
 
@@ -52,6 +52,7 @@ test('documents every distill subcommand and its output boundary', () => {
   expect(distillUsage()).toContain('urtext distill discover')
   expect(distillUsage()).toContain('urtext distill coverage')
   expect(distillUsage()).toContain('urtext distill validate')
+  expect(distillUsage()).toContain('urtext distill cluster')
   expect(distillUsage()).toContain('urtext distill promote')
   expect(distillUsage()).toContain('without modifying canonical specs')
 })
@@ -71,14 +72,8 @@ describe('codebase fact distillation', () => {
       'src/cli.ts',
     ])
     expect(manifest.observed.testFiles).toEqual(['internal/payments/charge_test.go', 'tests/charge.test.ts'])
+    expect(manifest.observed.contractFiles).toEqual([])
     expect(manifest.observed.entrypoints).toEqual(['cmd/server/main.go', 'src/cli.ts'])
-    expect(manifest.declared.features).toEqual([
-      {
-        implementationEvidence: ['src/charge.ts', 'tests/charge.test.ts'],
-        path: 'specs/payments/spec.md',
-        testOracleTargets: ['tests/charge.test.ts'],
-      },
-    ])
 
     const saved = JSON.parse(readFileSync(join(root, '.urtext/distill/facts.json'), 'utf8')) as unknown
     expect(saved).toEqual(manifest)
@@ -177,6 +172,28 @@ describe('codebase fact distillation', () => {
     ])
   })
 
+
+  test('clusters every observed source, test, and contract into deterministic structural domains', () => {
+    const root = makeWorkspace()
+    mkdirSync(join(root, 'internal/domain/payments'), { recursive: true })
+    mkdirSync(join(root, 'contracts/payments'), { recursive: true })
+    mkdirSync(join(root, 'misc'), { recursive: true })
+    writeFileSync(join(root, 'internal/domain/payments/model.go'), 'package payments\n')
+    writeFileSync(join(root, 'contracts/payments/api.proto'), 'syntax = "proto3";\n')
+    writeFileSync(join(root, 'misc/config.yaml'), 'enabled: true\n')
+    const manifest = cluster(discover(root), root)
+
+    expect(manifest.schema).toBe('urtext-distill-domains/v1')
+    expect(manifest.unclassified).toEqual([])
+    expect(manifest.domains.find((domain) => domain.id === 'payments')).toEqual({
+      contractFiles: ['contracts/payments/api.proto'],
+      id: 'payments',
+      sourceFiles: ['internal/domain/payments/model.go', 'internal/payments/charge.go'],
+      testFiles: ['internal/payments/charge_test.go'],
+    })
+    expect(manifest.domains.find((domain) => domain.id === 'platform/misc')?.contractFiles).toEqual(['misc/config.yaml'])
+    expect(readFileSync(join(root, '.urtext/distill/domains.json'), 'utf8')).toContain('urtext-distill-domains/v1')
+  })
   test('promotes only observed low-risk runnable draft clauses after feature confirmation', () => {
     const root = makeWorkspace()
     const facts = discover(root)

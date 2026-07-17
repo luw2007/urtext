@@ -100,11 +100,14 @@ export {
   type DecisionRecord,
 } from './decision.js'
 export {
+  cluster,
   coverage as distillCoverage,
   discover,
   validate as validateDistill,
   type CoverageReport as DistillCoverageReport,
   type DistillFacts,
+  type DomainCluster,
+  type DomainManifest,
   type FeatureDeclaration,
   type ValidationReport as DistillValidationReport,
 } from './distill.js'

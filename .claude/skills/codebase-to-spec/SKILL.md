@@ -25,10 +25,11 @@ Turn observed repository facts into reviewable specification candidates. The out
 ```bash
 urtext distill discover
 urtext distill validate
+urtext distill cluster
 urtext distill coverage
 ```
 
-Read the manifest, its referenced declarations, and the smallest relevant source/test/contract set. Select a feature slice by observable user flow or stable domain behavior, never by file count.
+Read the facts manifest and `.urtext/distill/domains.json`. Select one structural domain bucket at a time; its bucket is an L0 ownership boundary, not a claim of product intent. Then read its referenced declarations and the smallest relevant source/test/contract set. Select a feature slice by observable user flow or stable domain behavior, never by file count.
 
 ### 2. Establish the fact boundary
 

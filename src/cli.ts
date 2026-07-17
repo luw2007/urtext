@@ -31,7 +31,7 @@ import DatabaseConstructor from 'better-sqlite3'
 
 import { coverage as auditCoverage, exportRequest, importVerdicts, type AuditVerdictInput } from './audit.js'
 import { listDecisions, recordDecision } from './decision.js'
-import { coverage as distillCoverage, discover, distillUsage, promote, validate } from './distill.js'
+import { cluster, coverage as distillCoverage, discover, distillUsage, promote, validate } from './distill.js'
 import { blame, detectUnmapped, recordAck, recordMapping } from './dwarf.js'
 import { adjudicate } from './gate.js'
 import { impact } from './linker.js'
@@ -169,6 +169,10 @@ const run = (argv: string[]): number => {
         console.log(JSON.stringify(facts, null, 2))
         return 0
       }
+      if (mode === 'cluster') {
+        console.log(JSON.stringify(cluster(facts, workspaceRoot), null, 2))
+        return 0
+      }
       if (mode === 'coverage') {
         const report = distillCoverage(facts, workspaceRoot)
         for (const gap of report.missingEvidence) {
@@ -210,7 +214,7 @@ const run = (argv: string[]): number => {
           return 1
         }
       }
-      console.error('Usage: urtext distill <discover|coverage|validate|promote>')
+      console.error('Usage: urtext distill <discover|coverage|validate|cluster|promote>')
       return 1
     }
     if (command === 'audit') {
