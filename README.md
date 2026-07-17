@@ -54,6 +54,15 @@ softer kind of truth. See [docs/VISION.md](docs/VISION.md) for the principles,
 [docs/DESIGN.md](docs/DESIGN.md) for the seven subsystems, and
 [docs/SYNTAX.md](docs/SYNTAX.md) for the v0 grammar.
 
+## Documentation
+
+The [documentation wiki](docs/wiki/index.md) reads in three layers — **concepts**
+(why decidable specs are a paradigm shift), **mechanisms** (how the loop closes),
+and **guides** (put it to work). Start with the
+[Quickstart](docs/wiki/guides/01-quickstart.md), or read
+[Urtext vs Spec-Driven Development](docs/wiki/concepts/04-vs-spec-driven-dev.md)
+for how it differs from Spec Kit and its peers.
+
 ## Status
 
 v0 closed loop, self-hosted: Urtext describes its own core behavior in
