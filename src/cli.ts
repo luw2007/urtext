@@ -31,7 +31,7 @@ import DatabaseConstructor from 'better-sqlite3'
 
 import { coverage as auditCoverage, exportRequest, importVerdicts, type AuditVerdictInput } from './audit.js'
 import { listDecisions, recordDecision } from './decision.js'
-import { coverage as distillCoverage, discover, distillUsage, validate } from './distill.js'
+import { coverage as distillCoverage, discover, distillUsage, promote, validate } from './distill.js'
 import { blame, detectUnmapped, recordAck, recordMapping } from './dwarf.js'
 import { adjudicate } from './gate.js'
 import { impact } from './linker.js'
@@ -192,7 +192,25 @@ const run = (argv: string[]): number => {
         console.log('Distill declarations are valid.')
         return 0
       }
-      console.error('Usage: urtext distill <discover|coverage|validate>')
+      if (mode === 'promote') {
+        const draft = argv[2]
+        const targetFlag = argv.indexOf('--target')
+        const target = targetFlag >= 0 ? argv[targetFlag + 1] : undefined
+        if (!draft || !target || !argv.includes('--confirm')) {
+          console.error('Usage: urtext distill promote <draft> --target <feature> --confirm')
+          return 1
+        }
+        try {
+          const report = promote(workspaceRoot, draft, target, true)
+          console.log(`promoted: ${report.promoted.join(', ') || '(none)'}`)
+          console.log(`retained: ${report.retained.join(', ') || '(none)'}`)
+          return 0
+        } catch (error) {
+          console.error(error instanceof Error ? error.message : String(error))
+          return 1
+        }
+      }
+      console.error('Usage: urtext distill <discover|coverage|validate|promote>')
       return 1
     }
     if (command === 'audit') {

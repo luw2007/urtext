@@ -62,17 +62,22 @@ Fill it with:
 
 Use stable candidate IDs inside the draft. Do not reuse IDs from a canonical feature until a human decides the merge target.
 
-### 4. Review before promotion
+### 4. Feature-level acceptance and promotion
 
-Present these decisions explicitly:
+Present one feature-level acceptance covering the draft boundary, vocabulary, and the rule that only observed low-risk candidates with existing workspace-local `test` files or resolvable `cmd` oracles may enter canonical clauses.
 
-- feature boundary and vocabulary;
-- every inferred requirement;
-- high-risk classifications: security, money, migrations, concurrency, state transitions, permissions, and cross-language wire changes;
-- weak or broad oracle coverage;
-- gaps requiring tests or machine contracts.
+Keep inferred requirements, high-risk candidates, manual oracles, weak/broad oracle coverage, unresolved oracles, and evidence gaps in staging. They require a separate strict-lane decision or a stronger machine oracle.
 
-Only after a human approves the wording and boundary may a separate change promote the draft into `specs/<feature>/`, run `urtext check`, bind clauses to code through real diffs, and run `urtext verify`.
+After the feature-level acceptance, promote eligible candidates without per-clause `review`, `audit`, or `map` steps:
+
+```bash
+urtext distill promote .urtext/distill/spec-drafts/<feature>/spec-draft.md \
+  --target specs/<feature> --confirm
+urtext check
+urtext verify
+```
+
+Promotion is spec-only. A later runtime behavior change still follows the normal impact, review, and audit gates.
 
 ## Required output
 

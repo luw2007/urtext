@@ -108,3 +108,4 @@ export {
   type FeatureDeclaration,
   type ValidationReport as DistillValidationReport,
 } from './distill.js'
+export { promote, type PromotionReport } from './distill.js'

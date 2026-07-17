@@ -2,6 +2,8 @@ import { execFileSync } from 'node:child_process'
 import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join, sep } from 'node:path'
 
+import { parseClauseFile, type ParsedClause } from './clause-parser.js'
+
 export interface FeatureDeclaration {
   path: string
   implementationEvidence: string[]
@@ -28,6 +30,11 @@ export interface CoverageReport {
 
 export interface ValidationReport {
   errors: { feature: string; kind: 'missing_evidence' | 'missing_oracle_target'; path: string }[]
+}
+
+export interface PromotionReport {
+  promoted: string[]
+  retained: string[]
 }
 
 const toPosix = (path: string): string => path.split(sep).join('/')
@@ -176,6 +183,112 @@ export const validate = (facts: DistillFacts, workspaceRoot?: string): Validatio
   }
 }
 
+const DRAFT_ROOT = '.urtext/distill/spec-drafts/'
+
+const hasPendingHumanDecision = (body: string | null): boolean =>
+  (body ?? '').split('\n').some((line) => {
+    const match = /^\*\*Human decision needed\*\*:\s*(.*)$/.exec(line)
+    return match !== null && match[1]?.trim().toLowerCase() !== 'none'
+  })
+
+const hasExistingTestOracle = (clause: ParsedClause, workspaceRoot: string): boolean => {
+  if (clause.oracle?.kind !== 'test') return true
+  const reference = clause.oracle.ref
+  return reference !== null && !reference.includes('..') && !reference.startsWith('/') && fileExists(workspaceRoot, reference)
+}
+
+const hasResolvableCommandOracle = (clause: ParsedClause, workspaceRoot: string): boolean => {
+  if (clause.oracle?.kind !== 'cmd') return true
+  const command = clause.oracle.ref?.split('%20')[0]
+  if (!command || command.includes('..') || command.startsWith('/')) return false
+  if (command.startsWith('./')) {
+    try {
+      return statSync(join(workspaceRoot, command)).isFile() && (statSync(join(workspaceRoot, command)).mode & 0o111) !== 0
+    } catch {
+      return false
+    }
+  }
+  try {
+    execFileSync('which', [command], { stdio: 'ignore' })
+    return true
+  } catch {
+    return false
+  }
+}
+
+const isEligible = (clause: ParsedClause, workspaceRoot: string): boolean =>
+  (clause.oracle?.kind === 'test' || clause.oracle?.kind === 'cmd') &&
+  clause.oracle.ref !== null &&
+  clause.risk === 'low' &&
+  clause.body?.includes('**Confidence**: observed') === true &&
+  !hasPendingHumanDecision(clause.body) &&
+  hasExistingTestOracle(clause, workspaceRoot) && hasResolvableCommandOracle(clause, workspaceRoot)
+
+const renderClause = (clause: ParsedClause): string => {
+  const anchor = [
+    `oracle:${clause.oracle!.kind}${clause.oracle!.ref ? `:${clause.oracle!.ref}` : ''}`,
+    ...(clause.risk === 'high' ? ['risk:high'] : []),
+    ...(clause.refs.length > 0 ? [`refs:${clause.refs.map((ref) => `${ref.path}#${ref.clauseId}`).join(',')}`] : []),
+  ].join(' ')
+  const body = clause.body
+    ?.split('\n')
+    .filter((line) => !/^\*\*(Confidence|Evidence|Human decision needed|Review decision)\*\*:/.test(line))
+    .join('\n')
+    .trim()
+  return `## ${clause.clauseId} ${clause.title} <!-- ${anchor} -->${body ? `\n\n${body}` : ''}`
+}
+
+export const promote = (
+  workspaceRoot: string,
+  draftPath: string,
+  targetFeature: string,
+  confirmed: boolean
+): PromotionReport => {
+  if (!confirmed) throw new Error('feature-level confirmation is required')
+  if (!draftPath.startsWith(DRAFT_ROOT) || draftPath.includes('..')) {
+    throw new Error(`draft must live under ${DRAFT_ROOT}`)
+  }
+  if (!targetFeature.startsWith('specs/') || targetFeature.includes('..')) throw new Error('target must be a feature under specs/')
+
+  const content = readFileSync(join(workspaceRoot, draftPath), 'utf8')
+  const head = content.match(/^\*\*Facts manifest\*\*: .* at `([0-9a-f]{40})`$/m)?.[1]
+  if (!head || head !== gitHead(workspaceRoot)) throw new Error('stale draft facts manifest')
+
+  const validation = validate(discover(workspaceRoot), workspaceRoot)
+  if (validation.errors.length > 0) throw new Error('distill validation failed')
+
+  const parsed = parseClauseFile(content)
+  if (parsed.errors.length > 0) throw new Error('draft contains invalid clause syntax')
+
+  const promoted: ParsedClause[] = []
+  const retained: string[] = []
+  for (const clause of parsed.clauses) {
+    if (isEligible(clause, workspaceRoot)) promoted.push(clause)
+    else retained.push(clause.clauseId)
+  }
+
+  const targetPath = join(workspaceRoot, targetFeature, 'clauses.md')
+  let existing = ''
+  try {
+    existing = readFileSync(targetPath, 'utf8').trimEnd()
+  } catch {
+    mkdirSync(join(workspaceRoot, targetFeature), { recursive: true })
+  }
+  const existingIds = new Set(
+    listFiles(workspaceRoot, targetFeature)
+      .filter((path) => path.endsWith('.md'))
+      .flatMap((path) => parseClauseFile(readFileSync(join(workspaceRoot, path), 'utf8')).clauses)
+      .map((clause) => clause.clauseId)
+  )
+  for (const clause of promoted) {
+    if (existingIds.has(clause.clauseId)) throw new Error(`target already declares ${clause.clauseId}`)
+  }
+  if (promoted.length > 0) {
+    writeFileSync(targetPath, `${existing ? `${existing}\n\n` : '# Executable clauses\n\n'}${promoted.map(renderClause).join('\n\n')}\n`)
+  }
+  return { promoted: promoted.map((clause) => clause.clauseId), retained }
+}
+
 
 export const distillUsage = (): string =>
   [
@@ -185,4 +298,6 @@ export const distillUsage = (): string =>
     '                   Report missing declared evidence and unowned observed files.',
     '  urtext distill validate',
     '                   Fail on missing declared evidence or test-oracle targets.',
+    '  urtext distill promote <draft> --target <feature> --confirm',
+    '                   Promote only observed low-risk runnable draft clauses after one feature-level confirmation.'
   ].join('\n')

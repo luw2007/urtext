@@ -8,3 +8,5 @@
     Keep command documentation explicit about facts versus human-reviewed intent.
 - [x] T005 Create codebase-to-spec Skill <!-- role:coder depends:T001 gate:true clauses:C006 -->
     Consume facts.json into staged Feature/FR/clause drafts with evidence, confidence, and explicit human decisions.
+- [x] T006 Add fast distill promotion lane <!-- role:coder depends:T005 gate:true clauses:C007 -->
+    Promote eligible observed low-risk runnable candidates after one feature-level confirmation; retain all other candidates in staging.

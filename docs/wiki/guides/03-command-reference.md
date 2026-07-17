@@ -134,6 +134,16 @@ Rebuild the facts manifest, then validate declared implementation evidence and
 `oracle:test:` targets. **Exit 1** for missing paths. It verifies references, not
 semantic equivalence between prose and code.
 
+### `urtext distill promote <draft> --target <feature> --confirm`
+Promote a current staged draft after one feature-level acceptance. The command
+requires a draft beneath `.urtext/distill/spec-drafts/`, a matching facts-manifest
+HEAD, and valid declared evidence. It appends only `observed` candidates carrying
+a low-risk runnable `test` or `cmd` oracle and no pending human-decision marker to
+`<feature>/clauses.md`; inferred, manual, high-risk, unresolved-oracle, and
+decision-required candidates remain in staging. It validates oracle references but
+does not execute staged commands; canonical `urtext verify` executes promoted oracles.
+It does not overwrite `spec.md`, create mappings, or record reviews, decisions, or audit verdicts.
+
 ## Exit-code summary
 
 This table is a working guide, not an exhaustive spec (the CLI in `src/cli.ts` is
@@ -149,5 +159,6 @@ authoritative):
 | `ack` | bad arguments, git failure, or a range that does not overlap the current `git diff` |
 | `review` | unknown or non-high-risk clause, bad arguments, or git failure |
 | `decide` | unknown or non-manual clause, bad arguments, or git failure |
+| `distill promote` | missing `--confirm`/target, invalid or stale draft, invalid distill declaration, duplicate target clause ID, or invalid path |
 
 All other commands exit 0 on success.
