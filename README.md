@@ -65,15 +65,11 @@ and **guides** (put it to work). Start with the
 [Urtext vs Spec-Driven Development](docs/wiki/concepts/04-vs-spec-driven-dev.md)
 for how it differs from Spec Kit and its peers.
 
-中文版本见[中文文档 Wiki](docs/wiki/app/content/zh/index.md)。
+中文版本见[中文文档 Wiki](docs/zh-CN/wiki/index.md)。
 
 ## Status
 
-v0 closed loop, self-hosted: Urtext describes its own core behavior in
-`specs/urtext/` and `urtext verify` proves it — clause/checklist parsers,
-immutable-revision registry, oracle runner (test/cmd/diff-scope/manual),
-append-only evidence, pass-rate + manual-share reporting. Next milestones:
-clause linker (impact analysis) and clause↔code↔evidence mapping.
+Current v0 delivery status and implementation boundaries: [documentation wiki status](docs/wiki/index.md#status).
 
 ## License
 

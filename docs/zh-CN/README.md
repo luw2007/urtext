@@ -12,4 +12,4 @@
 - [立项简报](BRIEF.md)
 - [工作流脚手架使用与测试判断书](BRIEF-loops.md)
 
-面向使用者的教程、机制与概念文档见[中文 Wiki](../wiki/app/content/zh/index.md)。
+面向使用者的教程、机制与概念文档见[中文 Wiki](wiki/index.md)。

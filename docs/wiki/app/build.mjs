@@ -1,7 +1,7 @@
 /* Build a single self-contained app/index.html from the wiki docs.
  * Run:  node app/build.mjs
  * - EN sources are read from the wiki root (parent of app/).
- * - ZH translations are read from app/content/zh/<same-path>.
+ * - ZH translations are read from docs/zh-CN/wiki/<same-path>.
  * - marked, CSS, and JS are inlined so index.html works offline (file://). */
 import { readFile, writeFile, stat } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
@@ -10,7 +10,7 @@ import { dirname, join, resolve } from "node:path";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const APP = __dirname;                 // .../docs/wiki/app
 const ROOT = resolve(APP, "..");       // .../docs/wiki
-const ZH = join(APP, "content", "zh");
+const ZH = resolve(ROOT, "..", "zh-CN", "wiki");
 
 // Ordered document structure — mirrors index.md's three layers.
 const NAV = [
@@ -84,6 +84,10 @@ async function main() {
         zh: zh || null,
       };
     }
+  }
+
+  if (zhCount !== order.length) {
+    throw new Error(`expected ${order.length} ZH translations, found ${zhCount}`);
   }
 
   const data = {

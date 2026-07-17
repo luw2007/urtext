@@ -133,4 +133,10 @@ docs/wiki/
 - guides/02 子句手艺能否文档化「妙到毫巅」的粒度手感——BRIEF 风险 #3 明标未验证；
   先写决策树版本，真实 design partner 反馈后再迭代。
 - D2 的 wiki 一致性子句成本——写时评估，可能落 ack 而非硬子句。
-```
+
+## 2026-07-17 文档源重排
+
+- 中文 Wiki Markdown 源从 `docs/wiki/app/content/zh/` 迁至 `docs/zh-CN/wiki/`；中文文档与英文文档各自位于语言根目录。
+- `docs/wiki/app/` 只保存构建器、前端资源和生成的离线站点 `index.html`。
+- 构建器从 `docs/zh-CN/wiki/` 读取中文镜像，并要求全部 19 篇翻译存在；缺失翻译会使构建失败。
+- 根 README 不再重复维护发布状态，分别链接英文与中文 Wiki 的状态段落。
