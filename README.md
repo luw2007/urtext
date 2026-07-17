@@ -1,5 +1,7 @@
 # Urtext
 
+English | [简体中文](README.zh-CN.md)
+
 > **The ur-text of your system. Code is just an interpretation.**
 
 In classical music publishing, an *Urtext* edition strips away generations of
@@ -62,6 +64,8 @@ and **guides** (put it to work). Start with the
 [Quickstart](docs/wiki/guides/01-quickstart.md), or read
 [Urtext vs Spec-Driven Development](docs/wiki/concepts/04-vs-spec-driven-dev.md)
 for how it differs from Spec Kit and its peers.
+
+中文版本见[中文文档 Wiki](docs/wiki/app/content/zh/index.md)。
 
 ## Status
 
