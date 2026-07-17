@@ -2,7 +2,7 @@
 
 > 本 feature 将 `.claude/workflows/` 三套 loop 与 `.claude/skills/integrate-worker/`
 > 集成协议的承重规则固化为带 oracle 的子句，由 `urtext verify` 统一管辖。
-> 来源：docs/VISION.md + Rue 复刻指南（bytedance.larkoffice.com/docx/J66Edv9WxoLK9IxzSh5c6Gipn94）。
+> 来源：Rue 的 hunt、fix、audit 三类 loop check 机制。
 > cmd oracle 统一走 `scripts/oracle-loops.sh <check>`——机制活在 prompt/协议文本里，
 > 文本丢失即机制失效，文本存在性检查恰好判定这一点。
 > 人工验收检查点见 .claude/checklists/（引用本文件子句 id）。
