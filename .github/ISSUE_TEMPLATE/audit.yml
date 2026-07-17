@@ -1,0 +1,62 @@
+name: Audit finding
+description: Report a structured finding from a read-only audit.
+title: "[audit] "
+labels:
+  - loop:audit
+  - evidence:required
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Audit findings must cite clauses and record commands actually run. Audit never changes code or files issues automatically.
+  - type: dropdown
+    id: lens
+    attributes:
+      label: Lens
+      options:
+        - drift
+        - soundness
+        - consistency
+        - formal
+    validations:
+      required: true
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      options:
+        - critical
+        - high
+        - medium
+        - low
+    validations:
+      required: true
+  - type: input
+    id: clauses
+    attributes:
+      label: Clause IDs
+      description: Comma-separated exact clause IDs; write `uncovered-behavior` only when no clause exists.
+      placeholder: C101, C104
+    validations:
+      required: true
+  - type: textarea
+    id: detail
+    attributes:
+      label: Finding
+    validations:
+      required: true
+  - type: textarea
+    id: ran
+    attributes:
+      label: Commands actually run
+      description: Commands and observed result. Behavioral claims without this evidence are inadmissible.
+    validations:
+      required: true
+  - type: input
+    id: duplicate
+    attributes:
+      label: Duplicate check
+      description: Open issue number checked before filing, or `none`.
+      placeholder: "#42 or none"
+    validations:
+      required: true

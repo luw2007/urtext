@@ -37,6 +37,17 @@ A harness must provide the prelude primitives and have Bun, authenticated `gh`, 
 
 A fix run first needs `.claude/workflows/fix-cycle-input.json`. Its diff and metadata are never auto-merged: a human or main agent follows the seven-step integration protocol and reruns the reproduction on fresh trunk.
 
+## GitHub feedback boundary
+
+GitHub is the durable queue and evidence boundary, not the agent runtime:
+
+1. A hunt finding enters through the **Hunt finding** issue form only after a timeout-wrapped minimal repro ran. It receives `loop:hunt` and `evidence:required`; duplicate search happens before filing.
+2. A fix PR closes its issue with `Fixes #NN`, records actual verification output, and declares every non-spec hunk as clause-mapped or explicitly unmapped. Actions require the declaration and run typecheck, tests, build, and `urtext verify`.
+3. Unsafe or high-risk work also requires `risk:high` plus the maintainer-applied `decision:human-approved` label. The label is the durable gate record; an agent cannot self-declare it in prose.
+4. A real harness runs the read-only four-lens audit. Its JSON findings are dispatched to **Audit feedback**; Actions first rerun the toolchain evidence, then reject incomplete findings, deduplicate open issues, and file only admissible findings as `loop:audit`. Critical/high findings also receive `risk:high`.
+
+The scheduled audit workflow intentionally does not claim to run the four lenses: GitHub runners lack the harness primitives. It executes reproducible repository gates weekly; audit findings enter only through a manually dispatched, structured evidence payload.
+
 ## Smoke-test order
 
 1. Hunt an unimplemented area: expect no findings, no issue, and an updated ledger.
