@@ -29,14 +29,15 @@ import { join } from 'node:path'
 
 import DatabaseConstructor from 'better-sqlite3'
 
-import { coverage, exportRequest, importVerdicts, type AuditVerdictInput } from './audit.js'
-import { blame, detectUnmapped, recordAck, recordMapping } from './dwarf.js'
+import { coverage as auditCoverage, exportRequest, importVerdicts, type AuditVerdictInput } from './audit.js'
 import { listDecisions, recordDecision } from './decision.js'
+import { coverage as distillCoverage, discover, distillUsage, validate } from './distill.js'
+import { blame, detectUnmapped, recordAck, recordMapping } from './dwarf.js'
 import { adjudicate } from './gate.js'
 import { impact } from './linker.js'
 import { openRegistry } from './registry.js'
-import { scanWorkspace } from './scanner.js'
 import { currentHead, recordReview } from './review.js'
+import { scanWorkspace } from './scanner.js'
 import { verifyWorkspace } from './verifier.js'
 
 const USAGE = [
@@ -67,6 +68,7 @@ const USAGE = [
   '  urtext decide <spec-path>#<clause-id> --pass|--fail [note…]',
   '                   Record a human decision for a manual-oracle clause (Decision ledger).',
   '  urtext decisions List the Decision ledger, newest first.',
+  distillUsage(),
   '',
   'The registry lives at .urtext/registry.sqlite under the current directory.',
 ].join('\n')
@@ -150,6 +152,7 @@ const run = (argv: string[]): number => {
     review: true,
     decide: true,
     decisions: true,
+    distill: true,
   }
   if (COMMANDS[command] !== true) {
     console.error(`Unknown command: ${command}\n\n${USAGE}`)
@@ -159,6 +162,39 @@ const run = (argv: string[]): number => {
   const workspaceRoot = process.cwd()
   const db = openWorkspaceRegistry(workspaceRoot)
   try {
+    if (command === 'distill') {
+      const mode = argv[1]
+      const facts = discover(workspaceRoot)
+      if (mode === 'discover') {
+        console.log(JSON.stringify(facts, null, 2))
+        return 0
+      }
+      if (mode === 'coverage') {
+        const report = distillCoverage(facts)
+        for (const gap of report.missingEvidence) {
+          console.log(`  ✗ ${gap.feature}: missing declared evidence ${gap.path}`)
+        }
+        for (const path of report.unownedObservedFiles) {
+          console.log(`  ? unowned observed file ${path}`)
+        }
+        console.log(`\n${report.missingEvidence.length} missing declaration(s), ${report.unownedObservedFiles.length} unowned observed file(s)`)
+        return 0
+      }
+      if (mode === 'validate') {
+        const report = validate(facts, workspaceRoot)
+        for (const error of report.errors) {
+          console.log(`  ✗ ${error.feature}: [${error.kind}] ${error.path}`)
+        }
+        if (report.errors.length > 0) {
+          console.error(`\n${report.errors.length} distill validation failure(s).`)
+          return 1
+        }
+        console.log('Distill declarations are valid.')
+        return 0
+      }
+      console.error('Usage: urtext distill <discover|coverage|validate>')
+      return 1
+    }
     if (command === 'audit') {
       const mode = argv[1]
       scanWorkspace(db, workspaceRoot)
@@ -183,7 +219,7 @@ const run = (argv: string[]): number => {
           console.error(`[${outcome.code}] ${outcome.message}`)
           return 1
         }
-        const report = coverage(db)
+        const report = auditCoverage(db)
         const cov = report.coverage === null ? 'n/a' : `${Math.round(report.coverage * 100)}%`
         console.log(
           `imported ${outcome.count} verdict(s) — coverage ${cov} (${report.counts.agree} agree, ${report.counts.disagree} disagree, ${report.counts.unaudited} unaudited)`

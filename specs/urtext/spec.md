@@ -29,7 +29,7 @@ strict + exactOptionalPropertyTypes 下 `tsc --noEmit` 干净。
 ## C006 CLI 帮助面命令集变更需人工确认 <!-- oracle:manual -->
 
 当前命令集 `index` / `check` / `verify` / `impact` / `map` / `ack` / `blame` /
-`audit` / `gate` / `review` / `decide` / `decisions` 之外的新命令，需要人工确认
+`audit` / `gate` / `review` / `decide` / `decisions` / `distill` 之外的新命令，需要人工确认
 进入本子句或新增子句。
 
 ## C007 悬空引用被拒绝 <!-- oracle:test:tests/linker.test.ts risk:high refs:specs/urtext/spec.md#C003 -->

@@ -116,6 +116,24 @@ $ urtext decisions
 No decisions recorded.
 ```
 
+## Codebase fact distillation
+
+### `urtext distill discover`
+Scan the workspace and write a deterministic observed-facts manifest to
+`.urtext/distill/facts.json`. It records source files, tests, CLI entry points,
+the current Git HEAD, and separately declared `Implementation Evidence` and test
+oracle targets. It **does not modify canonical `specs/`** or infer product intent.
+
+### `urtext distill coverage`
+Report declared implementation-evidence paths that do not exist and observed
+source/test files that are not declared by any feature. Unowned observations are
+discovery work, not a failed claim of incomplete behavior; this command exits 0.
+
+### `urtext distill validate`
+Rebuild the facts manifest, then validate declared implementation evidence and
+`oracle:test:` targets. **Exit 1** for missing paths. It verifies references, not
+semantic equivalence between prose and code.
+
 ## Exit-code summary
 
 This table is a working guide, not an exhaustive spec (the CLI in `src/cli.ts` is

@@ -99,3 +99,12 @@ export {
   type DecisionOutcome,
   type DecisionRecord,
 } from './decision.js'
+export {
+  coverage as distillCoverage,
+  discover,
+  validate as validateDistill,
+  type CoverageReport as DistillCoverageReport,
+  type DistillFacts,
+  type FeatureDeclaration,
+  type ValidationReport as DistillValidationReport,
+} from './distill.js'
