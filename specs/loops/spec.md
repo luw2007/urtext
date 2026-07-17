@@ -5,7 +5,7 @@
 > 来源：docs/VISION.md + Rue 复刻指南（bytedance.larkoffice.com/docx/J66Edv9WxoLK9IxzSh5c6Gipn94）。
 > cmd oracle 统一走 `scripts/oracle-loops.sh <check>`——机制活在 prompt/协议文本里，
 > 文本丢失即机制失效，文本存在性检查恰好判定这一点。
-> 人工验收检查点见 docs/checklists/（引用本文件子句 id）。
+> 人工验收检查点见 .claude/checklists/（引用本文件子句 id）。
 
 ## 总则
 
@@ -13,7 +13,7 @@
 
 每个 AI 产出的裁判是"运行结果 vs 规范条文"，永远不是另一个 LLM 的意见。
 任何 loop 引入"LLM 打分即通过"的路径都是对本条的违反。
-（人工复核：docs/checklists/sprint-audit.md）
+（人工复核：.claude/checklists/sprint-audit.md）
 
 ### C102 信任边界在集成点 <!-- oracle:cmd:scripts/oracle-loops.sh%20trust-boundary risk:high -->
 

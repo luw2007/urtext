@@ -1,6 +1,6 @@
 # 三套脚手架使用与测试判断书（hunt / fix / audit + integrate）
 
-> 配套阅读：specs/loops/spec.md（机制子句）、docs/checklists/（人工验收点）、
+> 配套阅读：specs/loops/spec.md（机制子句）、.claude/checklists/（人工验收点）、
 > .claude/workflows/（三套 loop 源码）、.claude/skills/integrate-worker/SKILL.md（集成协议）。
 > 本文回答"怎么用、怎么测、能不能现在跑"，并诚实标注可运行边界。
 
@@ -47,7 +47,7 @@ scripts 仅 `build` / `check` / `test`。因此三套 loop 是**为宿主 harnes
 - **脚手架本体**：`.claude/workflows/{urtext-overnight-hunt,urtext-fix-cycle,urtext-spec-audit}.js`、
   `.claude/workflows/hunt-ledger.json`（覆盖轮换台账）、`.claude/skills/integrate-worker/SKILL.md`。
 - **机制裁判**：`specs/loops/spec.md`（C101–C504）、`scripts/oracle-loops.sh`（21 个 cmd 判定）、
-  `docs/checklists/{hunt-run,fix-cycle-integration,sprint-audit}.md`（人工点）。
+  `.claude/checklists/{hunt-run,fix-cycle-integration,sprint-audit}.md`（人工点）。
 - **验证工具链**：`urtext verify`（src/cli.ts → scanner → registry → verifier → oracle-runner）。
 - **外部依赖（本仓库外）**：agent-harness（提供 prelude 原语）、`bun`（`Bun.$`）、
   `gh`（issue 归档）、`git worktree`（fix 隔离）。hunt 的 AREAS 攻击面地图人工维护。
@@ -106,7 +106,7 @@ echo '{"cycle":1,"clusters":[{"key":"lex","prompt":"…","issues":[12]}]}' \
 #   注意：diff 不自动合并——必须走 integrate-worker 协议
 
 # integrate：人/主 agent 按 skill 7 步手工执行（非脚本）
-#   逐项对照 docs/checklists/fix-cycle-integration.md 勾选
+#   逐项对照 .claude/checklists/fix-cycle-integration.md 勾选
 
 # audit：每 sprint 一次
 <harness-run> .claude/workflows/urtext-spec-audit.js

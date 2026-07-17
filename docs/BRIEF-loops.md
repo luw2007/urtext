@@ -1,6 +1,6 @@
 # Workflow Scaffold Usage and Test Brief
 
-> Companion material: `specs/loops/spec.md` (mechanism clauses), `docs/checklists/` (human acceptance points), `.claude/workflows/` (workflow sources), and `.claude/skills/integrate-worker/SKILL.md` (integration protocol).
+> Companion material: `specs/loops/spec.md` (mechanism clauses), `.claude/checklists/` (human acceptance points), `.claude/workflows/` (workflow sources), and `.claude/skills/integrate-worker/SKILL.md` (integration protocol).
 
 ## Boundary
 
