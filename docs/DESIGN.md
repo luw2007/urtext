@@ -1,51 +1,55 @@
-# Urtext 系统设计（七子系统）
+# Urtext System Design (Seven Subsystems)
 
-> 本文是面向 Urtext 的权威版本）。VISION.md 是原则层，本文是结构层，SYNTAX.md 是语法层。
+> This document is the authoritative structural description of Urtext. `VISION.md` defines principles; `SYNTAX.md` defines grammar.
 
-## 总览
+## Overview
 
 ```text
-意图 → Spec(子句+oracle) → Link(影响分析) → 人审 spec diff → Accept
-     → 物化 checklist → AI 生成(带 provenance) → oracle 执行(证据)
-     → 跨模型元验证 → 风险分级裁决 → 合并 → Decision/ADR 沉淀
+intent → spec (clause + oracle) → link (impact analysis) → human spec-diff review → accept
+       → materialized checklist → AI generation (with provenance) → oracle execution (evidence)
+       → cross-model meta-verification → risk-tier gate → merge → Decision/ADR record
 ```
 
-| # | 子系统 | 职责 | v0 状态 |
+| # | Subsystem | Responsibility | v0 status |
 |---|---|---|---|
-| 1 | 语言层 | clause/oracle/refs/risk 四原语（SYNTAX.md） | ✅ parser + fail-closed 错误目录 |
-| 2 | 注册表 | 不可变修订链（unchanged/indexed/tombstoned） | ✅ registry.sqlite |
-| 3 | 验证器 | oracle 执行 → 证据落库 → 完成率 | ✅ `urtext verify` |
-| 4 | Linker | refs 建图、stale 传播、`urtext impact` | ✅ `urtext impact` |
-| 5 | DWARF | clause↔code↔evidence 映射、unmapped change 检测 | ✅ `urtext map/ack/blame`, `check --diff` |
-| 6 | 裁决层 | 风险分级触发人工、跨模型元验证、unsafe lane 人工审查 | ✅ `urtext audit/gate/review` |
-| 7 | 记忆层 | Decision/ADR 沉淀 | ✅ `urtext decide/decisions` |
+| 1 | Language layer | `clause` / `oracle` / `refs` / `risk` primitives (`SYNTAX.md`) | parser + fail-closed error catalogue |
+| 2 | Registry | immutable revision chain (`unchanged` / `indexed` / `tombstoned`) | `registry.sqlite` |
+| 3 | Verifier | execute oracles → persist evidence → compute completion | `urtext verify` |
+| 4 | Linker | build `refs` graph, propagate stale state, `urtext impact` | `urtext impact` |
+| 5 | DWARF | clause↔code↔evidence mapping; unmapped-change detection | `urtext map/ack/blame`, `check --diff` |
+| 6 | Adjudication | risk-tier human routing, cross-model meta-verification, unsafe-lane review | `urtext audit/gate/review` |
+| 7 | Memory | persist Decisions/ADRs | `urtext decide/decisions` |
 
-## 关键设计决策（沉淀自奠基讨论，不可回退）
+## Non-reversible design decisions
 
-1. **无 oracle 的规范性子句 = 索引错误**（P1）——语言与文档的分界线。
-2. **完成率 = 证据通过率**，AI 不打分（P2）；跨模型对抗只用于元层。
-3. **事实源翻转靠执法**（P3）：unmapped change 必须回写 spec 或显式 ack。
-4. **风险分级触发人工**（P4）：low+全绿自动过；high/分歧/unmapped 必人审。
-5. **unsafe 承认 spec 极限**（P5）：money path/迁移/并发上代码仍需人审。
-6. **manual oracle 占比是健康度指标**（P9）：持续 >50% 即宣告承重假设失败。
+1. **A normative clause without an oracle is an indexing error** (P1): this is the boundary between a language and a document.
+2. **Completion equals evidence pass rate**; AI does not score itself (P2). Cross-model adversarial review exists only at the meta layer.
+3. **The source-of-truth flip requires enforcement** (P3): every unmapped change must either update a spec or receive an explicit acknowledgement.
+4. **Risk tiers trigger humans** (P4): low-risk all-green work can pass automatically; high-risk, disputed, or unmapped work requires review.
+5. **The unsafe lane acknowledges the limit of specifications** (P5): money paths, migrations, and concurrency still require code-level human review.
+6. **Manual-oracle share is a health metric** (P9): sustained share above 50% falsifies the central assumption.
 
-## 验证器（v0 实现范围）
+## Verifier (v0 implementation boundary)
 
-`urtext verify`：index → 取每个 `ready` 修订的子句 → 执行 oracle → 证据落库 → 报告。
+`urtext verify` indexes, selects clauses from every `ready` revision, executes their oracles, persists evidence, and reports results.
 
-| oracle kind | 执行方式 | verdict |
+| Oracle kind | Execution | Verdict |
 |---|---|---|
-| `test` | `npx vitest run <ref>` | 退出码 0 → pass |
-| `cmd` | 执行 `<ref>`，`%20` 分隔参数（如 `scripts/x.sh%20arg`） | 退出码 0 → pass |
-| `diff-scope` | `git diff --name-only HEAD` 对照允许 glob | 违例集空 → pass |
-| `manual` | 不执行 | pending（等待人工，计入 manual 占比） |
-| `metric` | v0 不支持 | fail（显式，不静默跳过） |
+| `test` | `npx vitest run <ref>` | exit code 0 → pass |
+| `cmd` | execute `<ref>`; `%20` separates arguments, e.g. `scripts/x.sh%20arg` | exit code 0 → pass |
+| `diff-scope` | compare `git diff --name-only HEAD` against the allowed glob | no violations → pass |
+| `manual` | does not execute | pending; waits for a human and counts toward manual share |
+| `metric` | unsupported in v0 | fail explicitly; never silently skip |
 
-退出码：任一 fail → 1；pending 不阻塞。manual 子句的人工裁决经 `urtext decide` 落 Decision ledger（记忆层）。
-证据表：`evidence(spec_path, revision, clause_id, oracle_kind, oracle_ref, verdict, exit_code, output, created_at)`，append-only。
+Exit status: any failure returns 1; pending does not block. A human decides a manual clause through `urtext decide`, which writes to the Decision ledger (the memory layer).
 
-## 自举闭环（dogfood）
+Evidence is append-only:
 
-Urtext 用自己描述自己：`specs/urtext/spec.md` 声明本系统的核心子句，
-每条绑定真实 oracle（本仓库的测试与脚本）；`specs/urtext/tasks.md` 把实现任务映射到子句。
-`urtext check && urtext verify` 全绿 = 设计闭环成立的最小证明。
+```text
+evidence(spec_path, revision, clause_id, oracle_kind, oracle_ref, verdict,
+         exit_code, output, created_at)
+```
+
+## Self-hosting loop
+
+Urtext describes itself. `specs/urtext/spec.md` declares the system's core clauses, each bound to a real oracle from this repository; `specs/urtext/tasks.md` maps implementation tasks to those clauses. `urtext check && urtext verify` being green is the minimum proof that the design loop closes.

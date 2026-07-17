@@ -1,130 +1,90 @@
-# Urtext — 目标与设计原则
+# Urtext — Vision and Design Principles
 
-> 状态：奠基文档。后续所有设计、实现、取舍以本文为最高依据；修改本文需显式决策记录。
-> 本文沉淀自 2026-07 关于「AI 时代人类 review 什么」「汇编→C 类比」「SDD 工具缺口」的系列讨论。
+> Status: foundational document. Later design, implementation, and trade-offs defer to this document; changes require an explicit Decision record.
 
-## 一、定位：范式迁移的载体，不是一门新语言
+## Position: a vehicle for a paradigm shift, not another language
 
-研发范式正在迁移：
+Software development is moving from manual coding, through AI-assisted conversation and vibe coding, toward a world where humans no longer review ordinary code itself. Urtext is the workbench for that transition: **the human work object moves from code to cognition about the system.**
 
-```text
-手工编码 → AI 对话辅助 → Vibe Coding → 人类不再 review 代码本身
-```
+- Humans maintain system cognition: behavioural specs, visual designs, interaction demos, and acceptance checklists. They are equal first-class artifacts in one cognitive unit.
+- AI maintains the projection: code. Code remains fact—like assembly—but no longer consumes routine line-by-line attention.
+- **Urtext is the system's ur-text**: the authoritative composer intent; code is an interpretation. Interpretations may vary with LLM randomness, but being out of tune must be decidable.
 
-Urtext 是这次迁移的工作台：**人的工作对象从代码转为对系统的认知**。
+**The ur-text of your system. Code is just an interpretation.**
 
-- 人维护系统认知：spec（行为）、设计稿（外观）、交互 demo（手感）、checklist（验收）。
-  四者是平等的一等载体，同属一个认知单元，互相引用。
-- AI 维护投影：代码。代码是事实（类比汇编），但不再被人逐行关注。
-- **Urtext = 系统的净本**——如古典乐出版中的 Urtext 版乐谱：剔除历代编辑添改、
-  唯一可信的作曲家意图。代码是演绎（interpretation），每次演奏可以不同（LLM 随机性），
-  走调必须可判定。
+## The Assembly-to-C analogy
 
-一句话：**The ur-text of your system. Code is just an interpretation.**
+A real abstraction shift needs four conditions at once:
 
-## 二、理论基础：汇编→C 的四个成立条件
-
-C 取代汇编不是"抽象层次提高"，而是四件事同时发生。Urtext 对每一条给出 AI 时代的对应物：
-
-| # | 汇编→C | AI 时代的断裂 | Urtext 的回答 |
+| # | Assembly → C | AI-era break | Urtext response |
 |---|---|---|---|
-| 1 | 目标层（ISA）语义先被形式化 | 源语言（自然语言 spec）不可判定 | 规范性陈述必须绑定 oracle，不可验证即错误 |
-| 2 | 编译器确定性，信任一次建立 | LLM 随机：同一 spec → 不同代码 | **确定性从翻译器搬进验证器**：生成→验证→修复循环 |
-| 3 | 事实源翻转：手改编译产物成为禁忌 | 代码仍被手改且不回写 spec → Spec 腐败 | unmapped change 执法：手改必须回写或显式 ack |
-| 4 | DWARF 把两层双向缝合 | 失败报栈帧，人被迫跌回代码层 | 认知↔代码↔证据双向映射，失败归因到子句 |
+| 1 | ISA semantics became formal | natural-language specs are undecidable | every normative statement binds an oracle; unverifiable means error |
+| 2 | compiler determinism earned trust | the same spec yields different LLM code | move determinism into the verifier: generate → verify → repair |
+| 3 | hand-editing compiled output became taboo | code edits do not return to specs | enforce unmapped changes: write back or explicitly acknowledge |
+| 4 | DWARF stitches source and machine layers | failures throw people back into code | bidirectional cognition↔code↔evidence mapping; failures name clauses |
 
-**伪代码不是答案**：它与代码同属"机制（how）"范畴，只增加模糊度。
-Urtext 换的是描述对象——从"机器怎么做"到"系统必须满足什么"。
-（同一模式在窄域已胜三次：SQL、Terraform、类型系统。）
+Pseudocode is not the answer: it remains in the mechanism (“how”) layer and adds ambiguity. Urtext changes the described object to what the system must satisfy. SQL, Terraform, and type systems have already won this pattern in narrower domains.
 
-## 三、目标：成功长什么样
+## What success looks like
 
-1. **人只 review 四样东西**：意图变更（spec diff）、影响范围、验收证据、争议项。
-   不逐行 review 常规代码。
-2. **每条规范性陈述可判定**：绑定 test / cmd / metric / diff-scope / manual 五种 oracle 之一。
-3. **改动影响可机械回答**：修改一条子句，linker 沿引用图给出受影响的历史子句 /
-   checklist / 代码清单——不靠 AI 慢慢想。
-4. **失败归因到意图层**：oracle 失败报"违反了哪条子句"，不报栈帧。
-5. **完成率 = 客观证据通过率**：绿子句数 / 总子句数。AI 不打分。
-6. **人是系统意图的最终责任人**：只在高风险、跨域影响、模型分歧、不可逆操作上被触发介入。
+1. Humans review only intent changes, impact scope, acceptance evidence, and disputed items—not routine code line by line.
+2. Every normative statement is decidable through one of `test`, `cmd`, `metric`, `diff-scope`, or `manual`.
+3. A clause change mechanically reports affected clauses, checklists, and code.
+4. Oracle failures name the violated clause, not merely a stack frame.
+5. Completion is objective evidence pass rate; AI does not score itself.
+6. Humans remain ultimately accountable for intent and intervene only for high risk, cross-domain effects, disagreement, or irreversible operations.
 
-## 四、设计原则（按不可妥协程度排序）
+## Principles, ordered by non-negotiability
 
-### P1 无 oracle 的规范性子句是错误
-这是"语言"与"文档"的分界线。描述性 prose 自由；规范性子句没有 oracle 则索引失败，
-永远进不了执行。直接堵死"Gate 粗糙"。
+### P1 — A normative clause without an oracle is an error
 
-### P2 证据优先于意见
-- 完成判定只看客观证据（测试、命令退出码、指标、diff 范围）。
-- 跨模型对抗只用于**元层**：审"证据是否真覆盖子句语义"（oracle 太弱、测试作弊），
-  不替代证据本身。分歧自动升级人工。
-- 破解"同源验证"陷阱：AI 写的测试验证 AI 的实现，红绿只证明自洽，不证明正确。
-  独立的第三方 ground truth 必须存在。
+This is the boundary between language and documentation. Descriptive prose is free; an oracle-less normative clause fails indexing and cannot execute.
 
-### P3 事实源翻转靠执法，不靠自觉
-- 手改代码不禁止，但每个无法归因到子句/dispatch 的 hunk 都被检测为 unmapped，
-  强制 (a) 回写 spec 产生新子句，或 (b) 显式 manual-ack 落决策记录。
-- provenance 不信 LLM 自述：声称的子句→代码映射必须被真实 diff 交叉验证才落库。
-- 这是防止"Spec 腐败"的唯一可靠机制——所有靠 prompt 纪律的方案都已被证明失败。
+### P2 — Evidence outranks opinion
 
-### P4 风险分级触发人工
-| 条件 | 处理 |
+Completion depends on objective evidence: tests, exit codes, measurements, and diff scope. Cross-model review only asks whether evidence actually covers a clause; it does not replace evidence. Disagreement escalates to a human. Independent ground truth is required because AI-written tests can be internally consistent with AI-written code without proving correctness.
+
+### P3 — The source-of-truth flip needs enforcement, not discipline
+
+Hand edits are permitted, but every hunk not attributable to a clause or dispatch is surfaced as unmapped. It must update a spec or receive an explicit acknowledgement in the Decision ledger. Provenance trusts real diffs, not LLM claims.
+
+### P4 — Risk tiers trigger humans
+
+Low-risk work with green evidence, agreeing meta-verification, and no impact propagation may auto-pass. High-risk, irreversible, cross-history, disputed, or unmapped work requires a human decision recorded durably.
+
+### P5 — The unsafe lane admits the limits of specs
+
+Security boundaries, migrations, concurrency, money paths, and irreversible deletes cannot be fully represented by a spec. On these paths, code remains the only reviewable fact and receives mandatory code-level human review.
+
+### P6 — Format is storage; experience is the surface
+
+Do not invent a file format. Markdown plus HTML-comment anchors carries the clause grammar; describing a system is the product experience.
+
+### P7 — The cognitive unit is multimodal
+
+Clauses, design references, runnable demo snapshots, and checklists link as peers. Design changes should propagate stale state just as text changes do; visual screenshot-diff and interaction-replay oracles are planned first-class extensions.
+
+### P8 — Adopt incrementally, git-native and serverless
+
+Start with `cd` into an existing repository. Urtext requires no runtime, workspace, or orchestration model. It is agent-neutral: it defines a protocol to execute oracles and return evidence, not agent orchestration.
+
+### P9 — The system contains its own falsification condition
+
+The load-bearing assumption is: writing an oracle costs less than line-by-line code review. AI may draft oracles, but humans approve them. If manual-oracle share stays above 50%, the assumption has failed and expansion stops.
+
+## Core vocabulary
+
+| Term | Definition |
 |---|---|
-| 低风险 + 证据全绿 + 元验证一致 + 无影响传播 | 自动通过 |
-| 高风险 / 不可逆 / 跨历史 spec / 模型分歧 / unmapped | 人工裁决，落决策记录 |
+| clause | a normative spec statement with a stable ID, oracle, and risk tier |
+| oracle | executable decision: `test`, `cmd`, `metric`, `diff-scope`, or `manual` |
+| evidence | content-addressed oracle output with a verdict |
+| linker | clause registry, cross-spec reference graph, and reverse stale propagation |
+| DWARF layer | bidirectional clause↔code↔evidence mapping |
+| unmapped change | code change not attributable to a clause; P3's enforcement point |
+| unsafe | high-risk marker requiring a human gate and code review |
+| meta-verification | an implementation-distinct model audits whether evidence covers clause semantics |
 
-### P5 unsafe 承认 spec 的极限
-安全边界、数据迁移、并发、money path、删除类不可逆操作：spec 永远无法完整承载语义，
-**这些 path 上代码仍是唯一可 review 的事实**，强制人工代码级审查。
-不假装全部行为可以 spec 化——C 没有假装 inline asm 不存在。
+## Non-goals
 
-### P6 格式降级为存储，体验才是门面
-不发明新文件格式。markdown + HTML-comment anchor 足够承载子句语法。
-产品是"描述系统"的体验，语言只是内部实现细节。
-
-### P7 多模态认知单元
-spec 子句、设计稿引用、可运行 demo 快照、checklist 平等互链。
-linker 链接的不只是文本——设计稿版本变更同样触发 stale 传播；
-visual oracle（截图 diff）与 interaction oracle（demo 回放）是一等公民。
-
-### P8 渐进可采用，git-native，无服务器
-`cd 已有仓库` 即可开始。不要求安装运行时、创建 workspace、理解编排概念。
-适配任何 AI coding agent（Claude Code / Codex / …）——Urtext 不做编排，
-只定义"执行 oracle 并交回证据"的协议。
-
-### P9 系统自带证伪条件
-**承重假设：为子句写 oracle 的成本 < 逐行 review 代码的成本。**
-- 缓解：AI 起草 oracle，人只批准。
-- 健康度指标：manual oracle 占比。持续 > 50% 即宣告假设失败，停止扩建。
-不满足证伪条件的系统是信仰，不是工程。
-
-## 五、核心概念词汇表
-
-| 概念 | 定义 |
-|---|---|
-| clause（子句） | spec 内带稳定 id 的规范性陈述，绑定 oracle 与 risk 级别 |
-| oracle（判定器） | 可执行判定：test / cmd / metric / diff-scope / manual |
-| evidence（证据） | oracle 执行产物，内容寻址存储，判定 verdict |
-| linker | 子句注册 + 跨 spec 引用图 + stale 反向传播（影响分析） |
-| DWARF 层 | clause↔code↔evidence 双向映射（借调试信息之名） |
-| unmapped change | 无法归因到任何子句的代码变更，事实源翻转的执法点 |
-| unsafe | 高危块标记：强制 human gate + 代码级人工审查 |
-| 元验证 | 与实现方不同的模型审"证据是否覆盖子句"，不重跑实现 |
-
-## 六、非目标
-
-- **不做多 Agent 编排 / merge queue / fleet 管理**——Gastown 等已覆盖，Urtext 只消费 agent。
-- **不做形式化证明语言**——oracle 是工程判定，不是定理（TLA+/Dafny 的领域）。
-- **不替代 git / CI**——oracle 通过现有测试与命令执行，Urtext 提供绑定与归因。
-- **不做云端协作 / 多租户**——单机单 repo 闭环优先。
-- **不追求"好的 Spec = 成品项目"的完备性愿景**——粒度与风险成正比，
-  容忍可控模糊，UI 枝节可以不设子句。
-
-## 七、命名记录
-
-五轮候选（tenet / oath / seal / score / conductor 及音乐家系）全部因碰撞否决——
-"契约/编排/乐谱"语义场已被三代工具占满。教训：避开编程语言作者的第一直觉词库。
-
-**Urtext** 胜出理由：隐喻精确（净本 = 唯一权威意图源）、npm 裸名可注册、
-GitHub 近乎干净（唯一同名是 25-star 笔记插件，领域不同）、Ur- 前缀自解释。
-tagline 用拆写形式消化生词成本：*the ur-text of your system*。
+Urtext does not orchestrate agents, provide formal proof languages, replace Git or CI, provide cloud collaboration/multitenancy, or promise that a good spec alone produces a complete project. It accepts controlled ambiguity where risk and granularity warrant it.

@@ -1,152 +1,122 @@
-# Urtext 语法（v0）
+# Urtext Grammar (v0)
 
-> 状态：定稿 v0。实现以本文为准；破坏性修改需在本文记录版本演进。
-> 依据 VISION.md P1（无 oracle 即错误）、P6（markdown + anchor，不发明格式）。
+> Status: v0 is frozen. The implementation follows this document; breaking changes must record their version evolution here.
+> Based on VISION P1 (an oracle is mandatory) and P6 (Markdown plus anchors; no invented format).
 
-## 文件布局
+## File layout
 
 ```text
 specs/<feature>/
-  spec.md        行为子句（clause 文件；除 tasks.md 外任意 *.md 均可含子句）
-  tasks.md       验收 checklist（任务引用子句）
+  spec.md        behavioural clauses (any `*.md` except `tasks.md` may contain clauses)
+  tasks.md       acceptance checklist (tasks refer to clauses)
 ```
 
-- 子句文件与 checklist 同目录构成一个 **feature 单元**；checklist 的 `clauses:`
-  引用在本单元内解析。
-- 跨文件引用使用 `refs:<workspace 相对路径>#<clause-id>`。
+- Clause files and the checklist in one directory form a **feature unit**. A checklist's `clauses:` references resolve within that unit.
+- Cross-file references use `refs:<workspace-relative-path>#<clause-id>`.
 
-## 子句（clause）
+## Clauses
 
-一条子句 = 一个携带 `C\d+` id 的 markdown 标题 + 其后的正文（至下一个任意级标题为止）。
+A clause is a Markdown heading carrying a `C\d+` ID plus the body that follows it, up to the next heading at any level.
 
 ```markdown
-## C001 优惠券不可叠加 <!-- oracle:test:tests/coupon-stack.test.ts risk:high refs:billing/spec.md#C003 -->
-Given 已折扣商品 When 应用优惠券 Then 拒绝并返回 409
+## C001 Coupons must not stack <!-- oracle:test:tests/coupon-stack.test.ts risk:high refs:billing/spec.md#C003 -->
+Given an already-discounted item, When a coupon is applied, Then reject with 409.
 ```
 
-语法要点：
+Grammar rules:
 
-- 标题行匹配 `/^#{1,6}\s+(C\d+)\b\s*(.*)$/`。**不带 `C\d+` id 的标题是普通 prose**，
-  不受任何约束——只有声明为子句的陈述才进入判定体系。
-- 元数据置于 HTML 注释 anchor（`key:value`，空格分隔，值内不得含空格），
-  可见文本保持干净 GFM。
+- A heading matches `/^#{1,6}\s+(C\d+)\b\s*(.*)$/`. A heading without a `C\d+` ID is ordinary prose and unconstrained; only declared clauses enter the decision system.
+- Metadata lives in an HTML-comment anchor. It contains space-separated `key:value` tokens; values cannot contain spaces. Visible text remains clean GFM.
 
-### anchor 字段
+### Anchor fields
 
-| 字段 | 必填 | 取值 | 说明 |
+| Field | Required | Values | Meaning |
 |---|---|---|---|
-| `oracle` | **是** | `<kind>` 或 `<kind>:<ref>` | 见下表。**缺失即 `missing_oracle` 错误**（P1） |
-| `risk` | 否 | `low`（默认）\| `high` | `high` ⇒ 物化任务强制 human gate + 代码级人工审查（unsafe 语义） |
-| `refs` | 否 | 逗号分隔的 `path#Cid` | 跨 spec 依赖；linker 据此建图与 stale 传播 |
+| `oracle` | **yes** | `<kind>` or `<kind>:<ref>` | See the table below. Omission is `missing_oracle` (P1). |
+| `risk` | no | `low` (default) \| `high` | `high` requires a human gate and code-level human review (unsafe semantics). |
+| `refs` | no | comma-separated `path#Cid` | Cross-spec dependencies; the linker builds its graph and stale propagation from them. |
 
-### oracle 五种
+### The five oracle kinds
 
-| kind | ref 形态 | 判定 |
+| Kind | Reference form | Decision |
 |---|---|---|
-| `test` | 测试文件/pattern | 测试通过 |
-| `cmd` | shell 命令（无空格限制下用 `%20` 转义或包装脚本） | 退出码 0 |
-| `metric` | `探针表达式`（如 `p99<200ms`） | 数值比较 |
-| `diff-scope` | 允许触碰的路径 glob | 违例文件集为空 |
-| `manual` | 可省略；或人工检查项说明 | 人工勾选，落决策记录。**占比是健康度指标**（P9） |
+| `test` | test file/pattern | test passes |
+| `cmd` | shell command; encode spaces as `%20` or use a wrapper script | exit code 0 |
+| `metric` | probe expression, e.g. `p99<200ms` | **Not supported in v0: the runner returns `fail` (never a silent skip); planned for v1** |
+| `diff-scope` | allowed path glob | the violating-file set is empty |
+| `manual` | optional; or an explanation of the human check | human decision recorded in the Decision ledger; its share is a health metric (P9) |
 
-## Checklist（tasks.md）
+## Checklists (`tasks.md`)
 
-GFM 任务列表 + anchor 元数据，`clauses` 为多值字段：
+A GFM task list plus anchor metadata. `clauses` is multi-valued:
 
 ```markdown
-- [ ] T001 实现叠加校验 <!-- role:coder depends:T000 gate:true clauses:C001,C002 -->
-    在 apply 路径上拒绝已折扣商品。
-    第二行 prompt，与上一行以换行连接。
+- [ ] T001 Implement stacking guard <!-- role:coder depends:T000 gate:true clauses:C001,C002 -->
+    Reject an already-discounted item on the apply path.
+    The second indented line is appended to the prompt.
 ```
 
-- 一行一个任务：`- [ ] T\d+ Title <!-- … -->`；缩进 prose 为该任务的 prompt。
-- `T00x` 是文件内稳定 id；`depends` 引用同文件 `T00x`。
-- **无 id 的 checkbox 行是 `missing_file_id` 错误**（fail-closed）。
-- `clauses:` 引用同 feature 单元内的子句 id；未解析即 `unknown_clause` 错误。
-- `gate:true` ⇒ 任务完成前需人工批准（waiting_human 语义）。
+- One task per line: `- [ ] T\d+ Title <!-- … -->`; indented prose is that task's prompt.
+- `T00x` is a stable file-local ID; `depends` refers to another same-file `T00x`.
+- A checkbox line without an ID is `missing_file_id` (fail closed).
+- `clauses:` refers to clause IDs in the same feature unit; an unresolved reference is `unknown_clause`.
+- `gate:true` is stored as `human_gate` metadata marking that the task should get human approval. In v0 it is recorded only and **not enforced**—no command reads it to block a task (an authoring marker, not a runtime lock).
 
-### anchor 字段
-
-| 字段 | 取值 |
+| Field | Values |
 |---|---|
-| `role` | 执行角色提示（coder/reviewer/…），自由字符串 |
-| `depends` | 逗号分隔 `T00x` |
-| `gate` | `true` 开启 human gate |
-| `clauses` | 逗号分隔 `C\d+`，本任务声称满足的子句 |
+| `role` | free-form execution hint, e.g. `coder` or `reviewer` |
+| `depends` | comma-separated `T00x` IDs |
+| `gate` | `true` enables a human gate |
+| `clauses` | comma-separated `C\d+` IDs claimed by the task |
 
-## 错误目录（fail-closed）
+## Fail-closed errors
 
-解析或校验产生任一错误时，该文件的修订停在 `building`，永不进入可执行状态。
+Any parse or validation error leaves the file revision in `building`; it never becomes executable.
 
-| code | 含义 |
+| Code | Meaning |
 |---|---|
-| `missing_oracle` | 子句缺 oracle 绑定 |
-| `invalid_oracle_kind` | oracle kind 不在五种之内 |
-| `invalid_risk` | risk 不是 low/high |
-| `duplicate_clause_id` | 子句 id 在文件内重复 |
-| `malformed_anchor` | anchor token 不是 key:value |
-| `missing_file_id` | checkbox 行缺 `T00x` id |
-| `duplicate_file_id` | 任务 id 重复 |
-| `self_dependency` / `unknown_dependency` | 任务依赖闭包不成立 |
-| `unknown_clause` | 任务引用的子句在 feature 单元内不存在 |
-| `unknown_ref` | 子句 `refs` 指向不存在的文件或 id（check 阶段校验） |
+| `missing_oracle` | clause has no oracle |
+| `invalid_oracle_kind` | oracle kind is not one of the five |
+| `invalid_risk` | risk is not `low` or `high` |
+| `duplicate_clause_id` | a clause ID repeats within a file |
+| `malformed_anchor` | an anchor token is not `key:value` |
+| `malformed_ref` | a clause `refs` value is not `<path>#C<n>` |
+| `missing_file_id` | checkbox line has no `T00x` ID |
+| `duplicate_file_id` | task ID repeats |
+| `self_dependency` / `unknown_dependency` | task dependency closure is invalid |
+| `unknown_clause` / `malformed_clause_ref` | a task references no clause in its feature unit, or a ref is not a `C<n>` ID |
+| `unknown_ref` | a clause `refs` a missing file or ID; validated during `check` |
 
-## 注册表（registry）
+## Registry
 
-`urtext index` 将扫描结果 reconcile 进 `.urtext/registry.sqlite`，
-采用不可变修订链语义：
+`urtext index` reconciles scan results into `.urtext/registry.sqlite` using immutable revision-chain semantics:
 
-- 每文件一条修订链：`(spec_path, revision)`，`content_hash = sha256:<hex>`。
-- 内容未变 → no-op；变更 → 追加新修订（`ready` 或 `building`）。
-- 文件删除 → 追加 `tombstoned` 修订（content_hash NULL），**从不改写历史修订**。
-- 每条子句另记 `text_hash = sha256(标题 + 正文)`：anchor 元数据变更不算文本变更。
-- `refs` 边落 `clause_refs` 表（随修订链版本化）；linker 在每次 scan 后对
-  **全 workspace 最新活跃修订**解析引用（`unknown_ref` 属 check 阶段错误，
-  不改单文件修订状态——目标被删而引用方未变的悬空引用只有全量校验能捕获）。
-- 上游子句 text_hash 变更 → 反向闭包内依赖子句的既有证据打 `invalidated_at`
-  （evidence 唯一可变列；作废不删除）。
+- Each file has a revision chain `(spec_path, revision)` and `content_hash = sha256:<hex>`.
+- Unchanged content is a no-op; changed content appends a new `ready` or `building` revision.
+- Deleting a file appends a `tombstoned` revision with `content_hash NULL`; history is never rewritten.
+- Each clause also stores `text_hash = sha256(heading + body)`; anchor-metadata changes are not text changes.
+- `refs` edges are stored in `clause_refs` and versioned with revisions. The linker resolves references against all latest active workspace revisions after each scan. `unknown_ref` is therefore a whole-workspace `check` error rather than a single-file revision-state change.
+- Changing an upstream clause `text_hash` invalidates existing evidence in the reverse dependency closure by setting `invalidated_at`. Evidence is never deleted.
 
-## DWARF：clause↔code 映射（`urtext map` / `ack` / `blame` / `check --diff`）
+## DWARF: clause↔code mapping (`urtext map` / `ack` / `blame` / `check --diff`)
 
-- `clause_code_map` 落 `(kind, spec_path, clause_id, file_path, line_start,
-  line_end, commit_sha, note)`；`kind=clause` 是子句映射，`kind=ack` 是显式豁免。
-- **provenance 信 diff 不信自述**（DECISIONS D4）：`map`/`ack` 声称的范围必须与
-  当时真实 `git diff --unified=0 HEAD` 的 hunk 相交才落库，并记录当时 HEAD sha。
-- `check --diff` 归因每个工作区 hunk：命中**当前 HEAD** 的映射/ack，或落在
-  `specs/<feature>/*.md`（spec 回写即归因）→ 已归因；否则 `unmapped`，退出码 1。
-- `blame <file>:<line>` 反查约束该行的子句映射。
-- v0 边界：范围锚定 `(file, lines, commit_sha)`，后续编辑造成的行漂移暂不重锚。
+- `clause_code_map` stores `(kind, spec_path, clause_id, file_path, line_start, line_end, commit_sha, note)`. `kind=clause` is a clause mapping; `kind=ack` is an explicit exemption.
+- **Provenance trusts diffs, not assertions** (DECISIONS D4): claimed `map`/`ack` ranges must intersect a real hunk from `git diff --unified=0 HEAD`; the current HEAD SHA is persisted.
+- `check --diff` attributes every working-tree hunk. It is attributed when it matches a mapping/ack from the **current HEAD**, or lies in `specs/<feature>/*.md` (spec write-back). Otherwise it is `unmapped` and exits 1.
+- `blame <file>:<line>` looks up the clause mapping that constrains the line.
+- v0 boundary: mappings are anchored by `(file, lines, commit_sha)` and later line drift is not re-anchored.
 
-## 元验证与裁决门（`urtext audit` / `gate`）
+## Meta-verification and gate (`urtext audit` / `gate`)
 
-- **异源审计（DECISIONS D3）**：Urtext 自身不调用 LLM。`audit --export` 输出
-  JSON 包（协议 `urtext-meta-audit/v0`）——每条已判定证据的子句语义 + oracle +
-  客观证据输出；实现 preset ≠ 审计 preset 在进程外执行。
-- 审计只读证据不重跑实现；verdict（agree/disagree）绑定具体 `evidence_id`，
-  `audit --import` 回灌。stale/pending 证据不导出（无可审对象）。
-- `audit_verdicts(evidence_id, auditor, verdict, note)`；`disagree` 计入且
-  `import` 退出码 1，永不静默吞掉。
-- **裁决门（VISION P4）**：`urtext gate` 逐子句判定——
-  `risk=low ∧ evidence=pass ∧ audit=agree ∧ 非 stale` 才 auto-pass；
-  其余（high/缺证据/失败/pending/disagree/unaudited/stale）→ human，附原因。
-  `gate --diff` 额外把 unmapped 变更计入整体判定。任一子句需人工即整体人工，
-  退出码 1。
-- **unsafe lane（VISION P5）**：`risk:high` 子句证据全绿也不 auto-pass——代码是
-  唯一可 review 的事实。`urtext review <spec>#<clause> --approve|--reject` 记录
-  人工代码审查，绑定当时 HEAD sha（`reviews(spec_path, clause_id, commit_sha,
-  decision, reviewer, note)`）；HEAD 变更即失效须重审。仅高危子句进入本车道；
-  gate 见 approve 且其余条件满足才放行，`reject` 或无审查保持 human。
-- **记忆层 Decision ledger（DESIGN §7）**：`manual` oracle 子句永远 pending，
-  只有人工裁决能判定。`urtext decide <spec>#<clause> --pass|--fail` 记录裁决，
-  绑定当时 HEAD sha（`decisions(spec_path, clause_id, commit_sha, verdict,
-  decider, note)`）；HEAD 变更即失效。仅 manual 子句可裁决——runnable oracle
-  子句由客观证据判定（守 P2）。gate 见当前 HEAD 的 pass Decision 即放行该 manual
-  子句；manual 子句不参与 meta-audit（人工裁决即 ground truth）。`urtext decisions`
-  按时间倒序列出 ledger。
+- **Heterogeneous audit** (DECISIONS D3): Urtext never calls an LLM itself. `audit --export` emits a `urtext-meta-audit/v0` JSON package containing each decided clause's semantics, oracle, and objective evidence. An audit preset distinct from the implementation preset runs outside the process.
+- Audit reads evidence and does not rerun implementation. A verdict (`agree`/`disagree`) binds a concrete `evidence_id` and is imported by `audit --import`. Stale and pending evidence are not exported.
+- `audit_verdicts(evidence_id, auditor, verdict, note)` records results. `disagree` counts and makes import exit 1; it is never swallowed.
+- **Gate** (VISION P4): `urtext gate` auto-passes only `risk=low ∧ evidence=pass ∧ audit=agree ∧ not stale`. Every other condition—high risk, missing evidence, failure, pending, disagreement, unaudited, or stale—routes to a human with reasons. `gate --diff` also counts unmapped changes. If any clause needs a human, the whole gate exits 1.
+- **Unsafe lane** (VISION P5): a `risk:high` clause never auto-passes merely because evidence is green. `urtext review <spec>#<clause> --approve|--reject` records code review bound to HEAD; changing HEAD invalidates it. Only high-risk clauses use this lane. The gate passes one only with a current approval and all other conditions; rejection or missing review remains human-routed.
+- **Decision ledger** (DESIGN §7): `manual` clauses remain pending until a person decides them. `urtext decide <spec>#<clause> --pass|--fail` records a HEAD-bound decision. Only manual clauses can be decided; runnable clauses are decided by objective evidence. A current pass decision lets the gate pass that manual clause. Manual clauses do not enter meta-audit because the human decision is their ground truth. `urtext decisions` lists the ledger newest first.
 
-## v0 边界（后续版本处理）
+## v0 boundaries
 
-- anchor 值不含空格（whitespace 分词，v1 再评估引号转义）。
-- 设计稿引用（Figma）、demo 快照、visual/interaction oracle：VISION P7 范畴，v1 扩展
-  `oracle` kind 与 `refs` 目标类型，不改本文既有语法。
-- DWARF 映射行漂移重锚（后续编辑移动已映射代码行时自动跟随）不在 v0，见上节 v0 边界。
+- Anchor values cannot contain spaces; v1 may reconsider quoting and escaping.
+- Design references (Figma), demo snapshots, and visual/interaction oracles belong to VISION P7. v1 may extend oracle kinds and `refs` target types without changing this grammar.
+- Automatic re-anchoring for DWARF line drift is outside v0.

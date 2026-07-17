@@ -31,7 +31,7 @@ agent 构建的软件：**人类维护系统
 
 ### 机制 — 循环如何闭合
 
-- [子句与 Oracles](mechanisms/01-clause-and-oracle.md) — 语言层的四个原语。
+- [子句与 oracle](mechanisms/01-clause-and-oracle.md) — 语言层的四个原语：子句、oracle(判据)、refs(引用)、risk(风险级别)。
 - [注册表(registry)](mechanisms/02-registry.md) — 不可变的修订链。
 - [验证器(verifier)](mechanisms/03-verifier.md) — oracle 运行，证据落地，通过率(pass rate)聚合。
 - [链接器(linker)](mechanisms/04-linker-impact.md) — 引用图与失效传播。

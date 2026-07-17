@@ -1,125 +1,30 @@
-# Urtext 立项简报（背景 / 目标 / 方案 / 风险 / 认知边界）
+# Urtext Project Brief
 
-> 配套阅读：VISION（原则）、DESIGN（结构）、SYNTAX（语法）、DECISIONS（结论存档）、
-> ROADMAP（里程碑与停止条件）。本文是给未来的自己和潜在协作者的一页判断书。
+> Companion documents: [VISION](VISION.md) (principles), [DESIGN](DESIGN.md) (structure), [SYNTAX](SYNTAX.md) (grammar), [DECISIONS](DECISIONS.md) (record), and [ROADMAP](ROADMAP.md) (milestones and stop conditions). This is a decision brief for future maintainers and collaborators.
 
-## 一、背景
+## Context
 
-**研发范式正在迁移**：手工编码 → AI 对话辅助 → Vibe Coding → 人不再逐行 review 代码。
-瓶颈随之转移——"现在难的不是写代码，难的是 review"。人类的工作对象正在从代码
-上移到对系统的认知（spec、设计稿、交互 demo、验收 checklist）。
+The development bottleneck is moving from writing code to reviewing it. Humans must manage cognition about a system—specifications, designs, demos, and acceptance checklists—while AI maintains the code projection. Existing spec-driven tools produce non-decidable sentences without impact analysis or spec↔code mapping; review tools remain at the code layer; multi-agent systems orchestrate generation but do not decide correctness.
 
-**现有工具没有接住这次迁移**：
+The Assembly-to-C analogy requires decidable semantics, trusted translation, source-of-truth enforcement, bidirectional debug mapping, visible costs, and an escape hatch. LLMs provide translation but are stochastic, so determinism must move into verification.
 
-- SDD 工具（Spec Kit / OpenSpec / Kiro）产出的 spec 句子不可判定、无影响分析、
-  无 spec↔code 映射，靠 prompt 纪律防"Spec 腐败"——已被实践证明失败。
-- 代码审查工具（CodeRabbit 等）工作在代码层，不承载意图。
-- 多 Agent 编排（Claude Agent Teams / Codex App / Gastown）解决"怎么并行生成"，
-  不回答"生成的对不对"。
+## Objective
 
-**理论依据**（汇编→C 类比，DECISIONS D5）：一次真正的抽象层迁移需要六个条件同时成立
-——可判定语义、可信翻译、事实源翻转、双向调试映射、成本模型可见、逃生舱。
-LLM 补上了"翻译器"这一角但它是随机的，所以确定性必须搬进**验证器**。
-这正是所有现有 spec 工具缺失的一半。
+Make “humans maintain system intent; AI maintains code projection” an enforceable engineering fact. Success is measurable: review intent changes, impact, evidence, and disputes; bind every normative statement to an oracle; compute impacts mechanically; attribute failures to clauses; measure completion by evidence; and route humans only to high-risk, disputed, or unmapped work.
 
-## 二、目标
+## Chosen approach
 
-**一句话**：让"人维护系统意图、AI 维护代码投影"成为可执法的工程事实，
-而不是靠自觉的流程口号。
+Markdown carries clauses: C-ID headings with `oracle`, `risk`, and `refs` anchors. An immutable revision registry stores them; an oracle runner writes append-only evidence; completion is aggregation rather than an AI score. The roadmap adds linker impact analysis, DWARF mappings, meta-verification, the unsafe lane, and multimodal oracles.
 
-可度量的成功形态（VISION §3）：
+Rejected alternatives: cross-model diff review stays at the code layer; generic multi-agent workbenches are already native to model vendors; formal specification languages have steep cost and no translation bridge; pseudocode and prompt templates add ambiguity; discipline-only SDD cannot stop vague gates or spec rot.
 
-1. 人只 review 四样东西：意图变更、影响范围、验收证据、争议项。
-2. 每条规范性陈述绑定 oracle，可判定（P1，已实现并自证）。
-3. 改一条 spec，受影响的历史子句/checklist/代码可机械回答（M2 linker）。
-4. 失败归因到子句，不报栈帧（M3 DWARF）。
-5. 完成率 = 客观证据通过率，AI 不打分（P2，已实现）。
-6. 人是系统意图的最终责任人，只在高危/分歧/unmapped 时被触发（M4）。
+## Risks and boundaries
 
-**非目标**（同 VISION §6）：不做编排、不做形式证明、不替代 git/CI、不做云端、
-不追求"好的 Spec = 成品项目"的完备主义。
+1. The load-bearing assumption may fail: authoring oracles can cost more than code review. Manual-oracle share above 50% stops expansion.
+2. Users can game checks with shallow oracles. Meta-verification examines evidence coverage, but is not a second proof system.
+3. Clause granularity may be difficult to teach.
+4. Model vendors may commoditize the category.
+5. A seven-subsystem project may outrun a single maintainer.
+6. Self-hosting evidence may not generalize to business repositories.
 
-## 三、可行方案
-
-### 采纳方案：可判定子句 + 证据验证器（当前路径）
-
-markdown 承载 clause（C-id 标题 + oracle/risk/refs anchor），不可变修订链注册表，
-oracle runner 产出 append-only 证据，完成率是聚合不是评分。
-M1 已闭环自证（`urtext verify` 对本仓库 5 pass / 1 pending / exit 0；
-负向路径 exit 1）。后续 M2 linker → M3 DWARF → M4 元验证 → M5 unsafe/多模态。
-
-选它的理由：同一模式在窄域已胜三次（SQL / Terraform / 类型系统）；
-每期独立可合、独立有值；系统自带证伪条件（P9）。
-
-### 已考虑并否决的替代方案
-
-| 方案 | 否决理由 |
-|---|---|
-| 跨模型 diff review 产品 | 工作在代码层（review 汇编），Gastown/CodeRabbit 同层拥挤 |
-| 通用多 Agent 工作台 | 被模型厂商原生能力商品化，Gastown 更成熟 |
-| 形式化规格语言（TLA+/Dafny 路线） | 成本曲线陡峭，无到实现的翻译器，事实源翻转不了 |
-| 伪代码/更好的 prompt 模板 | 与代码同属机制范畴，只增加模糊度（D5 反面结论） |
-| 纯流程/纪律方案（现有 SDD 最佳实践） | Gate 粗糙、Spec 腐败靠自觉不可解（D7） |
-
-## 四、可能失控 / 失败的原因
-
-按概率 × 杀伤力排序：
-
-1. **承重假设塌方**：为子句写 oracle 的成本 > 逐行 review 代码的成本。
-   系统退化为"写测试的官僚流程"。探测器：manual oracle 占比（已内建，>50% 报警）；
-   停止条件已写入 ROADMAP——**不允许靠加功能挽救假设失败**。
-2. **spec 官僚化**：用户为了过 check 写敷衍 oracle（`cmd:true` 式作弊）。
-   oracle 形式上绿、实质不覆盖子句语义。缓解：M4 元验证专门审"证据是否覆盖"；
-   但元验证本身失效则无第二道网。
-3. **粒度手艺不可转移**：子句写多细取决于手感（"妙到毫巅处法无定法"）。
-   Design partner 学不会 → 首次价值链断裂。缓解：AI 起草子句和 oracle、人只批准；
-   未验证。
-4. **模型厂商原生化**：Anthropic/OpenAI 把"spec+验收闭环"做进官方工具
-   （gemini conductor 已在做 SDD 插件）。窗口期可能只有 6-12 个月。
-   对策：git-native、厂商中立是差异；但不构成防御。
-5. **单人项目持续性**：七个子系统的野心 vs 一个人的带宽。缓解：每期独立可合，
-   任何一期停下来系统仍可用；M1 已是最小可用物。
-6. **自举偏差**：拿自己 dogfood 自己，`specs/urtext/` 的子句天然好写
-   （作者=用户=领域专家），推断不到真实业务仓库。这是当前证据的最大折扣项。
-
-## 五、已知与未知
-
-### 已知的已知（有 git 记录的验证事实）
-
-- 闭环成立：P1/P2 语义有测试（32/32）+ 自证 verify + 负向冒烟，exit 码正确。
-- 法务边界清晰：全新 MIT，从零开发（D2）。
-- 市场缺口真实：spec-kit 无 oracle/linker/DWARF、Gastown measurement-only、
-  CodeRabbit 在代码层——均有一手源码/文档证据（D1）。
-- 命名资产干净：npm `urtext` 未占、GitHub 仓库已建、碰撞仅 25-star 笔记插件。
-- 不可变修订链、fail-closed、append-only 证据这套语义已由本仓库
-  registry / verifier 测试套件全量覆盖。
-
-### 已知的未知（有明确实验设计，等数据）
-
-- **oracle 编写成本在真实仓库里到底多高**——种子验证的第一问（ROADMAP 门槛：
-  10 分钟内写出第一条并跑通）。
-- **linker 影响分析在大 spec 树上是否可用**——refs 图的规模与噪声比未知（M2 回答）。
-- **元验证的真实价值/成本比**——1/10 成本是估算；disagree 率过高会把人工量弹回去（M4 回答）。
-- **付费意愿**——"愿意付费"的口头承诺与真实转化的差距（种子验证第四门槛）。
-- **visual/interaction oracle 的工程可行性**——截图 diff 的抖动、demo 回放的
-  稳定性都可能让多模态承诺落空（M5 回答）。
-- **多人协作形态**——单机单 repo 闭环之后，团队场景（评论、并发编辑 spec）
-  怎么做，故意推迟到有种子用户再回答。
-
-### 未知的未知（无法枚举，只能布置探测器）
-
-原则：不假装能预测，只保证**失控可被观察**，且每个探测器有明确的响应动作。
-
-| 探测器 | 监听什么 | 触发动作 |
-|---|---|---|
-| manual share（已内建） | 承重假设的慢性死亡 | >50% 持续 → 停止扩建（P9） |
-| 证据-满意度背离 | verify 全绿但用户仍不信任产出 → 说明 oracle 体系测错了东西 | 立即访谈，暂停路线图 |
-| 子句数/代码行比 | spec 官僚化的早期信号（比值异常增长） | 审查粒度指南，收紧默认 |
-| unmapped ack 率 | 用户大量 ack 而不回写 → 事实源翻转失败 | 重新设计回写体验 |
-| 种子用户的沉默 | 不投诉但也不复用——比负反馈更危险 | 每周主动回访，不等反馈 |
-| 竞品官方化 | 模型厂商发布同类功能 | 一周内重估差异，回到 D1 表格重写 |
-
-最后一道防线是文化性的：**本项目的每个关键主张都必须以子句形式活在
-`specs/urtext/` 里**。当某个"未知的未知"击中系统时，它必然表现为某条子句
-无法再绿、或没有任何子句能描述它——那一刻它就自动变成了"已知的未知"。
-这是系统对自身认知边界的 oracle。
+Known facts are recorded in the implementation, tests, and self-hosting specifications. Open questions include real oracle-writing cost, linker scale/noise, meta-verification value-to-cost, willingness to pay, multimodal reliability, and multi-person collaboration. The project response is observability: each important claim should live as a clause, so a broken claim turns into a red clause—or a newly known unknown.

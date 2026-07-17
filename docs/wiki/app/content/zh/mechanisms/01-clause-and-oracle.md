@@ -3,11 +3,7 @@
 语言层恰好只有四个原语：**子句(clause)**、**oracle(判据)**、**refs(引用)**，
 以及 **risk(风险级别)**。Urtext 中的其他一切都建立在它们之上。本页是
 v0 语法的权威导览；形式化参考见
-[`docs/SYNTAX.md`](../../SYNTAX.md)。
-
-首次出现时以 `英文(中文)` 标注术语，其后沿用英文原词以保持与语法 token 一致：
-**oracle(判据)** 是裁决一条子句通过与否的客观检查，**refs(引用)** 声明子句间的依赖，
-**risk(风险级别)** 是决定是否强制人工复审的二元分级。
+[`docs/zh-CN/SYNTAX.md`](../../../../../zh-CN/SYNTAX.md)。
 
 ## 子句是带 id 的标题
 
@@ -32,7 +28,7 @@ Given an already-discounted item, When a coupon is applied, Then reject with 409
 路径规范化 — 因此它必须从工作区根目录写起，例如
 `specs/billing/spec.md#C003`，而不是 `billing/spec.md#C003`。
 
-## 锚点字段(anchor fields)
+## 锚点字段
 
 | 字段 | 必填 | 取值 | 含义 |
 |---|---|---|---|
@@ -45,7 +41,7 @@ Given an already-discounted item, When a coupon is applied, Then reject with 409
 可逆性）是风险分级背后的设计原则（[assembly-to-C 条件
 5](../concepts/02-assembly-to-c.md)），不是 v0 存储的额外字段。
 
-## 五种 oracle(判据)
+## 五种 oracle
 
 | 种类 | 引用形态 | 判定结果 | v0 状态 |
 |---|---|---|---|
