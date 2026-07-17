@@ -1,0 +1,73 @@
+name: Pull request gates
+
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  evidence:
+    name: Evidence declaration
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require linked work, provenance, and risk decision
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = context.payload.pull_request.body ?? ''
+            const section = (heading) => {
+              const start = body.indexOf(heading)
+              if (start < 0) return ''
+              const end = body.indexOf('\n## ', start + heading.length)
+              return body.slice(start + heading.length, end < 0 ? body.length : end).trim()
+            }
+            const hasEvidenceBlock = (value) => /```(?:\w+)?\s*\n\s*\S[\s\S]*?\n```/.test(value)
+            const failures = []
+            if (!/(?:fixes|closes|resolves)\s+#\d+/i.test(body)) {
+              failures.push('Link a GitHub issue with `Fixes #NN`, `Closes #NN`, or `Resolves #NN`.')
+            }
+            for (const heading of ['## Clause provenance', '## Unmapped decisions', '## Risk gate']) {
+              if (!body.includes(heading)) failures.push(`Missing required PR template section: ${heading}`)
+            }
+            if (!hasEvidenceBlock(section('## Reproduction and verification'))) {
+              failures.push('Record actual reproduction or verification evidence in the template code block.')
+            }
+            if (!hasEvidenceBlock(section('## Clause provenance'))) {
+              failures.push('Declare changed non-spec hunks as clause-mapped, or state that none exist in the template code block.')
+            }
+            const unmapped = section('## Unmapped decisions')
+            if (!/\[x\] No changed hunk is unmapped\.|\[x\] Every unmapped hunk is explicitly acknowledged below/i.test(unmapped)) {
+              failures.push('Select an unmapped-change decision.')
+            }
+            const safe = body.includes('- [x] This PR changes no unsafe, high-risk, irreversible, security, money, migration, or concurrency path.')
+            const risky = body.includes('- [x] This PR needs human review because it changes one of those paths; I applied the `risk:high` label.')
+            if (safe === risky) failures.push('Select exactly one risk-gate declaration.')
+            if (risky) {
+              const labels = new Set(context.payload.pull_request.labels.map(({ name }) => name))
+              if (!labels.has('risk:high')) failures.push('High-risk PRs must carry the `risk:high` label.')
+              if (!labels.has('decision:human-approved')) {
+                failures.push('High-risk PRs require a recorded human decision via the `decision:human-approved` label.')
+              }
+            }
+            if (failures.length > 0) core.setFailed(failures.join('\n'))
+
+  quality:
+    name: Quality gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+      - run: npm run build
+      - run: node dist/cli.js verify

@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Loop protocol
+    url: https://github.com/luw2007/urtext/blob/master/docs/BRIEF-loops.md
+    about: Use a hunt or audit form for admissible loop findings.

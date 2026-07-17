@@ -1,0 +1,62 @@
+name: Hunt finding
+description: Report a reproduced defect from the hunt loop.
+title: "[hunt] "
+labels:
+  - loop:hunt
+  - evidence:required
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A finding without a minimal reproduction and observed result is not admissible.
+  - type: input
+    id: area
+    attributes:
+      label: Area
+      description: Hunt area ID.
+      placeholder: clause-parser
+    validations:
+      required: true
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      options:
+        - false-verdict
+        - missed-unmapped
+        - crash
+        - reject-valid
+        - accept-invalid
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: Exact timeout-wrapped command and the repro path that was actually run.
+      placeholder: |
+        Path: /tmp/urtext-hunt/...
+        Command: timeout 30s ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed behavior
+      description: Actual stdout, exit code, or stack trace.
+    validations:
+      required: true
+  - type: input
+    id: duplicate
+    attributes:
+      label: Duplicate check
+      description: Open issue number checked before filing, or `none`.
+      placeholder: "#42 or none"
+    validations:
+      required: true
