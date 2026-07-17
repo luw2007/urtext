@@ -97,7 +97,7 @@ describe('codebase fact distillation', () => {
       ].join('\n')
     )
 
-    const report = coverage(discover(root))
+    const report = coverage(discover(root), root)
 
     expect(report.missingEvidence).toEqual([{ feature: 'specs/payments/spec.md', path: 'src/missing.ts' }])
     expect(report.unownedObservedFiles).toEqual([
@@ -107,6 +107,28 @@ describe('codebase fact distillation', () => {
       'src/cli.ts',
       'tests/charge.test.ts',
     ])
+  })
+
+  test('accepts directories and globs as declared evidence and assigns their observed files', () => {
+    const root = makeWorkspace()
+    mkdirSync(join(root, 'contracts'), { recursive: true })
+    writeFileSync(join(root, 'contracts/payments.yaml'), 'openapi: 3.0.0\n')
+    writeFileSync(
+      join(root, 'specs/payments/spec.md'),
+      [
+        '# Payments',
+        '',
+        '## Implementation Evidence',
+        '',
+        '- `internal/payments/`',
+        '- `contracts/*.yaml`',
+      ].join('\n')
+    )
+
+    const facts = discover(root)
+
+    expect(coverage(facts, root).unownedObservedFiles).not.toContain('internal/payments/charge.go')
+    expect(coverage(facts, root).unownedObservedFiles).not.toContain('internal/payments/charge_test.go')
   })
 
   test('rejects missing implementation evidence and missing test oracle targets', () => {

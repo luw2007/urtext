@@ -55,12 +55,33 @@ const listFiles = (root: string, directory: string): string[] => {
   }
 }
 
-const exists = (root: string, path: string): boolean => {
+const fileExists = (root: string, path: string): boolean => {
   try {
     return statSync(join(root, path)).isFile()
   } catch {
     return false
   }
+}
+
+const evidenceExists = (root: string, path: string): boolean => {
+  if (!path.includes('*')) {
+    try {
+      statSync(join(root, path))
+      return true
+    } catch {
+      return false
+    }
+  }
+  const expression = new RegExp(`^${path.split('*').map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*')}$`)
+  return listFiles(root, '.').some((file) => expression.test(file))
+}
+
+const evidenceOwns = (evidence: string, file: string): boolean => {
+  if (evidence.includes('*')) {
+    const expression = new RegExp(`^${evidence.split('*').map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*')}$`)
+    return expression.test(file)
+  }
+  return evidence.endsWith('/') ? file.startsWith(evidence) : evidence === file
 }
 
 const extractImplementationEvidence = (content: string): string[] => {
@@ -119,18 +140,21 @@ export const discover = (workspaceRoot: string): DistillFacts => {
   return facts
 }
 
-export const coverage = (facts: DistillFacts): CoverageReport => {
-  const observed = new Set([...facts.observed.sourceFiles, ...facts.observed.testFiles])
-  const owned = new Set(facts.declared.features.flatMap((feature) => feature.implementationEvidence))
+export const coverage = (facts: DistillFacts, workspaceRoot?: string): CoverageReport => {
+  const root = workspaceRoot ?? process.cwd()
+  const observed = [...facts.observed.sourceFiles, ...facts.observed.testFiles]
+  const declaredEvidence = facts.declared.features.flatMap((feature) => feature.implementationEvidence)
   return {
     missingEvidence: facts.declared.features
       .flatMap((feature) =>
         feature.implementationEvidence
-          .filter((path) => !observed.has(path))
+          .filter((path) => !evidenceExists(root, path))
           .map((path) => ({ feature: feature.path, path }))
       )
       .sort((a, b) => a.feature.localeCompare(b.feature) || a.path.localeCompare(b.path)),
-    unownedObservedFiles: [...observed].filter((path) => !owned.has(path)).sort(),
+    unownedObservedFiles: observed
+      .filter((file) => !declaredEvidence.some((evidence) => evidenceOwns(evidence, file)))
+      .sort(),
   }
 }
 
@@ -139,14 +163,19 @@ export const validate = (facts: DistillFacts, workspaceRoot?: string): Validatio
   const errors: ValidationReport['errors'] = []
   for (const feature of facts.declared.features) {
     for (const path of feature.implementationEvidence) {
-      if (!exists(root, path)) errors.push({ feature: feature.path, kind: 'missing_evidence', path })
+      if (!evidenceExists(root, path)) errors.push({ feature: feature.path, kind: 'missing_evidence', path })
     }
     for (const path of feature.testOracleTargets) {
-      if (!exists(root, path)) errors.push({ feature: feature.path, kind: 'missing_oracle_target', path })
+      if (!fileExists(root, path)) errors.push({ feature: feature.path, kind: 'missing_oracle_target', path })
     }
   }
-  return { errors: errors.sort((a, b) => a.feature.localeCompare(b.feature) || a.kind.localeCompare(b.kind) || a.path.localeCompare(b.path)) }
+  return {
+    errors: errors.sort(
+      (a, b) => a.feature.localeCompare(b.feature) || a.kind.localeCompare(b.kind) || a.path.localeCompare(b.path)
+    ),
+  }
 }
+
 
 export const distillUsage = (): string =>
   [

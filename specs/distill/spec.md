@@ -18,13 +18,13 @@ Then observed source and test facts remain separately typed from declared featur
 
 Given a facts manifest and feature specs,
 When `urtext distill coverage` runs,
-Then it reports feature implementation-evidence paths that do not exist and observed source/test files not owned by any declaration, without assigning unsupported completeness percentages.
+Then it reports implementation-evidence files, directories, or globs that do not resolve in the workspace and observed source/test files not owned by any declaration, without assigning unsupported completeness percentages.
 
 ## C004 Validation rejects non-existent declared evidence and oracle targets <!-- oracle:test:tests/distill.test.ts risk:high refs:specs/urtext/spec.md#C001 -->
 
 Given a feature spec that declares absent implementation evidence or an executable clause whose referenced test file does not exist,
 When `urtext distill validate` runs,
-Then it reports each invalid declaration and exits non-zero.
+Then it accepts existing files, directories, and globs as implementation evidence, reports each invalid declaration, and exits non-zero.
 
 ## C005 The CLI documents the distill command family <!-- oracle:test:tests/distill.test.ts risk:low refs:specs/urtext/spec.md#C006 -->
 

@@ -170,7 +170,7 @@ const run = (argv: string[]): number => {
         return 0
       }
       if (mode === 'coverage') {
-        const report = distillCoverage(facts)
+        const report = distillCoverage(facts, workspaceRoot)
         for (const gap of report.missingEvidence) {
           console.log(`  ✗ ${gap.feature}: missing declared evidence ${gap.path}`)
         }
