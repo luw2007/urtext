@@ -4,20 +4,19 @@
 # mechanism, so grep-presence is exactly the right verdict. Exit 0 = green.
 # Usage: scripts/oracle-loops.sh <check-name>
 set -eu
-HUNT=.claude/workflows/urtext-overnight-hunt.js
 HUNT_CORE=.claude/workflows/lib/hunt-core.mjs
 ADAPTERS=.claude/workflows/lib/adapters.mjs
-FIX=.claude/workflows/urtext-fix-cycle.js
-AUDIT=.claude/workflows/urtext-spec-audit.js
+FIX_CORE=.claude/workflows/lib/fix-core.mjs
+AUDIT_CORE=.claude/workflows/lib/audit-core.mjs
 SKILL=.claude/skills/integrate-worker/SKILL.md
 
 case "${1:?usage: oracle-loops.sh <check-name>}" in
   trust-boundary)
-    grep -q 'NEVER merge here' "$FIX" && grep -q '视为未验证' "$SKILL" ;;
+    grep -q 'NEVER merge here' "$FIX_CORE" && grep -q '视为未验证' "$SKILL" ;;
   single-source)
-    grep -q 'docs/VISION.md' "$HUNT_CORE" && grep -q 'docs/VISION.md' "$FIX" && grep -q 'docs/VISION.md' "$AUDIT" ;;
+    grep -q 'docs/VISION.md' "$HUNT_CORE" && grep -q 'docs/VISION.md' "$FIX_CORE" && grep -q 'docs/VISION.md' "$AUDIT_CORE" ;;
   shell-safety)
-    grep -q 'SHELL SAFETY' "$HUNT_CORE" && grep -q 'SHELL SAFETY' "$FIX" ;;
+    grep -q 'SHELL SAFETY' "$HUNT_CORE" && grep -q 'SHELL SAFETY' "$FIX_CORE" ;;
   no-repro-no-report)
     grep -q 'NO REPRO, NO REPORT' "$HUNT_CORE" ;;
   rotation)
@@ -31,22 +30,22 @@ case "${1:?usage: oracle-loops.sh <check-name>}" in
   dedupe)
     grep -q 'gh issue list --search' "$ADAPTERS" ;;
   reproduce-first)
-    grep -q 'REPRODUCE FIRST' "$FIX" && grep -q 'refutations are as valuable as fixes' "$FIX" ;;
+    grep -q 'REPRODUCE FIRST' "$FIX_CORE" && grep -q 'refutations are as valuable as fixes' "$FIX_CORE" ;;
   coverage-follows-capability)
-    grep -q 'COVERAGE FOLLOWS CAPABILITY' "$FIX" ;;
+    grep -q 'COVERAGE FOLLOWS CAPABILITY' "$FIX_CORE" ;;
   isolation)
-    grep -q 'git worktree add' "$FIX" && grep -q 'MAX_WORKERS = 4' "$FIX" ;;
+    grep -q 'git worktree add' "$ADAPTERS" && grep -q 'MAX_WORKERS = 4' "$FIX_CORE" ;;
   no-scope-creep)
-    grep -q 'NO SCOPE CREEP' "$FIX" ;;
+    grep -q 'NO SCOPE CREEP' "$FIX_CORE" ;;
   provenance-dogfood)
-    grep -q 'UNMAPPED-CHANGE DOGFOOD' "$FIX" ;;
+    grep -q 'UNMAPPED-CHANGE DOGFOOD' "$FIX_CORE" ;;
   four-lenses)
-    grep -q 'drift:' "$AUDIT" && grep -q 'soundness:' "$AUDIT" && grep -q 'consistency:' "$AUDIT" && grep -q 'formal:' "$AUDIT" ;;
+    grep -q 'drift:' "$AUDIT_CORE" && grep -q 'soundness:' "$AUDIT_CORE" && grep -q 'consistency:' "$AUDIT_CORE" && grep -q 'formal:' "$AUDIT_CORE" ;;
   read-only)
-    grep -q 'Change NOTHING. File NO issues.' "$AUDIT" ;;
+    grep -q 'Change NOTHING. File NO issues.' "$AUDIT_CORE" ;;
   run-required)
-    grep -q 'exact command(s) actually executed' "$AUDIT" \
-      && grep -q 'required: \["lens", "severity", "clause_ids", "title", "detail", "ran"\]' "$AUDIT" ;;
+    grep -q 'exact command(s) actually executed' "$AUDIT_CORE" \
+      && grep -q 'required: \["lens", "severity", "clause_ids", "title", "detail", "ran"\]' "$AUDIT_CORE" ;;
   seven-steps)
     grep -q '永远从新 trunk 开始' "$SKILL" && grep -q -- '--3way' "$SKILL" \
       && grep -q '亲手重验每个 repro' "$SKILL" && grep -q '跨机制测试' "$SKILL" \

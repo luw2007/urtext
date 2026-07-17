@@ -1,7 +1,16 @@
-function stubAgent() {
-  return Promise.resolve({ findings: [], meta: {} });
+function makeStubAgent() {
+  const stubAgent = (prompt, opts = {}) => {
+    stubAgent.calls.push({ prompt, opts });
+    if (opts.schema?.properties?.key) {
+      const key = prompt.match(/Your cluster key: ([^.]+)\./)?.[1] ?? "stub";
+      return Promise.resolve({ key, fixed: [], refuted: [], tests_added: [], full_suite_green: true });
+    }
+    return Promise.resolve({ findings: [], meta: {} });
+  };
+  stubAgent.calls = [];
+  stubAgent.kind = "stub";
+  return stubAgent;
 }
-stubAgent.kind = "stub";
 
 function makeRealAgent(g) {
   const realAgent = async (prompt, opts) => {
@@ -12,13 +21,45 @@ function makeRealAgent(g) {
   return realAgent;
 }
 
+function makeStubWorktree() {
+  return {
+    kind: "stub",
+    calls: [],
+    async head() {
+      this.calls.push({ method: "head" });
+      return "stub-head";
+    },
+    async add(path, base) {
+      this.calls.push({ method: "add", path, base });
+    },
+  };
+}
+
+function makeRealWorktree(g) {
+  return {
+    kind: "real",
+    async head() {
+      if (!g.Bun?.$) throw new Error("Bun shell is unavailable");
+      return (await g.Bun.$`git rev-parse HEAD`.text()).trim();
+    },
+    async add(path, base) {
+      if (!g.Bun?.$) throw new Error("Bun shell is unavailable");
+      await g.Bun.$`git worktree add ${path} ${base}`.text();
+    },
+  };
+}
+
 function makeStubGh() {
   return {
     kind: "stub",
-    async list() {
+    calls: { list: [], create: [] },
+    async list(args) {
+      this.calls.list.push(args);
       return [];
     },
-    async create() {},
+    async create(args) {
+      this.calls.create.push(args);
+    },
   };
 }
 
@@ -44,8 +85,9 @@ function makeRealGh(g) {
 export function resolveAdapters(env, overrides = {}, g = globalThis) {
   const dryRun = Boolean(env?.DRY_RUN);
   return {
-    agent: overrides.agent ?? (dryRun ? stubAgent : makeRealAgent(g)),
+    agent: overrides.agent ?? (dryRun ? makeStubAgent() : makeRealAgent(g)),
     gh: overrides.gh ?? (dryRun ? makeStubGh() : makeRealGh(g)),
+    worktree: overrides.worktree ?? (dryRun ? makeStubWorktree() : makeRealWorktree(g)),
   };
 }
 
@@ -61,7 +103,10 @@ export function makeRealRuntime(g, env) {
 }
 
 export function makeStubRuntime() {
-  const files = new Map([[".claude/workflows/hunt-ledger.json", '{"swept":{}}']]);
+  const files = new Map([
+    [".claude/workflows/hunt-ledger.json", '{"swept":{}}'],
+    [".claude/workflows/fix-cycle-input.json", '{"cycle":0,"clusters":[{"key":"stub","prompt":"Dry-run smoke","issues":[]}]}'],
+  ]);
   const env = { DRY_RUN: "1" };
   return {
     read(path) {
