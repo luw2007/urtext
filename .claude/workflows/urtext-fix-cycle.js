@@ -40,26 +40,22 @@ Your claims will be treated as UNVERIFIED by the integrator — earn trust with 
    corruption merge green. Urtext equivalent: a detection gap lets spec
    corruption land silently.)
 
-3. FULL VERIFICATION GATE. The project's full test command must exit 0 before
+3. FULL VERIFICATION GATE. Run sh scripts/full-test.sh and require exit 0 before
    you emit your diff. If no test harness exists yet for the module you touched,
    say so explicitly in meta.blockers — do not fake a pass.
 
-4. RESERVED RANGES. You are assigned a reserved range for any global namespace
-   you extend (error codes, clause-id prefixes, fixture numbering). Never
-   allocate outside your range — parallel workers collide otherwise.
-
-5. SHELL SAFETY. A flagged command stalls the whole overnight run waiting for a
+4. SHELL SAFETY. A flagged command stalls the whole overnight run waiting for a
    sleeping human (Rue detour #7). Therefore:
    - NEVER compose rm/mv/redirect targets from shell variables ('rm $DIR/$f.out' gets flagged).
    - Use literal /tmp paths, or null-guard with \${VAR:?}.
    - Best: don't delete temp files at all — overwrite or leave them.
    - NEVER rm inside the repo checkout.
 
-6. NO SCOPE CREEP. Fix ONLY the issues listed in your cluster. If a change makes
+5. NO SCOPE CREEP. Fix ONLY the issues listed in your cluster. If a change makes
    a comment stale, update the comment in the same change (comments are source
    of truth). Unrelated improvements go in meta.followups, not in the diff.
 
-7. UNMAPPED-CHANGE DOGFOOD. Urtext enforces clause↔code provenance (VISION P3).
+6. UNMAPPED-CHANGE DOGFOOD. Urtext enforces clause↔code provenance (VISION P3).
    If specs with clauses exist for the module you touch, note in meta which
    clause ids your hunks map to; hunks you cannot attribute must be listed under
    meta.unmapped with a one-line justification.
@@ -105,21 +101,19 @@ for (const c of clusters) {
 // Model routing (human policy): workers get the default strong model. The
 // strongest model is reserved for integration judgment in the main loop —
 // grant it to a cluster only when its prompt explicitly demands it.
-const ERROR_CODE_BLOCK = 100; // reserved-range width per worker
 const results = await parallel(
-  clusters.map((c, i) => () =>
+  clusters.map((c) => () =>
     agent(
       `${PREAMBLE}
 Your worktree: ${outDir}/wt-${c.key} (work ONLY there).
 Your cluster key: ${c.key}. Issues: ${JSON.stringify(c.issues)}.
-Your reserved error-code range: UX-${1000 + i * ERROR_CODE_BLOCK}..UX-${1000 + (i + 1) * ERROR_CODE_BLOCK - 1}.
 Fetch each issue body with: gh issue view <n>
 
 Task:
 ${c.prompt}
 
 When done:
-1. Run the full test suite in your worktree; record exit status honestly.
+1. Run sh scripts/full-test.sh in your worktree; record exit status honestly.
 2. Emit your diff: git -C ${outDir}/wt-${c.key} diff > ${outDir}/${c.key}.diff
 3. Return your meta summary as structured JSON.`,
       { agent: "task", schema: META_SCHEMA }

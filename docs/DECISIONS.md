@@ -60,3 +60,9 @@ The human is conductor, AI agents are players, code is performance, and the orac
 Open hunt issues enter an area's `knownBugs` only when they carry the matching `area:<id>` label. Hunt-created issues carry both `hunt,<category>` and `area:<id>`, so the read and write paths use the same mapping. Issues without an area label are not injected into a sweep.
 
 The hunt coverage ledger had an empty `swept` object when the authorized ten-domain AREAS map landed. No historical area ids required migration; the empty ledger remains valid for the first rotation.
+
+## D9 ADR 0001 D7 acknowledgment: remove numeric reserved ranges
+
+The UX numeric error-code reservation was dead: `grep -rn UX- src/` returned no consumers, while repository errors use string literal codes such as `missing_oracle`, `unknown_clause`, and `git_failed`. No parallel worker allocates a shared numeric namespace, so retaining the reservation would enforce a fictional constraint.
+
+The mechanism was removed coherently from four locations: the `ERROR_CODE_BLOCK` constant and per-worker `UX-…` prompt line, PREAMBLE rule 4 `RESERVED RANGES`, clause C304, and the `reserved-ranges` oracle case. The loop specification now contains 25 clauses and the oracle script contains 21 cases.

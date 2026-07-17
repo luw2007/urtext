@@ -36,8 +36,6 @@ case "${1:?usage: oracle-loops.sh <check-name>}" in
     grep -q 'COVERAGE FOLLOWS CAPABILITY' "$FIX" ;;
   isolation)
     grep -q 'git worktree add' "$FIX" && grep -q 'MAX_WORKERS = 4' "$FIX" ;;
-  reserved-ranges)
-    grep -q 'RESERVED RANGES' "$FIX" ;;
   no-scope-creep)
     grep -q 'NO SCOPE CREEP' "$FIX" ;;
   provenance-dogfood)

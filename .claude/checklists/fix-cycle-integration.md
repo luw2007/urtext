@@ -14,7 +14,7 @@ worker key: ________  cycle: ____  日期: ________
 - [ ] 3b. 每个 `refuted` issue 有 PIN 测试且通过（clause: C301）
 - [ ] 4. 与已合入/在途 worker 存在相互作用机制时，已当场编写跨机制组合测试；
        确无相互作用时勾选并注明依据
-- [ ] 5. 全套测试 exit 0 + 格式化通过
+- [ ] 5. `sh scripts/full-test.sh` exit 0 + 格式化通过
 - [ ] 6. commit 引用 `Fixes #NN` 每行一个
 - [ ] 6b. meta.unmapped 逐条裁决：回写 spec 新子句，或 manual-ack 落决策记录
        （clause: C503；未裁决不得合入）
