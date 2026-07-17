@@ -6,3 +6,5 @@
     Fail only for declarations that the repository can deterministically prove invalid.
 - [x] T004 Expose the distill command family in CLI help <!-- role:coder depends:T001 clauses:C005 -->
     Keep command documentation explicit about facts versus human-reviewed intent.
+- [x] T005 Create codebase-to-spec Skill <!-- role:coder depends:T001 gate:true clauses:C006 -->
+    Consume facts.json into staged Feature/FR/clause drafts with evidence, confidence, and explicit human decisions.

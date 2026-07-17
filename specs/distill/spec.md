@@ -31,3 +31,9 @@ Then it reports each invalid declaration and exits non-zero.
 Given a user invokes CLI help,
 When the distill feature is present,
 Then help documents `distill discover`, `distill coverage`, and `distill validate` and their output boundary.
+
+## C006 Codebase-to-spec synthesis produces review-only candidates <!-- oracle:cmd:sh%20scripts/oracle-skill.sh%20codebase-to-spec risk:high refs:specs/distill/spec.md#C001,specs/distill/spec.md#C002 -->
+
+Given a current facts manifest,
+When the `codebase-to-spec` Skill synthesizes a feature,
+Then it writes only staged candidate specs, separates observed facts from inferences, and records evidence gaps rather than inventing behavioral guarantees or canonical specifications.
