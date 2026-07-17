@@ -54,3 +54,9 @@ The human is conductor, AI agents are players, code is performance, and the orac
 | vague gates such as “fast” | templates and review rules | P1: no oracle is a syntax error |
 | spec rot after implementation | cleanup instructions | D4 unmapped-change enforcement |
 | spec drift during iteration | manual synchronization | linker stale propagation plus `urtext impact` |
+
+## D8 Hunt issue area round-trip
+
+Open hunt issues enter an area's `knownBugs` only when they carry the matching `area:<id>` label. Hunt-created issues carry both `hunt,<category>` and `area:<id>`, so the read and write paths use the same mapping. Issues without an area label are not injected into a sweep.
+
+The hunt coverage ledger had an empty `swept` object when the authorized ten-domain AREAS map landed. No historical area ids required migration; the empty ledger remains valid for the first rotation.
