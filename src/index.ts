@@ -58,3 +58,23 @@ export {
   type UnmappedReport,
   type BlameEntry,
 } from './dwarf.js'
+export {
+  exportRequest,
+  importVerdicts,
+  coverage,
+  latestEvidence,
+  ensureAuditLedger,
+  AUDIT_SCHEMA,
+  type AuditRequest,
+  type AuditItem,
+  type AuditVerdictInput,
+  type ImportOutcome,
+  type CoverageReport,
+  type CoverageRow,
+} from './audit.js'
+export {
+  adjudicate,
+  type Decision,
+  type ClauseDecision,
+  type GateReport,
+} from './gate.js'

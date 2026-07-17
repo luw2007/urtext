@@ -8,3 +8,5 @@
     refs 建图（clause_refs）、unknown_ref fail-closed、text_hash stale 传播、urtext impact。
 - [x] T005 DWARF clause↔code 映射与 unmapped 执法 <!-- role:coder depends:T004 gate:true clauses:C009,C010 -->
     clause_code_map、diff 交叉验证的 map/ack、check --diff unmapped 检测、urtext blame。
+- [x] T006 元验证协议与风险分级裁决门 <!-- role:coder depends:T005 gate:true clauses:C011,C012 -->
+    audit_verdicts、异源 export/import 覆盖率、gate 聚合 evidence/audit/stale/unmapped。

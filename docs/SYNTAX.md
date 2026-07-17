@@ -117,6 +117,21 @@ GFM 任务列表 + anchor 元数据，`clauses` 为多值字段：
 - `blame <file>:<line>` 反查约束该行的子句映射。
 - v0 边界：范围锚定 `(file, lines, commit_sha)`，后续编辑造成的行漂移暂不重锚。
 
+## 元验证与裁决门（`urtext audit` / `gate`）
+
+- **异源审计（DECISIONS D3）**：Urtext 自身不调用 LLM。`audit --export` 输出
+  JSON 包（协议 `urtext-meta-audit/v0`）——每条已判定证据的子句语义 + oracle +
+  客观证据输出；实现 preset ≠ 审计 preset 在进程外执行。
+- 审计只读证据不重跑实现；verdict（agree/disagree）绑定具体 `evidence_id`，
+  `audit --import` 回灌。stale/pending 证据不导出（无可审对象）。
+- `audit_verdicts(evidence_id, auditor, verdict, note)`；`disagree` 计入且
+  `import` 退出码 1，永不静默吞掉。
+- **裁决门（VISION P4）**：`urtext gate` 逐子句判定——
+  `risk=low ∧ evidence=pass ∧ audit=agree ∧ 非 stale` 才 auto-pass；
+  其余（high/缺证据/失败/pending/disagree/unaudited/stale）→ human，附原因。
+  `gate --diff` 额外把 unmapped 变更计入整体判定。任一子句需人工即整体人工，
+  退出码 1。
+
 ## v0 边界（后续版本处理）
 
 - anchor 值不含空格（whitespace 分词，v1 再评估引号转义）。

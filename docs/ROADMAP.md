@@ -37,10 +37,16 @@ clause/checklist 语法、不可变修订链注册表、oracle runner
 
 独立价值：事实源翻转开始执法；失败归因到子句。
 
-## M4 元验证 + 自动通过
+## M4 元验证 + 自动通过（已完成 ✅）
 
-- 跨模型证据覆盖审计（agent 协议：读证据→逐子句 agree/disagree）。
-- 风险分级自动通过规则（low+全绿+一致+无 stale → 自动过）。
+- 跨模型证据覆盖审计：`audit --export` 导出已判定证据的覆盖包，异源 preset agent
+  逐 evidence 判 agree/disagree，`audit --import` 回灌（verdict 绑定 evidence_id，
+  只读证据不重跑，DECISIONS D3）。
+- 风险分级裁决门 `urtext gate`：`low + evidence=pass + audit=agree + 非 stale`
+  自动通过；high/失败/pending/disagree/unaudited/stale/unmapped 任一 → 人工附原因。
+
+验收（已达成）：C011/C012 绑定 tests/gate.test.ts 全绿；自举单元 12 子句
+11 pass / 1 pending manual / exit 0。
 
 独立价值：人工量收敛到高危与分歧。
 

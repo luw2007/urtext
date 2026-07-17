@@ -14,18 +14,23 @@
  *                         Explicitly acknowledge an intentionally unmapped change.
  *   urtext blame <file>:<line>
  *                         Which clauses constrain this line.
+ *   urtext audit --export | --import <file>
+ *                         Cross-model meta-verification protocol (evidence coverage).
+ *   urtext gate [--diff]  Risk-tier adjudication: which clauses auto-pass vs need a human.
  *   urtext --help | -h
  *
  * Registry lives at `.urtext/registry.sqlite` under the workspace root (cwd).
  * Git-native and serverless: no daemon, no workspace registration (VISION P8).
  */
 
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import DatabaseConstructor from 'better-sqlite3'
 
+import { coverage, exportRequest, importVerdicts, type AuditVerdictInput } from './audit.js'
 import { blame, detectUnmapped, recordAck, recordMapping } from './dwarf.js'
+import { adjudicate } from './gate.js'
 import { impact } from './linker.js'
 import { openRegistry } from './registry.js'
 import { scanWorkspace } from './scanner.js'
@@ -48,6 +53,12 @@ const USAGE = [
   '                   Acknowledge an intentionally unmapped change (reason required).',
   '  urtext blame <file>:<line>',
   '                   List the clauses constraining a code line.',
+  '  urtext audit --export | --import <file>',
+  '                   Meta-verification: export the evidence-coverage package for a',
+  '                   different-preset auditor, or import its agree/disagree verdicts.',
+  '  urtext gate [--diff]',
+  '                   Risk-tier adjudication; --diff also counts unmapped changes.',
+  '                   exit 1 when any clause needs a human.',
   '',
   'The registry lives at .urtext/registry.sqlite under the current directory.',
 ].join('\n')
@@ -74,6 +85,25 @@ const parseRangeTarget = (
     : null
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null
+
+/** Validate a parsed audit file into verdict inputs without trusting its shape. */
+const normalizeVerdicts = (parsed: unknown): AuditVerdictInput[] | null => {
+  if (!isRecord(parsed) || !Array.isArray(parsed.verdicts)) return null
+  const verdicts: AuditVerdictInput[] = []
+  for (const item of parsed.verdicts) {
+    if (!isRecord(item)) return null
+    const { evidenceId, auditor, verdict, note } = item
+    if (typeof evidenceId !== 'number' || !Number.isInteger(evidenceId)) return null
+    if (typeof auditor !== 'string' || auditor.length === 0) return null
+    if (verdict !== 'agree' && verdict !== 'disagree') return null
+    if (note !== undefined && typeof note !== 'string') return null
+    verdicts.push({ evidenceId, auditor, verdict, ...(note !== undefined ? { note } : {}) })
+  }
+  return verdicts
+}
+
 const openWorkspaceRegistry = (workspaceRoot: string) => {
   const dir = join(workspaceRoot, '.urtext')
   mkdirSync(dir, { recursive: true })
@@ -98,6 +128,8 @@ const run = (argv: string[]): number => {
     map: true,
     ack: true,
     blame: true,
+    audit: true,
+    gate: true,
   }
   if (COMMANDS[command] !== true) {
     console.error(`Unknown command: ${command}\n\n${USAGE}`)
@@ -107,6 +139,64 @@ const run = (argv: string[]): number => {
   const workspaceRoot = process.cwd()
   const db = openWorkspaceRegistry(workspaceRoot)
   try {
+    if (command === 'audit') {
+      const mode = argv[1]
+      scanWorkspace(db, workspaceRoot)
+      if (mode === '--export') {
+        console.log(JSON.stringify(exportRequest(db), null, 2))
+        return 0
+      }
+      if (mode === '--import') {
+        const file = argv[2]
+        if (!file) {
+          console.error('Usage: urtext audit --import <file>')
+          return 1
+        }
+        const parsed: unknown = JSON.parse(readFileSync(file, 'utf8'))
+        const verdicts = normalizeVerdicts(parsed)
+        if (verdicts === null) {
+          console.error('Invalid audit file: expected {verdicts:[{evidenceId,auditor,verdict,note?}]}.')
+          return 1
+        }
+        const outcome = importVerdicts(db, verdicts, Date.now())
+        if (outcome.kind === 'rejected') {
+          console.error(`[${outcome.code}] ${outcome.message}`)
+          return 1
+        }
+        const report = coverage(db)
+        const cov = report.coverage === null ? 'n/a' : `${Math.round(report.coverage * 100)}%`
+        console.log(
+          `imported ${outcome.count} verdict(s) — coverage ${cov} (${report.counts.agree} agree, ${report.counts.disagree} disagree, ${report.counts.unaudited} unaudited)`
+        )
+        return report.counts.disagree > 0 ? 1 : 0
+      }
+      console.error('Usage: urtext audit --export | --import <file>')
+      return 1
+    }
+
+    if (command === 'gate') {
+      scanWorkspace(db, workspaceRoot)
+      let unmappedCount = 0
+      if (argv.includes('--diff')) {
+        const unmappedReport = detectUnmapped(db, workspaceRoot)
+        if ('error' in unmappedReport) {
+          console.error(unmappedReport.error)
+          return 1
+        }
+        unmappedCount = unmappedReport.unmapped.length
+      }
+      const report = adjudicate(db, unmappedCount)
+      for (const decision of report.decisions) {
+        const marker = decision.decision === 'auto-pass' ? '✓' : '⊗'
+        const risk = decision.risk === 'high' ? ' [high]' : ''
+        console.log(`  ${marker} ${decision.clauseId} ${decision.title}${risk} → ${decision.decision}`)
+        for (const reason of decision.reasons) console.log(`      · ${reason}`)
+      }
+      console.log(`\noverall: ${report.overall}`)
+      for (const reason of report.reasons) console.log(`  · ${reason}`)
+      return report.overall === 'auto-pass' ? 0 : 1
+    }
+
     if (command === 'map') {
       const clause = parseClauseTarget(argv[1])
       const range = parseRangeTarget(argv[2])

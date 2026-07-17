@@ -28,8 +28,8 @@ strict + exactOptionalPropertyTypes 下 `tsc --noEmit` 干净。
 
 ## C006 CLI 帮助面命令集变更需人工确认 <!-- oracle:manual -->
 
-当前命令集 `index` / `check` / `verify` / `impact` / `map` / `ack` / `blame`
-之外的新命令，需要人工确认进入本子句或新增子句。
+当前命令集 `index` / `check` / `verify` / `impact` / `map` / `ack` / `blame` /
+`audit` / `gate` 之外的新命令，需要人工确认进入本子句或新增子句。
 
 ## C007 悬空引用被拒绝 <!-- oracle:test:tests/linker.test.ts risk:high refs:specs/urtext/spec.md#C003 -->
 
@@ -52,3 +52,15 @@ strict + exactOptionalPropertyTypes 下 `tsc --noEmit` 干净。
 
 `urtext check --diff` 扫描工作区 hunk：无法归因到子句映射、显式 ack 或
 spec 回写的变更标记为 unmapped，退出码 1——事实源翻转的执法点（VISION P3）。
+
+## C011 元验证只读证据且异源、分歧不静默 <!-- oracle:test:tests/gate.test.ts risk:high refs:specs/urtext/spec.md#C004 -->
+
+`audit --export` 只导出已判定证据的覆盖包（stale/pending 排除），审计 verdict
+绑定具体 evidence_id（只读证据不重跑，异源 preset 见 DECISIONS D3）；
+`disagree` 计入且永不静默——升级人工。
+
+## C012 风险分级裁决门 <!-- oracle:test:tests/gate.test.ts risk:high refs:specs/urtext/spec.md#C011 -->
+
+`urtext gate`：子句仅当 `low + evidence=pass + audit=agree + 非 stale` 自动通过；
+high/缺证据/失败/pending/disagree/unaudited/stale 任一 → 人工，附原因；
+存在 unmapped 变更时整体判定人工（VISION P4）。
