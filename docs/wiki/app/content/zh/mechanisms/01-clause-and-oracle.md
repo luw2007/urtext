@@ -3,7 +3,7 @@
 语言层恰好只有四个原语：**子句(clause)**、**oracle(判据)**、**refs(引用)**，
 以及 **risk(风险级别)**。Urtext 中的其他一切都建立在它们之上。本页是
 v0 语法的权威导览；形式化参考见
-[`docs/zh-CN/SYNTAX.md`](../../../../../zh-CN/SYNTAX.md)。
+[SYNTAX 语法](../../../../../zh-CN/SYNTAX.md)。
 
 ## 子句是带 id 的标题
 

@@ -63,7 +63,7 @@ GFM 任务列表 + anchor 元数据，`clauses` 为多值字段：
 - `T00x` 是文件内稳定 id；`depends` 引用同文件 `T00x`。
 - **无 id 的 checkbox 行是 `missing_file_id` 错误**（fail-closed）。
 - `clauses:` 引用同 feature 单元内的子句 id；未解析即 `unknown_clause` 错误。
-- `gate:true` ⇒ 任务完成前需人工批准（waiting_human 语义）。
+- `gate:true` ⇒ 存储为 `human_gate` 元数据，标记该任务应经人工批准；v0 中仅记录、**不强制**——无命令据此阻塞任务（作者标记，非运行时锁）。
 
 ### anchor 字段
 

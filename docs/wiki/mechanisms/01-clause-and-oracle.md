@@ -3,7 +3,7 @@
 The language layer has exactly four primitives: **clause**, **oracle**, **refs**,
 and **risk**. Everything else in Urtext is built on them. This page is the
 authoritative tour of the v0 grammar; the formal reference is
-[`docs/SYNTAX.md`](../../SYNTAX.md).
+[SYNTAX](../../SYNTAX.md).
 
 ## A clause is a heading with an id
 
