@@ -16,7 +16,7 @@
 | 2 | 注册表 | 不可变修订链（unchanged/indexed/tombstoned） | ✅ registry.sqlite |
 | 3 | 验证器 | oracle 执行 → 证据落库 → 完成率 | ✅ `urtext verify` |
 | 4 | Linker | refs 建图、stale 传播、`urtext impact` | ✅ `urtext impact` |
-| 5 | DWARF | clause↔code↔evidence 映射、unmapped change 检测 | 里程碑 +2 |
+| 5 | DWARF | clause↔code↔evidence 映射、unmapped change 检测 | ✅ `urtext map/ack/blame`, `check --diff` |
 | 6 | 裁决层 | 风险分级触发人工、manual 勾选落 Decision | 里程碑 +2 |
 | 7 | 记忆层 | Decision/ADR 沉淀 | 里程碑 +3 |
 

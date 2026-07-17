@@ -6,3 +6,5 @@
     test/cmd/diff-scope 执行，manual pending，metric 显式 fail；evidence append-only。
 - [x] T004 linker 与影响分析 <!-- role:coder depends:T003 clauses:C007,C008 -->
     refs 建图（clause_refs）、unknown_ref fail-closed、text_hash stale 传播、urtext impact。
+- [x] T005 DWARF clause↔code 映射与 unmapped 执法 <!-- role:coder depends:T004 gate:true clauses:C009,C010 -->
+    clause_code_map、diff 交叉验证的 map/ack、check --diff unmapped 检测、urtext blame。

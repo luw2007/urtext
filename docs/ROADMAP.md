@@ -24,11 +24,16 @@ clause/checklist 语法、不可变修订链注册表、oracle runner
 
 独立价值：改一条 spec 能回答"波及什么"——现有一切 SDD 工具都做不到。
 
-## M3 DWARF：clause↔code↔evidence
+## M3 DWARF：clause↔code↔evidence（已完成 ✅）
 
-- `clause_code_map` + `clause_outputs` 落库（diff 交叉验证，见 DECISIONS D4）。
+- `clause_code_map` 落库（`map` 写映射、`ack` 显式豁免），声称范围用**当时真实
+  `git diff` 交叉验证**方落库（provenance 信 diff 不信 LLM 自述，见 DECISIONS D4）。
 - `urtext blame <file>:<line>`：反查代码行由哪条子句约束。
-- unmapped change 检测进入 `urtext check --diff`。
+- unmapped change 检测进入 `urtext check --diff`：无法归因到映射/ack/spec 回写的
+  hunk 退出码 1。
+
+验收（已达成）：C009/C010 绑定 tests/dwarf.test.ts 全绿；自举单元 10 子句
+9 pass / 1 pending manual / exit 0。
 
 独立价值：事实源翻转开始执法；失败归因到子句。
 

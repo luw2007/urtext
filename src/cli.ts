@@ -3,10 +3,17 @@
  * Urtext CLI — v0 surface:
  *
  *   urtext index          Scan specs/ and reconcile the clause registry.
- *   urtext check          Index, then report errors; exit 1 when any file is `building`
- *                         or any cross-file ref is unknown.
+ *   urtext check [--diff] Index, then report errors; exit 1 when any file is `building`
+ *                         or any cross-file ref is unknown. `--diff` additionally
+ *                         fails on unmapped working-tree changes (VISION P3).
  *   urtext impact <spec-path>#<clause-id>
  *                         Reverse closure over the refs graph: affected clauses + tasks.
+ *   urtext map <spec-path>#<clause-id> <file>:<start>-<end> [note…]
+ *                         Record a diff-verified clause→code mapping (D4).
+ *   urtext ack <file>:<start>-<end> <reason…>
+ *                         Explicitly acknowledge an intentionally unmapped change.
+ *   urtext blame <file>:<line>
+ *                         Which clauses constrain this line.
  *   urtext --help | -h
  *
  * Registry lives at `.urtext/registry.sqlite` under the workspace root (cwd).
@@ -18,6 +25,7 @@ import { join } from 'node:path'
 
 import DatabaseConstructor from 'better-sqlite3'
 
+import { blame, detectUnmapped, recordAck, recordMapping } from './dwarf.js'
 import { impact } from './linker.js'
 import { openRegistry } from './registry.js'
 import { scanWorkspace } from './scanner.js'
@@ -26,15 +34,45 @@ import { verifyWorkspace } from './verifier.js'
 const USAGE = [
   'Usage:',
   '  urtext index     Scan specs/ and reconcile the clause registry.',
-  '  urtext check     Index, then report errors; exit 1 on any building revision',
-  '                   or unknown cross-file ref.',
+  '  urtext check [--diff]',
+  '                   Index, then report errors; exit 1 on any building revision',
+  '                   or unknown cross-file ref. --diff also fails on unmapped',
+  '                   working-tree changes.',
   '  urtext verify    Index + check, then run every clause oracle and record evidence;',
   '                   exit 1 on any failing clause.',
   '  urtext impact <spec-path>#<clause-id>',
   '                   List clauses and tasks affected if the clause changes.',
+  '  urtext map <spec-path>#<clause-id> <file>:<start>-<end> [note…]',
+  '                   Record a clause→code mapping, cross-verified against git diff.',
+  '  urtext ack <file>:<start>-<end> <reason…>',
+  '                   Acknowledge an intentionally unmapped change (reason required).',
+  '  urtext blame <file>:<line>',
+  '                   List the clauses constraining a code line.',
   '',
   'The registry lives at .urtext/registry.sqlite under the current directory.',
 ].join('\n')
+
+/** `<spec-path>#C<n>` → parts, or null. */
+const parseClauseTarget = (target: string | undefined): { specPath: string; clauseId: string } | null => {
+  const hash = target?.lastIndexOf('#') ?? -1
+  if (!target || hash <= 0) return null
+  const specPath = target.slice(0, hash)
+  const clauseId = target.slice(hash + 1)
+  return /^C\d+$/.test(clauseId) ? { specPath, clauseId } : null
+}
+
+/** `<file>:<start>-<end>` (or `<file>:<line>`) → parts, or null. */
+const parseRangeTarget = (
+  target: string | undefined
+): { filePath: string; lineStart: number; lineEnd: number } | null => {
+  const match = target?.match(/^(.+):(\d+)(?:-(\d+))?$/)
+  if (!match || match[1] === undefined || match[2] === undefined) return null
+  const lineStart = Number(match[2])
+  const lineEnd = match[3] === undefined ? lineStart : Number(match[3])
+  return lineStart >= 1 && lineEnd >= lineStart
+    ? { filePath: match[1], lineStart, lineEnd }
+    : null
+}
 
 const openWorkspaceRegistry = (workspaceRoot: string) => {
   const dir = join(workspaceRoot, '.urtext')
@@ -52,7 +90,15 @@ const run = (argv: string[]): number => {
     return command ? 0 : 1
   }
 
-  const COMMANDS: Record<string, true> = { index: true, check: true, verify: true, impact: true }
+  const COMMANDS: Record<string, true> = {
+    index: true,
+    check: true,
+    verify: true,
+    impact: true,
+    map: true,
+    ack: true,
+    blame: true,
+  }
   if (COMMANDS[command] !== true) {
     console.error(`Unknown command: ${command}\n\n${USAGE}`)
     return 1
@@ -61,15 +107,76 @@ const run = (argv: string[]): number => {
   const workspaceRoot = process.cwd()
   const db = openWorkspaceRegistry(workspaceRoot)
   try {
-    if (command === 'impact') {
-      const target = argv[1]
-      const hash = target?.lastIndexOf('#') ?? -1
-      const specPath = hash > 0 && target ? target.slice(0, hash) : ''
-      const clauseId = hash > 0 && target ? target.slice(hash + 1) : ''
-      if (!specPath || !/^C\d+$/.test(clauseId)) {
-        console.error(`Usage: urtext impact <spec-path>#<clause-id>\n\nGot: ${target ?? '(nothing)'}`)
+    if (command === 'map') {
+      const clause = parseClauseTarget(argv[1])
+      const range = parseRangeTarget(argv[2])
+      if (!clause || !range) {
+        console.error('Usage: urtext map <spec-path>#<clause-id> <file>:<start>-<end> [note…]')
         return 1
       }
+      scanWorkspace(db, workspaceRoot)
+      const note = argv.slice(3).join(' ')
+      const outcome = recordMapping(
+        db,
+        { ...clause, ...range, ...(note ? { note } : {}) },
+        workspaceRoot,
+        Date.now()
+      )
+      if (outcome.kind === 'rejected') {
+        console.error(`[${outcome.code}] ${outcome.message}`)
+        return 1
+      }
+      console.log(
+        `mapped ${clause.specPath}#${clause.clauseId} → ${range.filePath}:${range.lineStart}-${range.lineEnd} @ ${outcome.commitSha.slice(0, 7)}`
+      )
+      return 0
+    }
+
+    if (command === 'ack') {
+      const range = parseRangeTarget(argv[1])
+      const note = argv.slice(2).join(' ')
+      if (!range || !note) {
+        console.error('Usage: urtext ack <file>:<start>-<end> <reason…> (reason is required)')
+        return 1
+      }
+      const outcome = recordAck(db, { ...range, note }, workspaceRoot, Date.now())
+      if (outcome.kind === 'rejected') {
+        console.error(`[${outcome.code}] ${outcome.message}`)
+        return 1
+      }
+      console.log(
+        `acked ${range.filePath}:${range.lineStart}-${range.lineEnd} @ ${outcome.commitSha.slice(0, 7)} — ${note}`
+      )
+      return 0
+    }
+
+    if (command === 'blame') {
+      const range = parseRangeTarget(argv[1])
+      if (!range) {
+        console.error('Usage: urtext blame <file>:<line>')
+        return 1
+      }
+      const entries = blame(db, range.filePath, range.lineStart)
+      if (entries.length === 0) {
+        console.log(`No clause constrains ${range.filePath}:${range.lineStart}.`)
+        return 0
+      }
+      for (const entry of entries) {
+        const note = entry.note ? ` — ${entry.note}` : ''
+        console.log(
+          `  ${entry.specPath}#${entry.clauseId} (${entry.lineStart}-${entry.lineEnd} @ ${entry.commitSha.slice(0, 7)})${note}`
+        )
+      }
+      return 0
+    }
+
+    if (command === 'impact') {
+      const clause = parseClauseTarget(argv[1])
+      if (!clause) {
+        console.error(`Usage: urtext impact <spec-path>#<clause-id>\n\nGot: ${argv[1] ?? '(nothing)'}`)
+        return 1
+      }
+      const { specPath, clauseId } = clause
       scanWorkspace(db, workspaceRoot)
       const report = impact(db, { specPath, clauseId })
       if (report.affectedClauses.length === 0 && report.affectedTasks.length === 0) {
@@ -131,7 +238,24 @@ const run = (argv: string[]): number => {
       )
     }
 
-    const failures = buildingCount + report.linkErrors.length
+    let failures = buildingCount + report.linkErrors.length
+
+    // check --diff: unmapped working-tree changes are a validation failure
+    // (VISION P3 — source-of-truth flip is enforced, not prompt-disciplined).
+    if (command === 'check' && argv.includes('--diff')) {
+      const unmappedReport = detectUnmapped(db, workspaceRoot)
+      if ('error' in unmappedReport) {
+        console.error(`\n${unmappedReport.error}`)
+        return 1
+      }
+      for (const hunk of unmappedReport.unmapped) {
+        console.log(
+          `  ⚠ unmapped ${hunk.filePath}:${hunk.lineStart}-${hunk.lineEnd} — map to a clause, ack, or write back to spec`
+        )
+      }
+      failures += unmappedReport.unmapped.length
+    }
+
     if (command !== 'index' && failures > 0) {
       console.error(`\n${failures} validation failure(s).`)
       return 1

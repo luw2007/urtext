@@ -44,3 +44,17 @@ export {
   type VerifyReport,
   type ClauseVerdict,
 } from './verifier.js'
+export {
+  recordMapping,
+  recordAck,
+  detectUnmapped,
+  blame,
+  diffHunks,
+  ensureCodeMap,
+  CODE_MAP_SCHEMA,
+  type MappingClaim,
+  type MapOutcome,
+  type DiffHunk,
+  type UnmappedReport,
+  type BlameEntry,
+} from './dwarf.js'

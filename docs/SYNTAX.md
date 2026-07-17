@@ -106,9 +106,20 @@ GFM 任务列表 + anchor 元数据，`clauses` 为多值字段：
 - 上游子句 text_hash 变更 → 反向闭包内依赖子句的既有证据打 `invalidated_at`
   （evidence 唯一可变列；作废不删除）。
 
+## DWARF：clause↔code 映射（`urtext map` / `ack` / `blame` / `check --diff`）
+
+- `clause_code_map` 落 `(kind, spec_path, clause_id, file_path, line_start,
+  line_end, commit_sha, note)`；`kind=clause` 是子句映射，`kind=ack` 是显式豁免。
+- **provenance 信 diff 不信自述**（DECISIONS D4）：`map`/`ack` 声称的范围必须与
+  当时真实 `git diff --unified=0 HEAD` 的 hunk 相交才落库，并记录当时 HEAD sha。
+- `check --diff` 归因每个工作区 hunk：命中**当前 HEAD** 的映射/ack，或落在
+  `specs/<feature>/*.md`（spec 回写即归因）→ 已归因；否则 `unmapped`，退出码 1。
+- `blame <file>:<line>` 反查约束该行的子句映射。
+- v0 边界：范围锚定 `(file, lines, commit_sha)`，后续编辑造成的行漂移暂不重锚。
+
 ## v0 边界（后续版本处理）
 
 - anchor 值不含空格（whitespace 分词，v1 再评估引号转义）。
 - 设计稿引用（Figma）、demo 快照、visual/interaction oracle：VISION P7 范畴，v1 扩展
   `oracle` kind 与 `refs` 目标类型，不改本文既有语法。
-- DWARF 映射（clause↔code）不在 v0 语法内，注册表 schema 已为其预留修订链。
+- DWARF 映射行漂移重锚（后续编辑移动已映射代码行时自动跟随）不在 v0，见上节 v0 边界。
