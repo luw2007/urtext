@@ -114,7 +114,7 @@ describe('adjudicate (risk-tier gate)', () => {
     auditAgree('C001')
     const report = adjudicate(db)
     expect(report.overall).toBe('human')
-    expect(report.decisions[0]?.reasons).toContain('high-risk (P5: code-level human review)')
+    expect(report.decisions[0]?.reasons).toContain('high-risk: needs human code review — `urtext review` (P5)')
   })
 
   test('unaudited evidence never auto-passes (D3: disagreement never silent)', () => {

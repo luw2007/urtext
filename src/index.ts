@@ -78,3 +78,13 @@ export {
   type ClauseDecision,
   type GateReport,
 } from './gate.js'
+export {
+  recordReview,
+  reviewsAtHead,
+  currentHead,
+  ensureReviewLedger,
+  REVIEW_SCHEMA,
+  type ReviewDecision,
+  type ReviewInput,
+  type ReviewOutcome,
+} from './review.js'

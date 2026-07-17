@@ -50,10 +50,23 @@ clause/checklist 语法、不可变修订链注册表、oracle runner
 
 独立价值：人工量收敛到高危与分歧。
 
-## M5 unsafe lane + 多模态 oracle
+## M5a unsafe lane（已完成 ✅）
 
-- `risk:high` 子句强制人工代码级审查的工作流接口。
+- `risk:high` 子句强制人工代码级审查工作流：`urtext review --approve|--reject`
+  记录人工裁决，绑定当时 HEAD sha（HEAD 变更即失效须重审）；gate 据此放行或
+  阻断高危子句。证据全绿也不自动通过——代码是唯一可 review 的事实（VISION P5）。
+  审查记录持久落库（Decision ledger 种子）。
+
+验收（已达成）：C013 绑定 tests/review.test.ts 全绿；自举单元 13 子句
+12 pass / 1 pending manual / exit 0。
+
+独立价值：高危路径不再死锁，人工审查进入可追溯工作流。
+
+## M5b 多模态 oracle（v1，按 SYNTAX v0 边界推迟）
+
 - visual（截图 diff 对设计稿）/ interaction（demo 回放）oracle kind。
+- 需截图 diff / demo 回放运行时；与 P8 serverless 边界冲突，留待 v1 扩展
+  `oracle` kind 与 `refs` 目标类型，不改既有语法（SYNTAX.md v0 边界已声明）。
 
 ## 种子验证策略（贯穿 M2-M4）
 

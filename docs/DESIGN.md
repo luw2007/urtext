@@ -17,8 +17,8 @@
 | 3 | 验证器 | oracle 执行 → 证据落库 → 完成率 | ✅ `urtext verify` |
 | 4 | Linker | refs 建图、stale 传播、`urtext impact` | ✅ `urtext impact` |
 | 5 | DWARF | clause↔code↔evidence 映射、unmapped change 检测 | ✅ `urtext map/ack/blame`, `check --diff` |
-| 6 | 裁决层 | 风险分级触发人工、跨模型元验证 | ✅ `urtext audit/gate` |
-| 7 | 记忆层 | Decision/ADR 沉淀 | 里程碑 +3 |
+| 6 | 裁决层 | 风险分级触发人工、跨模型元验证、unsafe lane 人工审查 | ✅ `urtext audit/gate/review` |
+| 7 | 记忆层 | Decision/ADR 沉淀 | ◑ review 记录持久落库（种子） |
 
 ## 关键设计决策（沉淀自奠基讨论，不可回退）
 

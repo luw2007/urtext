@@ -131,6 +131,11 @@ GFM 任务列表 + anchor 元数据，`clauses` 为多值字段：
   其余（high/缺证据/失败/pending/disagree/unaudited/stale）→ human，附原因。
   `gate --diff` 额外把 unmapped 变更计入整体判定。任一子句需人工即整体人工，
   退出码 1。
+- **unsafe lane（VISION P5）**：`risk:high` 子句证据全绿也不 auto-pass——代码是
+  唯一可 review 的事实。`urtext review <spec>#<clause> --approve|--reject` 记录
+  人工代码审查，绑定当时 HEAD sha（`reviews(spec_path, clause_id, commit_sha,
+  decision, reviewer, note)`）；HEAD 变更即失效须重审。仅高危子句进入本车道；
+  gate 见 approve 且其余条件满足才放行，`reject` 或无审查保持 human。
 
 ## v0 边界（后续版本处理）
 

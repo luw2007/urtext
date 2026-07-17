@@ -10,3 +10,5 @@
     clause_code_map、diff 交叉验证的 map/ack、check --diff unmapped 检测、urtext blame。
 - [x] T006 元验证协议与风险分级裁决门 <!-- role:coder depends:T005 gate:true clauses:C011,C012 -->
     audit_verdicts、异源 export/import 覆盖率、gate 聚合 evidence/audit/stale/unmapped。
+- [x] T007 unsafe lane：高危子句人工代码审查工作流 <!-- role:coder depends:T006 gate:true clauses:C013 -->
+    reviews 表、review --approve/--reject 绑定 HEAD、gate 接入 review 放行/阻断高危子句。

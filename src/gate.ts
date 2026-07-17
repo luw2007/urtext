@@ -18,6 +18,7 @@
 import type { Database } from 'better-sqlite3'
 
 import { coverage } from './audit.js'
+import { reviewsAtHead } from './review.js'
 import { ensureEvidenceLedger } from './verifier.js'
 
 export type Decision = 'auto-pass' | 'human'
@@ -30,6 +31,8 @@ export interface ClauseDecision {
   evidenceVerdict: 'pass' | 'fail' | 'pending' | 'missing'
   auditVerdict: 'agree' | 'disagree' | 'unaudited'
   stale: boolean
+  /** Human code-review status for high-risk clauses at the current HEAD. */
+  reviewStatus: 'approved' | 'rejected' | 'none' | 'n/a'
   decision: Decision
   /** Why this clause needs a human; empty for auto-pass. */
   reasons: string[]
@@ -97,14 +100,18 @@ const evidenceByClause = (db: Database): Map<string, EvidenceState> => {
 /**
  * Adjudicate every live clause and roll up an overall merge verdict.
  * `unmappedCount` comes from the caller's real-diff scan (0 when unchecked).
+ * `headSha`, when given, activates the unsafe lane: a high-risk clause with
+ * an `approve` review at that commit is cleared for auto-pass; a `reject` or
+ * missing review keeps it human.
  */
-export const adjudicate = (db: Database, unmappedCount = 0): GateReport => {
+export const adjudicate = (db: Database, unmappedCount = 0, headSha?: string): GateReport => {
   const evidence = evidenceByClause(db)
   const audits = coverage(db)
   const auditByClause = new Map<string, 'agree' | 'disagree'>()
   for (const row of audits.rows) {
     if (row.auditVerdict) auditByClause.set(`${row.specPath}#${row.clauseId}`, row.auditVerdict)
   }
+  const reviews = headSha ? reviewsAtHead(db, headSha) : new Map<string, 'approve' | 'reject'>()
 
   const decisions: ClauseDecision[] = []
   for (const clause of liveClauses(db)) {
@@ -115,7 +122,15 @@ export const adjudicate = (db: Database, unmappedCount = 0): GateReport => {
     const auditVerdict = auditByClause.get(key) ?? 'unaudited'
 
     const reasons: string[] = []
-    if (clause.risk === 'high') reasons.push('high-risk (P5: code-level human review)')
+    // Unsafe lane (P5): a high-risk clause needs a human code-review approval
+    // at the current HEAD; evidence alone never clears it.
+    let reviewStatus: ClauseDecision['reviewStatus'] = 'n/a'
+    if (clause.risk === 'high') {
+      const review = reviews.get(key)
+      reviewStatus = review === 'approve' ? 'approved' : review === 'reject' ? 'rejected' : 'none'
+      if (reviewStatus === 'rejected') reasons.push('high-risk: human code review REJECTED (P5)')
+      else if (reviewStatus === 'none') reasons.push('high-risk: needs human code review — `urtext review` (P5)')
+    }
     if (evidenceVerdict === 'missing') reasons.push('no evidence — run `urtext verify`')
     else if (evidenceVerdict === 'fail') reasons.push('evidence failing')
     else if (evidenceVerdict === 'pending') reasons.push('evidence pending (manual oracle unadjudicated)')
@@ -131,6 +146,7 @@ export const adjudicate = (db: Database, unmappedCount = 0): GateReport => {
       evidenceVerdict,
       auditVerdict,
       stale,
+      reviewStatus,
       decision: reasons.length === 0 ? 'auto-pass' : 'human',
       reasons,
     })

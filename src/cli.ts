@@ -23,6 +23,7 @@
  * Git-native and serverless: no daemon, no workspace registration (VISION P8).
  */
 
+import { spawnSync } from 'node:child_process'
 import { mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -34,6 +35,7 @@ import { adjudicate } from './gate.js'
 import { impact } from './linker.js'
 import { openRegistry } from './registry.js'
 import { scanWorkspace } from './scanner.js'
+import { currentHead, recordReview } from './review.js'
 import { verifyWorkspace } from './verifier.js'
 
 const USAGE = [
@@ -59,9 +61,20 @@ const USAGE = [
   '  urtext gate [--diff]',
   '                   Risk-tier adjudication; --diff also counts unmapped changes.',
   '                   exit 1 when any clause needs a human.',
+  '  urtext review <spec-path>#<clause-id> --approve|--reject [note…]',
+  '                   Record a human code review for a high-risk clause (unsafe lane).',
   '',
   'The registry lives at .urtext/registry.sqlite under the current directory.',
 ].join('\n')
+
+/** Reviewer identity for the audit trail: URTEXT_REVIEWER, else git user, else $USER. */
+const reviewerName = (): string => {
+  const fromEnv = process.env.URTEXT_REVIEWER
+  if (fromEnv) return fromEnv
+  const gitUser = spawnSync('git', ['config', 'user.name'], { encoding: 'utf8' })
+  const name = gitUser.status === 0 ? gitUser.stdout.trim() : ''
+  return name || process.env.USER || 'unknown'
+}
 
 /** `<spec-path>#C<n>` → parts, or null. */
 const parseClauseTarget = (target: string | undefined): { specPath: string; clauseId: string } | null => {
@@ -130,6 +143,7 @@ const run = (argv: string[]): number => {
     blame: true,
     audit: true,
     gate: true,
+    review: true,
   }
   if (COMMANDS[command] !== true) {
     console.error(`Unknown command: ${command}\n\n${USAGE}`)
@@ -185,7 +199,7 @@ const run = (argv: string[]): number => {
         }
         unmappedCount = unmappedReport.unmapped.length
       }
-      const report = adjudicate(db, unmappedCount)
+      const report = adjudicate(db, unmappedCount, currentHead(workspaceRoot) ?? undefined)
       for (const decision of report.decisions) {
         const marker = decision.decision === 'auto-pass' ? '✓' : '⊗'
         const risk = decision.risk === 'high' ? ' [high]' : ''
@@ -195,6 +209,32 @@ const run = (argv: string[]): number => {
       console.log(`\noverall: ${report.overall}`)
       for (const reason of report.reasons) console.log(`  · ${reason}`)
       return report.overall === 'auto-pass' ? 0 : 1
+    }
+
+    if (command === 'review') {
+      const clause = parseClauseTarget(argv[1])
+      const mode = argv[2]
+      const decision = mode === '--approve' ? 'approve' : mode === '--reject' ? 'reject' : null
+      const note = argv.slice(3).join(' ')
+      if (!clause || decision === null) {
+        console.error('Usage: urtext review <spec-path>#<clause-id> --approve|--reject [note…]')
+        return 1
+      }
+      scanWorkspace(db, workspaceRoot)
+      const outcome = recordReview(
+        db,
+        { ...clause, decision, reviewer: reviewerName(), ...(note ? { note } : {}) },
+        workspaceRoot,
+        Date.now()
+      )
+      if (outcome.kind === 'rejected') {
+        console.error(`[${outcome.code}] ${outcome.message}`)
+        return 1
+      }
+      console.log(
+        `${decision === 'approve' ? 'approved' : 'rejected'} ${clause.specPath}#${clause.clauseId} @ ${outcome.commitSha.slice(0, 7)} by ${reviewerName()}`
+      )
+      return 0
     }
 
     if (command === 'map') {
