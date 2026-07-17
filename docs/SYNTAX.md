@@ -136,6 +136,13 @@ GFM 任务列表 + anchor 元数据，`clauses` 为多值字段：
   人工代码审查，绑定当时 HEAD sha（`reviews(spec_path, clause_id, commit_sha,
   decision, reviewer, note)`）；HEAD 变更即失效须重审。仅高危子句进入本车道；
   gate 见 approve 且其余条件满足才放行，`reject` 或无审查保持 human。
+- **记忆层 Decision ledger（DESIGN §7）**：`manual` oracle 子句永远 pending，
+  只有人工裁决能判定。`urtext decide <spec>#<clause> --pass|--fail` 记录裁决，
+  绑定当时 HEAD sha（`decisions(spec_path, clause_id, commit_sha, verdict,
+  decider, note)`）；HEAD 变更即失效。仅 manual 子句可裁决——runnable oracle
+  子句由客观证据判定（守 P2）。gate 见当前 HEAD 的 pass Decision 即放行该 manual
+  子句；manual 子句不参与 meta-audit（人工裁决即 ground truth）。`urtext decisions`
+  按时间倒序列出 ledger。
 
 ## v0 边界（后续版本处理）
 

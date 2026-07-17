@@ -18,6 +18,7 @@
 import type { Database } from 'better-sqlite3'
 
 import { coverage } from './audit.js'
+import { decisionsAtHead, type DecisionVerdict } from './decision.js'
 import { reviewsAtHead } from './review.js'
 import { ensureEvidenceLedger } from './verifier.js'
 
@@ -33,6 +34,8 @@ export interface ClauseDecision {
   stale: boolean
   /** Human code-review status for high-risk clauses at the current HEAD. */
   reviewStatus: 'approved' | 'rejected' | 'none' | 'n/a'
+  /** Human decision for manual-oracle clauses at the current HEAD. */
+  decisionVerdict: 'pass' | 'fail' | 'none' | 'n/a'
   decision: Decision
   /** Why this clause needs a human; empty for auto-pass. */
   reasons: string[]
@@ -51,13 +54,14 @@ interface LiveClauseRow {
   clause_id: string
   title: string
   risk: 'low' | 'high'
+  oracle_kind: string | null
 }
 
 /** Every clause of the latest live (non-tombstoned) revision per spec file. */
 const liveClauses = (db: Database): LiveClauseRow[] =>
   db
     .prepare(
-      `SELECT c.spec_path, c.clause_id, c.title, c.risk
+      `SELECT c.spec_path, c.clause_id, c.title, c.risk, c.oracle_kind
        FROM clauses c
        JOIN (
          SELECT spec_path, MAX(revision) AS revision
@@ -112,6 +116,7 @@ export const adjudicate = (db: Database, unmappedCount = 0, headSha?: string): G
     if (row.auditVerdict) auditByClause.set(`${row.specPath}#${row.clauseId}`, row.auditVerdict)
   }
   const reviews = headSha ? reviewsAtHead(db, headSha) : new Map<string, 'approve' | 'reject'>()
+  const humanDecisions = headSha ? decisionsAtHead(db, headSha) : new Map<string, DecisionVerdict>()
 
   const decisions: ClauseDecision[] = []
   for (const clause of liveClauses(db)) {
@@ -120,6 +125,7 @@ export const adjudicate = (db: Database, unmappedCount = 0, headSha?: string): G
     const evidenceVerdict = state?.verdict ?? 'missing'
     const stale = state?.stale ?? false
     const auditVerdict = auditByClause.get(key) ?? 'unaudited'
+    const isManual = clause.oracle_kind === 'manual'
 
     const reasons: string[] = []
     // Unsafe lane (P5): a high-risk clause needs a human code-review approval
@@ -131,12 +137,31 @@ export const adjudicate = (db: Database, unmappedCount = 0, headSha?: string): G
       if (reviewStatus === 'rejected') reasons.push('high-risk: human code review REJECTED (P5)')
       else if (reviewStatus === 'none') reasons.push('high-risk: needs human code review — `urtext review` (P5)')
     }
+
+    // Memory layer (DESIGN §7): a manual clause is `pending` forever; only a
+    // human decision at the current HEAD resolves it. A `pass` decision clears
+    // the clause; `fail` blocks; no decision keeps it pending.
+    let decisionVerdict: ClauseDecision['decisionVerdict'] = 'n/a'
+    if (isManual) {
+      const decided = humanDecisions.get(key)
+      decisionVerdict = decided ?? 'none'
+    }
+
     if (evidenceVerdict === 'missing') reasons.push('no evidence — run `urtext verify`')
     else if (evidenceVerdict === 'fail') reasons.push('evidence failing')
-    else if (evidenceVerdict === 'pending') reasons.push('evidence pending (manual oracle unadjudicated)')
+    else if (evidenceVerdict === 'pending') {
+      // pending ⟺ manual oracle (only manual yields pending).
+      if (decisionVerdict === 'fail') reasons.push('manual clause decided FAIL (P4: human adjudication)')
+      else if (decisionVerdict !== 'pass') reasons.push('manual clause undecided — `urtext decide`')
+    }
     if (stale) reasons.push('stale — upstream changed, re-verify required')
-    if (auditVerdict === 'disagree') reasons.push('meta-audit disagreement (D3)')
-    else if (auditVerdict === 'unaudited') reasons.push('no meta-audit verdict')
+    // Meta-audit applies only to runnable oracles (D3: audit judges whether
+    // objective evidence covers the clause). A manual clause's ground truth is
+    // the human decision, not a cross-model read — it needs no meta-audit.
+    if (!isManual) {
+      if (auditVerdict === 'disagree') reasons.push('meta-audit disagreement (D3)')
+      else if (auditVerdict === 'unaudited') reasons.push('no meta-audit verdict')
+    }
 
     decisions.push({
       specPath: clause.spec_path,
@@ -147,6 +172,7 @@ export const adjudicate = (db: Database, unmappedCount = 0, headSha?: string): G
       auditVerdict,
       stale,
       reviewStatus,
+      decisionVerdict,
       decision: reasons.length === 0 ? 'auto-pass' : 'human',
       reasons,
     })

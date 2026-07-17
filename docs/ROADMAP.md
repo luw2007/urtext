@@ -62,6 +62,20 @@ clause/checklist 语法、不可变修订链注册表、oracle runner
 
 独立价值：高危路径不再死锁，人工审查进入可追溯工作流。
 
+## M6 记忆层：Decision ledger（已完成 ✅）
+
+- manual oracle 子句永远 pending（无可运行 oracle 判定），此前在 gate 里死锁；
+  `urtext decide --pass|--fail` 记录人工裁决，绑定当时 HEAD sha（HEAD 变更即失效），
+  持久落 `decisions` 表（DESIGN §7）。仅 manual 子句可裁决——runnable oracle 由
+  客观证据判定，守 P2。`urtext decisions` 查询 Decision ledger。
+- gate 接入：manual 子句见当前 HEAD 的 pass Decision 即放行；manual 子句不参与
+  跨模型 meta-audit（人工裁决即 ground truth，D3 的 audit 只审 runnable 证据覆盖）。
+
+验收（已达成）：C014 绑定 tests/decision.test.ts 全绿；自举单元 14 子句全部可判定。
+
+独立价值：VISION P4「人工裁决落决策记录」闭环；四类人工触点（unmapped-ack、
+meta-audit disagree、high-risk review、manual decide）全部有持久 Decision 落库。
+
 ## M5b 多模态 oracle（v1，按 SYNTAX v0 边界推迟）
 
 - visual（截图 diff 对设计稿）/ interaction（demo 回放）oracle kind。

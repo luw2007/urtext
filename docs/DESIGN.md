@@ -18,7 +18,7 @@
 | 4 | Linker | refs 建图、stale 传播、`urtext impact` | ✅ `urtext impact` |
 | 5 | DWARF | clause↔code↔evidence 映射、unmapped change 检测 | ✅ `urtext map/ack/blame`, `check --diff` |
 | 6 | 裁决层 | 风险分级触发人工、跨模型元验证、unsafe lane 人工审查 | ✅ `urtext audit/gate/review` |
-| 7 | 记忆层 | Decision/ADR 沉淀 | ◑ review 记录持久落库（种子） |
+| 7 | 记忆层 | Decision/ADR 沉淀 | ✅ `urtext decide/decisions` |
 
 ## 关键设计决策（沉淀自奠基讨论，不可回退）
 
@@ -41,7 +41,7 @@
 | `manual` | 不执行 | pending（等待人工，计入 manual 占比） |
 | `metric` | v0 不支持 | fail（显式，不静默跳过） |
 
-退出码：任一 fail → 1；pending 不阻塞（人工裁决在后续里程碑接 Decision）。
+退出码：任一 fail → 1；pending 不阻塞。manual 子句的人工裁决经 `urtext decide` 落 Decision ledger（记忆层）。
 证据表：`evidence(spec_path, revision, clause_id, oracle_kind, oracle_ref, verdict, exit_code, output, created_at)`，append-only。
 
 ## 自举闭环（dogfood）

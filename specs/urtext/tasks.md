@@ -12,3 +12,7 @@
     audit_verdicts、异源 export/import 覆盖率、gate 聚合 evidence/audit/stale/unmapped。
 - [x] T007 unsafe lane：高危子句人工代码审查工作流 <!-- role:coder depends:T006 gate:true clauses:C013 -->
     reviews 表、review --approve/--reject 绑定 HEAD、gate 接入 review 放行/阻断高危子句。
+- [x] T008 记忆层：manual 子句 Decision ledger <!-- role:coder depends:T007 gate:true clauses:C014 -->
+    decisions 表、decide --pass/--fail 绑定 HEAD、gate 接入 Decision 放行 manual 子句、urtext decisions 查询。
+- [x] T009 文档 wiki 与命令参考一致性 oracle <!-- role:coder depends:T008 clauses:C015 -->
+    docs/wiki/ 三层内容；scripts/oracle-wiki.sh command-coverage 对 cli.ts 命令集 grep-presence 判定。

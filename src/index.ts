@@ -88,3 +88,14 @@ export {
   type ReviewInput,
   type ReviewOutcome,
 } from './review.js'
+export {
+  recordDecision,
+  decisionsAtHead,
+  listDecisions,
+  ensureDecisionLedger,
+  DECISION_SCHEMA,
+  type DecisionVerdict,
+  type DecisionInput,
+  type DecisionOutcome,
+  type DecisionRecord,
+} from './decision.js'

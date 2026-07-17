@@ -31,6 +31,7 @@ import DatabaseConstructor from 'better-sqlite3'
 
 import { coverage, exportRequest, importVerdicts, type AuditVerdictInput } from './audit.js'
 import { blame, detectUnmapped, recordAck, recordMapping } from './dwarf.js'
+import { listDecisions, recordDecision } from './decision.js'
 import { adjudicate } from './gate.js'
 import { impact } from './linker.js'
 import { openRegistry } from './registry.js'
@@ -63,6 +64,9 @@ const USAGE = [
   '                   exit 1 when any clause needs a human.',
   '  urtext review <spec-path>#<clause-id> --approve|--reject [note…]',
   '                   Record a human code review for a high-risk clause (unsafe lane).',
+  '  urtext decide <spec-path>#<clause-id> --pass|--fail [note…]',
+  '                   Record a human decision for a manual-oracle clause (Decision ledger).',
+  '  urtext decisions List the Decision ledger, newest first.',
   '',
   'The registry lives at .urtext/registry.sqlite under the current directory.',
 ].join('\n')
@@ -144,6 +148,8 @@ const run = (argv: string[]): number => {
     audit: true,
     gate: true,
     review: true,
+    decide: true,
+    decisions: true,
   }
   if (COMMANDS[command] !== true) {
     console.error(`Unknown command: ${command}\n\n${USAGE}`)
@@ -234,6 +240,48 @@ const run = (argv: string[]): number => {
       console.log(
         `${decision === 'approve' ? 'approved' : 'rejected'} ${clause.specPath}#${clause.clauseId} @ ${outcome.commitSha.slice(0, 7)} by ${reviewerName()}`
       )
+      return 0
+    }
+
+    if (command === 'decide') {
+      const clause = parseClauseTarget(argv[1])
+      const mode = argv[2]
+      const verdict = mode === '--pass' ? 'pass' : mode === '--fail' ? 'fail' : null
+      const note = argv.slice(3).join(' ')
+      if (!clause || verdict === null) {
+        console.error('Usage: urtext decide <spec-path>#<clause-id> --pass|--fail [note…]')
+        return 1
+      }
+      scanWorkspace(db, workspaceRoot)
+      const outcome = recordDecision(
+        db,
+        { ...clause, verdict, decider: reviewerName(), ...(note ? { note } : {}) },
+        workspaceRoot,
+        Date.now()
+      )
+      if (outcome.kind === 'rejected') {
+        console.error(`[${outcome.code}] ${outcome.message}`)
+        return 1
+      }
+      console.log(
+        `decided ${clause.specPath}#${clause.clauseId} → ${verdict} @ ${outcome.commitSha.slice(0, 7)} by ${reviewerName()}`
+      )
+      return 0
+    }
+
+    if (command === 'decisions') {
+      const records = listDecisions(db)
+      if (records.length === 0) {
+        console.log('No decisions recorded.')
+        return 0
+      }
+      for (const record of records) {
+        const when = new Date(record.createdAt).toISOString().slice(0, 19).replace('T', ' ')
+        const note = record.note ? ` — ${record.note}` : ''
+        console.log(
+          `  ${when} ${record.specPath}#${record.clauseId} → ${record.verdict} @ ${record.commitSha.slice(0, 7)} by ${record.decider}${note}`
+        )
+      }
       return 0
     }
 
