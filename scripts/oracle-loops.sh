@@ -54,6 +54,10 @@ case "${1:?usage: oracle-loops.sh <check-name>}" in
     grep -q '车道纪律' "$SKILL" && grep -q '热点' "$SKILL" ;;
   unmapped-gate)
     grep -q 'manual-ack' "$SKILL" ;;
+  referee-run)
+    grep -q "Never confirm something you couldn't run" "$HUNT_CORE" \
+      && grep -q 'FULL VERIFICATION GATE' "$FIX_CORE" \
+      && grep -q 'No run, no behavioral finding' "$AUDIT_CORE" ;;
   areas-aligned)
     node --input-type=module <<'NODE'
 import { existsSync, readFileSync } from "node:fs";

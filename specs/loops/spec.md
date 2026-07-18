@@ -9,11 +9,11 @@
 
 ## 总则
 
-### C101 裁判永远是运行结果 <!-- oracle:manual risk:high -->
+### C101 裁判永远是运行结果 <!-- oracle:cmd:scripts/oracle-loops.sh%20referee-run risk:high -->
 
 每个 AI 产出的裁判是"运行结果 vs 规范条文"，永远不是另一个 LLM 的意见。
 任何 loop 引入"LLM 打分即通过"的路径都是对本条的违反。
-（人工复核：.claude/checklists/sprint-audit.md）
+（自动守卫：三套 loop core 均载"运行结果即裁判、无运行不判定"承重规则文本；纵深人工复核见 .claude/checklists/sprint-audit.md）
 
 ### C102 信任边界在集成点 <!-- oracle:cmd:scripts/oracle-loops.sh%20trust-boundary risk:high -->
 
