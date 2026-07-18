@@ -31,7 +31,7 @@ import DatabaseConstructor from 'better-sqlite3'
 
 import { coverage as auditCoverage, exportRequest, importVerdicts, type AuditVerdictInput } from './audit.js'
 import { listDecisions, recordDecision } from './decision.js'
-import { cluster, coverage as distillCoverage, discover, distillUsage, promote, validate } from './distill.js'
+import { baseline, baselineValidation, cluster, coverage as distillCoverage, discover, distillUsage, promote, runBaseline, validate } from './distill.js'
 import { blame, detectUnmapped, recordAck, recordMapping } from './dwarf.js'
 import { adjudicate } from './gate.js'
 import { impact } from './linker.js'
@@ -173,6 +173,25 @@ const run = (argv: string[]): number => {
         console.log(JSON.stringify(cluster(facts, workspaceRoot), null, 2))
         return 0
       }
+      if (mode === 'baseline') {
+        const domains = cluster(facts, workspaceRoot)
+        const manifest = baseline(facts, domains, workspaceRoot)
+        if (argv[2] === 'validate') {
+          const report = baselineValidation(facts, domains, manifest)
+          for (const error of report.errors) console.error(`  ✗ ${error}`)
+          if (report.errors.length > 0) return 1
+          console.log(`Baseline is valid: ${manifest.groups.length} executable groups, ${manifest.gaps.length} gaps.`)
+          return 0
+        }
+        if (argv[2] === 'run') {
+          const evidence = runBaseline(manifest, workspaceRoot)
+          const failures = evidence.groups.filter((group) => group.verdict === 'fail')
+          console.log(`${evidence.groups.length - failures.length} pass, ${failures.length} fail`)
+          return failures.length === 0 ? 0 : 1
+        }
+        console.log(JSON.stringify(manifest, null, 2))
+        return 0
+      }
       if (mode === 'coverage') {
         const report = distillCoverage(facts, workspaceRoot)
         for (const gap of report.missingEvidence) {
@@ -214,7 +233,7 @@ const run = (argv: string[]): number => {
           return 1
         }
       }
-      console.error('Usage: urtext distill <discover|coverage|validate|cluster|promote>')
+      console.error('Usage: urtext distill <discover|coverage|validate|cluster|baseline [validate|run]|promote>')
       return 1
     }
     if (command === 'audit') {

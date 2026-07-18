@@ -141,6 +141,14 @@ domain bucket. Buckets reflect path structure, not product intent; fallback
 `platform/<top-level>` buckets are explicit ownership rather than an inferred domain.
 The command does not create or modify canonical specs.
 
+### `urtext distill baseline [validate|run]`
+Write `.urtext/distill/baseline.json`, grouping every observed test into a direct
+executable command within its structural domain. The baseline only asserts that
+existing tests are evidence at the recorded HEAD; it does not infer their product
+meaning. `validate` checks exact-once test assignment, HEAD consistency, and command
+presence. `run` executes those groups and writes `baseline-evidence.json`; source and
+contract files in domains without tests remain explicit gaps.
+
 ### `urtext distill promote <draft> --target <feature> --confirm`
 Promote a current staged draft after one feature-level acceptance. The command
 requires a draft beneath `.urtext/distill/spec-drafts/`, a matching facts-manifest
@@ -168,5 +176,7 @@ authoritative):
 | `decide` | unknown or non-manual clause, bad arguments, or git failure |
 | `distill promote` | missing `--confirm`/target, invalid or stale draft, invalid distill declaration, duplicate target clause ID, or invalid path |
 | `distill cluster` | filesystem write failure |
+| `distill baseline validate` | stale/mismatched inventory, test assignment, or missing command |
+| `distill baseline run` | any generated test group fails |
 
 All other commands exit 0 on success.

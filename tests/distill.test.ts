@@ -5,7 +5,7 @@ import { join } from 'node:path'
 
 import { afterEach, describe, expect, test } from 'vitest'
 
-import { cluster, coverage, discover, distillUsage, promote, validate } from '../src/distill.js'
+import { baseline, baselineValidation, cluster, coverage, discover, distillUsage, promote, validate } from '../src/distill.js'
 
 const tempDirs: string[] = []
 
@@ -23,6 +23,7 @@ const makeWorkspace = (): string => {
   writeFileSync(join(root, 'cmd/server/main.go'), 'package main\n')
   writeFileSync(join(root, 'internal/payments/charge.go'), 'package payments\n')
   writeFileSync(join(root, 'internal/payments/charge_test.go'), 'package payments\n')
+  writeFileSync(join(root, 'cmd/server/main_test.go'), 'package main\n')
   writeFileSync(
     join(root, 'specs/payments/spec.md'),
     [
@@ -47,12 +48,12 @@ const makeWorkspace = (): string => {
 afterEach(() => {
   for (const dir of tempDirs.splice(0)) rmSync(dir, { force: true, recursive: true })
 })
-
 test('documents every distill subcommand and its output boundary', () => {
   expect(distillUsage()).toContain('urtext distill discover')
   expect(distillUsage()).toContain('urtext distill coverage')
   expect(distillUsage()).toContain('urtext distill validate')
   expect(distillUsage()).toContain('urtext distill cluster')
+  expect(distillUsage()).toContain('urtext distill baseline')
   expect(distillUsage()).toContain('urtext distill promote')
   expect(distillUsage()).toContain('without modifying canonical specs')
 })
@@ -71,7 +72,7 @@ describe('codebase fact distillation', () => {
       'src/charge.ts',
       'src/cli.ts',
     ])
-    expect(manifest.observed.testFiles).toEqual(['internal/payments/charge_test.go', 'tests/charge.test.ts'])
+    expect(manifest.observed.testFiles).toEqual(['cmd/server/main_test.go', 'internal/payments/charge_test.go', 'tests/charge.test.ts'])
     expect(manifest.observed.contractFiles).toEqual([])
     expect(manifest.observed.entrypoints).toEqual(['cmd/server/main.go', 'src/cli.ts'])
 
@@ -98,6 +99,7 @@ describe('codebase fact distillation', () => {
     expect(report.missingEvidence).toEqual([{ feature: 'specs/payments/spec.md', path: 'src/missing.ts' }])
     expect(report.unownedObservedFiles).toEqual([
       'cmd/server/main.go',
+      'cmd/server/main_test.go',
       'internal/payments/charge.go',
       'internal/payments/charge_test.go',
       'src/cli.ts',
@@ -193,6 +195,50 @@ describe('codebase fact distillation', () => {
     })
     expect(manifest.domains.find((domain) => domain.id === 'platform/misc')?.contractFiles).toEqual(['misc/config.yaml'])
     expect(readFileSync(join(root, '.urtext/distill/domains.json'), 'utf8')).toContain('urtext-distill-domains/v1')
+  })
+
+  test('groups every observed test into executable baseline clauses and reports untested domains as gaps', () => {
+    const root = makeWorkspace()
+    mkdirSync(join(root, 'web/src/modules/payments'), { recursive: true })
+    writeFileSync(join(root, 'web/src/modules/payments/payment.test.ts'), 'export const payment = true\n')
+    const facts = discover(root)
+    const domains = cluster(facts, root)
+    const report = baseline(facts, domains, root)
+
+    expect(report.schema).toBe('urtext-distill-baseline/v1')
+    expect(report.groups).toEqual([
+      {
+        clauseId: 'C001',
+        command: ['go', 'test', './internal/payments'],
+        domain: 'payments',
+        id: 'payments-go-internal-payments',
+        testFiles: ['internal/payments/charge_test.go'],
+      },
+      {
+        clauseId: 'C002',
+        command: ['pnpm', '--dir', 'web', 'exec', 'vitest', 'run', 'src/modules/payments/payment.test.ts'],
+        domain: 'payments',
+        id: 'payments-ts-web-src-modules-payments',
+        testFiles: ['web/src/modules/payments/payment.test.ts'],
+      },
+      {
+        clauseId: 'C001',
+        command: ['npx', 'vitest', 'run', 'tests/charge.test.ts'],
+        domain: 'platform/tests',
+        id: 'platform-tests-ts-tests',
+        testFiles: ['tests/charge.test.ts'],
+      },
+      {
+        clauseId: 'C001',
+        command: ['go', 'test', './cmd/server'],
+        domain: 'server',
+        id: 'server-go-cmd-server',
+        testFiles: ['cmd/server/main_test.go'],
+      },
+    ])
+    expect(report.gaps).toEqual(['platform/src: src/charge.ts', 'platform/src: src/cli.ts'])
+    expect(readFileSync(join(root, '.urtext/distill/baseline/payments.md'), 'utf8')).toContain('## C001 Existing tests execute for payments')
+    expect(baselineValidation(facts, domains, report)).toEqual({ errors: [] })
   })
   test('promotes only observed low-risk runnable draft clauses after feature confirmation', () => {
     const root = makeWorkspace()

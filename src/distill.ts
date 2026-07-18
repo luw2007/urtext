@@ -1,6 +1,6 @@
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
-import { join, sep } from 'node:path'
+import { dirname, join, sep } from 'node:path'
 
 import { parseClauseFile, type ParsedClause } from './clause-parser.js'
 
@@ -50,6 +50,31 @@ export interface DomainManifest {
   workspaceHead: string | null
   domains: DomainCluster[]
   unclassified: string[]
+}
+
+export interface ObservedBaselineGroup {
+  id: string
+  clauseId: string
+  domain: string
+  command: string[]
+  testFiles: string[]
+}
+
+export interface ObservedBaseline {
+  schema: 'urtext-distill-baseline/v1'
+  workspaceHead: string | null
+  groups: ObservedBaselineGroup[]
+  gaps: string[]
+}
+
+export interface BaselineValidationReport {
+  errors: string[]
+}
+
+export interface BaselineEvidence {
+  schema: 'urtext-distill-baseline-evidence/v1'
+  workspaceHead: string | null
+  groups: { id: string; verdict: 'pass' | 'fail'; exitCode: number | null; output: string }[]
 }
 
 const toPosix = (path: string): string => path.split(sep).join('/')
@@ -210,6 +235,139 @@ export const cluster = (facts: DistillFacts, workspaceRoot?: string): DomainMani
   return manifest
 }
 
+const goToolchain = (workspaceRoot: string): string[] => {
+  try {
+    return /^go 1\.25(?:\.0)?$/m.test(readFileSync(join(workspaceRoot, 'go.mod'), 'utf8')) ? ['GOTOOLCHAIN=go1.25.0'] : []
+  } catch {
+    return []
+  }
+}
+
+const baselineGroupId = (domain: string, language: string, directory: string): string =>
+  `${domain.replace(/\//g, '-')}-${language}-${directory.replace(/^\.\//, '').replace(/\//g, '-')}`
+
+const commandFor = (testFiles: string[], workspaceRoot: string): string[] => {
+  const first = testFiles[0]!
+  if (first.endsWith('_test.go')) {
+    const directory = dirname(first)
+    return [...goToolchain(workspaceRoot), 'go', 'test', `./${directory}`]
+  }
+  if (first.startsWith('web/')) {
+    return ['pnpm', '--dir', 'web', 'exec', 'vitest', 'run', ...testFiles.map((path) => path.slice('web/'.length))]
+  }
+  return ['npx', 'vitest', 'run', ...testFiles]
+}
+
+const encodedCommand = (command: string[]): string =>
+  command[0]?.startsWith('GOTOOLCHAIN=') ? ['env', ...command].join('%20') : command.join('%20')
+
+const renderBaselineClauses = (domain: string, groups: ObservedBaselineGroup[]): string =>
+  [
+    `# Observed executable baseline: ${domain}`,
+    '',
+    '**Status**: Observed fact baseline — not product intent',
+    '',
+    ...groups.flatMap((group) => [
+      `## ${group.clauseId} Existing tests execute for ${domain} <!-- oracle:cmd:${encodedCommand(group.command)} -->`,
+      '',
+      `Given the recorded workspace HEAD,`,
+      `When ${group.testFiles.map((path) => `\`${path}\``).join(', ')} run,`,
+      'Then the command records their executable evidence without asserting their implied product behavior.',
+      '',
+      `**Confidence**: observed`,
+      `**Evidence**: ${group.testFiles.map((path) => `\`${path}\``).join(', ')}`,
+      '',
+    ]),
+  ].join('\n')
+
+export const baseline = (facts: DistillFacts, domains: DomainManifest, workspaceRoot?: string): ObservedBaseline => {
+  const root = workspaceRoot ?? process.cwd()
+  const groups: ObservedBaselineGroup[] = []
+  const domainsWithTests = new Set<string>()
+  for (const domain of domains.domains) {
+    const partitions = new Map<string, string[]>()
+    for (const testFile of domain.testFiles) {
+      const language = testFile.endsWith('_test.go') ? 'go' : 'ts'
+      const directory = language === 'go' ? dirname(testFile) : testFile.startsWith('web/') ? dirname(testFile) : dirname(testFile)
+      const key = `${language}:${directory}`
+      const files = partitions.get(key) ?? []
+      files.push(testFile)
+      partitions.set(key, files)
+    }
+    for (const [key, testFiles] of partitions) {
+      const [language, directory] = key.split(':') as [string, string]
+      const sortedFiles = testFiles.sort()
+      groups.push({
+        id: baselineGroupId(domain.id, language, directory),
+        clauseId: `C${String(groups.filter((group) => group.domain === domain.id).length + 1).padStart(3, '0')}`,
+        domain: domain.id,
+        command: commandFor(sortedFiles, root),
+        testFiles: sortedFiles,
+      })
+      domainsWithTests.add(domain.id)
+    }
+  }
+  const gaps = domains.domains
+    .filter((domain) => !domainsWithTests.has(domain.id))
+    .flatMap((domain) => [...domain.sourceFiles, ...domain.contractFiles].map((path) => `${domain.id}: ${path}`))
+    .sort()
+  const manifest: ObservedBaseline = {
+    schema: 'urtext-distill-baseline/v1',
+    workspaceHead: facts.workspaceHead,
+    groups: groups.sort((a, b) => a.id.localeCompare(b.id)),
+    gaps,
+  }
+  const outputDir = join(root, '.urtext/distill')
+  const baselineDir = join(outputDir, 'baseline')
+  mkdirSync(baselineDir, { recursive: true })
+  for (const domain of domains.domains) {
+    const domainGroups = manifest.groups.filter((group) => group.domain === domain.id)
+    if (domainGroups.length > 0) writeFileSync(join(baselineDir, `${domain.id.replace(/\//g, '__')}.md`), renderBaselineClauses(domain.id, domainGroups))
+  }
+  writeFileSync(join(outputDir, 'baseline.json'), `${JSON.stringify(manifest, null, 2)}\n`)
+  return manifest
+}
+
+export const baselineValidation = (
+  facts: DistillFacts,
+  domains: DomainManifest,
+  manifest: ObservedBaseline
+): BaselineValidationReport => {
+  const errors: string[] = []
+  if (facts.workspaceHead !== domains.workspaceHead || facts.workspaceHead !== manifest.workspaceHead) errors.push('workspace heads differ')
+  const expected = domains.domains.flatMap((domain) => domain.testFiles).sort()
+  const assigned = manifest.groups.flatMap((group) => group.testFiles).sort()
+  if (expected.length !== assigned.length || expected.some((path, index) => path !== assigned[index])) {
+    errors.push('observed tests are not assigned exactly once')
+  }
+  for (const group of manifest.groups) {
+    if (group.command.length === 0) errors.push(`${group.id} has no command`)
+  }
+  return { errors }
+}
+
+export const runBaseline = (manifest: ObservedBaseline, workspaceRoot: string): BaselineEvidence => {
+  const groups = manifest.groups.map((group) => {
+    const [maybeEnv, command, ...args] = group.command
+    const env = maybeEnv?.startsWith('GOTOOLCHAIN=') ? { ...process.env, GOTOOLCHAIN: maybeEnv.slice('GOTOOLCHAIN='.length) } : process.env
+    const result = spawnSync(maybeEnv?.startsWith('GOTOOLCHAIN=') ? command! : maybeEnv!, maybeEnv?.startsWith('GOTOOLCHAIN=') ? args : [command!, ...args], {
+      cwd: workspaceRoot,
+      encoding: 'utf8',
+      timeout: 300_000,
+      env,
+    })
+    return {
+      id: group.id,
+      verdict: result.status === 0 && !result.error ? ('pass' as const) : ('fail' as const),
+      exitCode: result.status,
+      output: `${result.stdout ?? ''}${result.stderr ?? ''}`.trim().slice(0, 4_000),
+    }
+  })
+  const evidence: BaselineEvidence = { schema: 'urtext-distill-baseline-evidence/v1', workspaceHead: manifest.workspaceHead, groups }
+  writeFileSync(join(workspaceRoot, '.urtext/distill/baseline-evidence.json'), `${JSON.stringify(evidence, null, 2)}\n`)
+  return evidence
+}
+
 export const coverage = (facts: DistillFacts, workspaceRoot?: string): CoverageReport => {
   const root = workspaceRoot ?? process.cwd()
   const observed = [...facts.observed.sourceFiles, ...facts.observed.testFiles]
@@ -363,6 +521,8 @@ export const distillUsage = (): string =>
     '                   Fail on missing declared evidence or test-oracle targets.',
     '  urtext distill cluster',
     '                   Write a deterministic domain inventory to .urtext/distill/domains.json without asserting behavior.',
+    '  urtext distill baseline [validate|run]',
+    '                   Write observed executable test groups to .urtext/distill/baseline.json; validate or run without modifying canonical specs.',
     '  urtext distill promote <draft> --target <feature> --confirm',
     '                   Promote only observed low-risk runnable draft clauses after one feature-level confirmation.'
   ].join('\n')
