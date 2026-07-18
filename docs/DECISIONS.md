@@ -66,3 +66,13 @@ The hunt coverage ledger had an empty `swept` object when the authorized ten-dom
 The UX numeric error-code reservation was dead: `grep -rn UX- src/` returned no consumers, while repository errors use string literal codes such as `missing_oracle`, `unknown_clause`, and `git_failed`. No parallel worker allocates a shared numeric namespace, so retaining the reservation would enforce a fictional constraint.
 
 The mechanism was removed coherently from four locations: the `ERROR_CODE_BLOCK` constant and per-worker `UX-…` prompt line, PREAMBLE rule 4 `RESERVED RANGES`, clause C304, and the `reserved-ranges` oracle case. The loop specification now contains 25 clauses and the oracle script contains 21 cases.
+
+## D10 ADR 0001 D6 concurrency conclusion: WAL race disproved
+
+This acknowledges the D6 risk from the ADR 0001 design, not repository decision D6 (Metaphor system). Parallel fix workers do not contend on one `.urtext/registry.sqlite` WAL file:
+
+1. Each worker receives a disjoint worktree path: `.claude/workflows/lib/fix-core.mjs` calls ``worktree.add(`${outDir}/wt-${cluster.key}`, base)``, so the cluster key separates worker directories.
+2. `.gitignore:3` excludes `.urtext/`. `git worktree add` therefore does not propagate the registry; each worktree creates a path-local `.urtext/registry.sqlite`, and SQLite WAL locks are scoped to that file path rather than crossing disjoint paths.
+3. `tests/registry.test.ts:15` opens `new DatabaseConstructor(':memory:')`, so registry tests do not lock any on-disk registry.
+
+These static facts are sufficient to disprove the shared-file contention premise. No concurrent stress test was added: this conclusion is limited to the path-isolated worker and in-memory test architecture documented above.

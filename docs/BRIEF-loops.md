@@ -21,9 +21,12 @@ urtext verify
 sh scripts/oracle-loops.sh shell-safety && echo GREEN
 bun build .claude/workflows/urtext-overnight-hunt.js --no-bundle
 npx vitest run && npx tsc --noEmit -p tsconfig.json
+sh scripts/loops-smoke.sh
 ```
 
 These validate mechanism text, static workflow syntax, and repository tests. They do **not** prove end-to-end autonomous execution.
+
+`scripts/loops-smoke.sh` is the narrower DRY_RUN exception: without a harness, its inline stub runtime runs all three loop cores through the empty-state skeleton and asserts the hunt ledger write, fix metadata write, and audit JSON write. This fulfills the source design's known unknown #1—whether the three end-to-end loop skeletons can run through an empty state. End-to-end execution with real models, `gh`, and Git still requires the host harness.
 
 ## Using a real harness
 
@@ -55,5 +58,7 @@ The scheduled audit workflow intentionally does not claim to run the four lenses
 3. Run one fix worker: confirm isolated worktree and diff/meta output.
 4. Integrate manually: ensure fresh-trunk reproduction rejects stale-base false green.
 5. Audit read-only: verify it mutates neither files nor issues.
+
+Parallel fix-worker isolation is evidenced rather than inferred: cluster-keyed worktree paths are disjoint, `.urtext/` is gitignored so each worktree uses a path-local registry and WAL file, and registry tests use `:memory:`. These three static facts are sufficient to rule out cross-worker registry-file contention; no concurrent stress test was performed.
 
 Risks include mistaking green text checks for effective mechanisms, claiming workflows run without a harness, skipping the verification foundation, shell-safety regressions, stale-worker validation, an obsolete AREA map, parallel workers touching hot files, and rising manual share. Each has a corresponding clause, checklist, or human gate; none should be silently downgraded.
