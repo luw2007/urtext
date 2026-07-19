@@ -5,7 +5,7 @@ import { join } from 'node:path'
 
 import { afterEach, describe, expect, test } from 'vitest'
 
-import { baseline, baselineValidation, cluster, coverage, discover, distillUsage, promote, validate } from '../src/distill.js'
+import { baseline, baselineValidation, cluster, coverage, discover, distillUsage, l2IntentReview, l2IntentReviewValidation, promote, validate } from '../src/distill.js'
 
 const tempDirs: string[] = []
 
@@ -54,6 +54,7 @@ test('documents every distill subcommand and its output boundary', () => {
   expect(distillUsage()).toContain('urtext distill validate')
   expect(distillUsage()).toContain('urtext distill cluster')
   expect(distillUsage()).toContain('urtext distill baseline')
+  expect(distillUsage()).toContain('urtext distill l2')
   expect(distillUsage()).toContain('urtext distill promote')
   expect(distillUsage()).toContain('without modifying canonical specs')
 })
@@ -474,5 +475,103 @@ describe('codebase fact distillation', () => {
 
     expect(() => promote(root, '.urtext/distill/spec-drafts/payments/spec-draft.md', 'specs/payments', true)).toThrow('stale')
     expect(() => readFileSync(join(root, 'specs/payments/clauses.md'), 'utf8')).toThrow()
+  })
+
+  test('renders one non-normative L2 review draft per structural domain', () => {
+    const root = makeWorkspace()
+    mkdirSync(join(root, 'internal/generated'), { recursive: true })
+    writeFileSync(join(root, 'internal/generated/model.go'), 'package generated\n')
+    const facts = discover(root)
+    const domains = cluster(facts, root)
+    const observedBaseline = baseline(facts, domains, root)
+
+    const review = l2IntentReview(facts, domains, observedBaseline, root)
+
+    expect(review.schema).toBe('urtext-distill-l2-intent-review/v1')
+    expect(review.workspaceHead).toBe(facts.workspaceHead)
+    expect(review.domains.map((domain) => domain.id)).toEqual(domains.domains.map((domain) => domain.id))
+    expect(review.domains.find((domain) => domain.id === 'payments')).toMatchObject({
+      id: 'payments',
+      sourceFiles: ['internal/payments/charge.go'],
+      contractFiles: [],
+      testGroupIds: ['payments-go-internal-payments'],
+    })
+    const draft = readFileSync(join(root, '.urtext/distill/l2-generated-intent-drafts/payments/intent-review.md'), 'utf8')
+    expect(draft).toContain('Human review required — not a canonical spec revision')
+    expect(draft).toContain('does not assert product behavior')
+    expect(draft).toContain('internal/payments/charge.go')
+    expect(existsSync(join(root, '.urtext/distill/l2-generated-intent-drafts/generated/intent-review.md'))).toBe(true)
+    expect(l2IntentReviewValidation(facts, domains, observedBaseline, review, root)).toEqual({ errors: [] })
+  })
+
+  test('removes stale L2 review drafts before rebuilding the current domain inventory', () => {
+    const root = makeWorkspace()
+    const facts = discover(root)
+    const domains = cluster(facts, root)
+    const observedBaseline = baseline(facts, domains, root)
+    const staleDraft = join(root, '.urtext/distill/l2-generated-intent-drafts/retired/intent-review.md')
+    const humanDraft = join(root, '.urtext/distill/l2-intent-drafts/generated/intent-review.md')
+    mkdirSync(join(root, '.urtext/distill/l2-generated-intent-drafts/retired'), { recursive: true })
+    mkdirSync(join(root, '.urtext/distill/l2-intent-drafts/generated'), { recursive: true })
+    writeFileSync(humanDraft, 'human decision\n')
+    writeFileSync(staleDraft, 'obsolete review\n')
+
+    l2IntentReview(facts, domains, observedBaseline, root)
+
+    expect(existsSync(staleDraft)).toBe(false)
+    expect(readFileSync(humanDraft, 'utf8')).toBe('human decision\n')
+    expect(existsSync(join(root, '.urtext/distill/facts.json'))).toBe(true)
+    expect(existsSync(join(root, '.urtext/distill/l2-intent-review.json'))).toBe(true)
+  })
+
+  test('rejects an L2 review inventory with a stale baseline head', () => {
+    const root = makeWorkspace()
+    const facts = discover(root)
+    const domains = cluster(facts, root)
+    const observedBaseline = baseline(facts, domains, root)
+    const review = l2IntentReview(facts, domains, observedBaseline, root)
+
+    expect(
+      l2IntentReviewValidation(facts, domains, { ...observedBaseline, workspaceHead: 'stale' }, review, root).errors
+    ).toContain('workspace heads differ')
+  })
+
+  test('reports every L2 inventory integrity failure', () => {
+    const root = makeWorkspace()
+    const facts = discover(root)
+    const domains = cluster(facts, root)
+    const observedBaseline = baseline(facts, domains, root)
+    const review = l2IntentReview(facts, domains, observedBaseline, root)
+    const payments = review.domains.find((domain) => domain.id === 'payments')!
+    const platformSource = review.domains.find((domain) => domain.id === 'platform/src')!
+
+    expect(l2IntentReviewValidation(facts, domains, observedBaseline, { ...review, domains: review.domains.slice(1) }, root).errors).toContain(
+      'structural domains are not assigned exactly once'
+    )
+    expect(
+      l2IntentReviewValidation(
+        facts,
+        domains,
+        observedBaseline,
+        { ...review, domains: review.domains.map((domain) => domain.id === 'payments' ? { ...domain, testGroupIds: [] } : domain) },
+        root
+      ).errors
+    ).toContain('payments has incorrect L1 groups')
+    expect(
+      l2IntentReviewValidation(
+        facts,
+        domains,
+        observedBaseline,
+        { ...review, domains: review.domains.map((domain) => domain.id === 'platform/src' ? { ...domain, deferredGaps: [] } : domain) },
+        root
+      ).errors
+    ).toContain('platform/src has incorrect deferred gaps')
+
+    rmSync(join(root, '.urtext/distill/l2-generated-intent-drafts', encodeURIComponent(payments.id)), { force: true, recursive: true })
+    expect(l2IntentReviewValidation(facts, domains, observedBaseline, review, root).errors).toContain('payments is missing its L2 review draft')
+    expect(platformSource.deferredGaps).toEqual(['src/charge.ts', 'src/cli.ts'])
+    expect(readFileSync(join(root, '.urtext/distill/l2-generated-intent-drafts/platform%2Fsrc/intent-review.md'), 'utf8')).toContain(
+      'This domain has no L1 executable group.'
+    )
   })
 })

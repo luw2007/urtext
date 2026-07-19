@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process'
-import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, sep } from 'node:path'
 
 import { parseClauseFile, type ParsedClause } from './clause-parser.js'
@@ -75,6 +75,20 @@ export interface BaselineEvidence {
   schema: 'urtext-distill-baseline-evidence/v1'
   workspaceHead: string | null
   groups: { id: string; verdict: 'pass' | 'fail'; exitCode: number | null; output: string }[]
+}
+
+export interface L2IntentReviewDomain {
+  id: string
+  sourceFiles: string[]
+  contractFiles: string[]
+  testGroupIds: string[]
+  deferredGaps: string[]
+}
+
+export interface L2IntentReviewManifest {
+  schema: 'urtext-distill-l2-intent-review/v1'
+  workspaceHead: string | null
+  domains: L2IntentReviewDomain[]
 }
 
 const toPosix = (path: string): string => path.split(sep).join('/')
@@ -346,6 +360,126 @@ export const baselineValidation = (
   return { errors }
 }
 
+const L2_GENERATED_ROOT = '.urtext/distill/l2-generated-intent-drafts'
+
+const l2GeneratedDraftPath = (domain: string): string =>
+  `${L2_GENERATED_ROOT}/${encodeURIComponent(domain)}/intent-review.md`
+
+const renderL2IntentReview = (domain: L2IntentReviewDomain, workspaceHead: string | null): string =>
+  [
+    `# L2 Intent Review: ${domain.id}`,
+    '',
+    '**Status**: Human review required — not a canonical spec revision',
+    `**Facts HEAD**: \`${workspaceHead ?? 'unavailable'}\``,
+    '',
+    '## Fact boundary',
+    '',
+    `- Structural domain: \`${domain.id}\`. This is an L0 ownership bucket, not a product boundary.`,
+    `- Observed source files (${domain.sourceFiles.length}): ${domain.sourceFiles.length > 0 ? domain.sourceFiles.map((path) => `\`${path}\``).join(', ') : 'none'}.`,
+    `- Observed contract files (${domain.contractFiles.length}): ${domain.contractFiles.length > 0 ? domain.contractFiles.map((path) => `\`${path}\``).join(', ') : 'none'}.`,
+    `- L1 executable groups (${domain.testGroupIds.length}): ${domain.testGroupIds.length > 0 ? domain.testGroupIds.map((id) => `\`${id}\``).join(', ') : 'none'}.`,
+    `- L1 deferred gaps (${domain.deferredGaps.length}): ${domain.deferredGaps.length > 0 ? domain.deferredGaps.map((path) => `\`${path}\``).join(', ') : 'none'}.`,
+    '',
+    'L0 files and L1 groups are observed facts only. This review does not assert product behavior, create functional requirements, or authorize canonical-spec changes.',
+    '',
+    '## Human intent decision',
+    '',
+    'Choose one: accept this structural domain as an L2 review boundary; revise it by naming the intended product boundary and vocabulary; split or merge it with named domains; or defer it as non-behavioral glue / missing oracle / cross-domain contract / intentional exclusion.',
+    '',
+    '## Evidence adequacy',
+    '',
+    domain.deferredGaps.length > 0
+      ? 'This domain has no L1 executable group. Resolve its deferred gaps before deriving requirement-level product intent.'
+      : 'Existing L1 groups establish test execution only. Requirement-level intent still requires human adjudication and, for high-risk semantics, a requirement-level oracle.',
+    '',
+  ].join('\n')
+
+const indexBaselineByDomain = (observedBaseline: ObservedBaseline): {
+  groupsByDomain: Map<string, string[]>
+  gapsByDomain: Map<string, string[]>
+} => {
+  const groupsByDomain = new Map<string, string[]>()
+  for (const group of observedBaseline.groups) {
+    const groups = groupsByDomain.get(group.domain) ?? []
+    groups.push(group.id)
+    groupsByDomain.set(group.domain, groups)
+  }
+  const gapsByDomain = new Map<string, string[]>()
+  for (const gap of observedBaseline.gaps) {
+    const separator = gap.indexOf(': ')
+    if (separator < 0) continue
+    const id = gap.slice(0, separator)
+    const paths = gapsByDomain.get(id) ?? []
+    paths.push(gap.slice(separator + 2))
+    gapsByDomain.set(id, paths)
+  }
+  return { groupsByDomain, gapsByDomain }
+}
+
+export const l2IntentReview = (
+  facts: DistillFacts,
+  domains: DomainManifest,
+  observedBaseline: ObservedBaseline,
+  workspaceRoot?: string
+): L2IntentReviewManifest => {
+  const root = workspaceRoot ?? process.cwd()
+  const { groupsByDomain, gapsByDomain } = indexBaselineByDomain(observedBaseline)
+  const manifest: L2IntentReviewManifest = {
+    schema: 'urtext-distill-l2-intent-review/v1',
+    workspaceHead: facts.workspaceHead,
+    domains: domains.domains.map((domain) => ({
+      id: domain.id,
+      sourceFiles: domain.sourceFiles,
+      contractFiles: domain.contractFiles,
+      testGroupIds: (groupsByDomain.get(domain.id) ?? []).sort(),
+      deferredGaps: (gapsByDomain.get(domain.id) ?? []).sort(),
+    })),
+  }
+  const generatedRoot = join(root, L2_GENERATED_ROOT)
+  rmSync(generatedRoot, { force: true, recursive: true })
+  mkdirSync(generatedRoot, { recursive: true })
+  const outputDir = join(root, '.urtext/distill')
+  for (const domain of manifest.domains) {
+    const path = join(root, l2GeneratedDraftPath(domain.id))
+    mkdirSync(dirname(path), { recursive: true })
+    writeFileSync(path, `${renderL2IntentReview(domain, facts.workspaceHead)}\n`)
+  }
+  writeFileSync(join(outputDir, 'l2-intent-review.json'), `${JSON.stringify(manifest, null, 2)}\n`)
+  return manifest
+}
+
+export const l2IntentReviewValidation = (
+  facts: DistillFacts,
+  domains: DomainManifest,
+  observedBaseline: ObservedBaseline,
+  review: L2IntentReviewManifest,
+  workspaceRoot?: string
+): BaselineValidationReport => {
+  const errors: string[] = []
+  if (
+    facts.workspaceHead !== domains.workspaceHead ||
+    facts.workspaceHead !== observedBaseline.workspaceHead ||
+    facts.workspaceHead !== review.workspaceHead
+  ) {
+    errors.push('workspace heads differ')
+  }
+  const expected = domains.domains.map((domain) => domain.id)
+  const actual = review.domains.map((domain) => domain.id)
+  if (expected.length !== actual.length || expected.some((id, index) => id !== actual[index])) {
+    errors.push('structural domains are not assigned exactly once')
+  }
+  const { groupsByDomain, gapsByDomain } = indexBaselineByDomain(observedBaseline)
+  const root = workspaceRoot ?? process.cwd()
+  for (const domain of review.domains) {
+    const expectedGroups = (groupsByDomain.get(domain.id) ?? []).sort()
+    const expectedGaps = (gapsByDomain.get(domain.id) ?? []).sort()
+    if (domain.testGroupIds.join('\n') !== expectedGroups.join('\n')) errors.push(`${domain.id} has incorrect L1 groups`)
+    if (domain.deferredGaps.join('\n') !== expectedGaps.join('\n')) errors.push(`${domain.id} has incorrect deferred gaps`)
+    if (!fileExists(root, l2GeneratedDraftPath(domain.id))) errors.push(`${domain.id} is missing its L2 review draft`)
+  }
+  return { errors }
+}
+
 export const runBaseline = (manifest: ObservedBaseline, workspaceRoot: string): BaselineEvidence => {
   const groups = manifest.groups.map((group) => {
     const [maybeEnv, command, ...args] = group.command
@@ -523,6 +657,8 @@ export const distillUsage = (): string =>
     '                   Write a deterministic domain inventory to .urtext/distill/domains.json without asserting behavior.',
     '  urtext distill baseline [validate|run]',
     '                   Write observed executable test groups to .urtext/distill/baseline.json; validate or run without modifying canonical specs.',
+    '  urtext distill l2 [validate]',
+    '                   Write one non-normative L2 intent-review draft per structural domain without modifying canonical specs.',
     '  urtext distill promote <draft> --target <feature> --confirm',
     '                   Promote only observed low-risk runnable draft clauses after one feature-level confirmation.'
   ].join('\n')

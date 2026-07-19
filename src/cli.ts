@@ -31,7 +31,7 @@ import DatabaseConstructor from 'better-sqlite3'
 
 import { coverage as auditCoverage, exportRequest, importVerdicts, type AuditVerdictInput } from './audit.js'
 import { listDecisions, recordDecision } from './decision.js'
-import { baseline, baselineValidation, cluster, coverage as distillCoverage, discover, distillUsage, promote, runBaseline, validate } from './distill.js'
+import { baseline, baselineValidation, cluster, coverage as distillCoverage, discover, distillUsage, l2IntentReview, l2IntentReviewValidation, promote, runBaseline, validate } from './distill.js'
 import { blame, detectUnmapped, recordAck, recordMapping } from './dwarf.js'
 import { adjudicate } from './gate.js'
 import { impact } from './linker.js'
@@ -192,6 +192,20 @@ const run = (argv: string[]): number => {
         console.log(JSON.stringify(manifest, null, 2))
         return 0
       }
+      if (mode === 'l2') {
+        const domains = cluster(facts, workspaceRoot)
+        const observedBaseline = baseline(facts, domains, workspaceRoot)
+        const review = l2IntentReview(facts, domains, observedBaseline, workspaceRoot)
+        if (argv[2] === 'validate') {
+          const report = l2IntentReviewValidation(facts, domains, observedBaseline, review, workspaceRoot)
+          for (const error of report.errors) console.error(`  ✗ ${error}`)
+          if (report.errors.length > 0) return 1
+          console.log(`L2 review inventory is valid: ${review.domains.length} structural domains.`)
+          return 0
+        }
+        console.log(JSON.stringify(review, null, 2))
+        return 0
+      }
       if (mode === 'coverage') {
         const report = distillCoverage(facts, workspaceRoot)
         for (const gap of report.missingEvidence) {
@@ -233,7 +247,7 @@ const run = (argv: string[]): number => {
           return 1
         }
       }
-      console.error('Usage: urtext distill <discover|coverage|validate|cluster|baseline [validate|run]|promote>')
+      console.error('Usage: urtext distill <discover|coverage|validate|cluster|baseline [validate|run]|l2 [validate]|promote>')
       return 1
     }
     if (command === 'audit') {
