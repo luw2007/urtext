@@ -11,7 +11,7 @@ INDEX=docs/wiki/index.md
 case "${1:?usage: oracle-wiki.sh <check-name>}" in
   # Every command in cli.ts COMMANDS must be documented in the command reference.
   command-coverage)
-    for cmd in index check verify impact map ack blame audit gate review decide decisions; do
+    for cmd in index check verify impact map ack blame audit gate review decide decisions ui; do
       grep -q "urtext $cmd" "$REF" || { echo "command-reference.md missing: urtext $cmd" >&2; exit 1; }
     done ;;
   # The three-layer structure must stay wired: index links concepts/mechanisms/guides.

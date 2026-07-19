@@ -99,3 +99,12 @@ export {
   type DecisionOutcome,
   type DecisionRecord,
 } from './decision.js'
+export {
+  buildUiSnapshot,
+  renderPage,
+  handleDecide,
+  type UiSnapshot,
+  type UiClause,
+  type DecideResult,
+} from './review-ui.js'
+export { startUiServer, type UiServerHandle } from './ui-server.js'

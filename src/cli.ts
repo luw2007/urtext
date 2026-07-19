@@ -38,6 +38,7 @@ import { openRegistry } from './registry.js'
 import { scanWorkspace } from './scanner.js'
 import { currentHead, recordReview } from './review.js'
 import { verifyWorkspace } from './verifier.js'
+import { startUiServer } from './ui-server.js'
 
 const USAGE = [
   'Usage:',
@@ -67,6 +68,9 @@ const USAGE = [
   '  urtext decide <spec-path>#<clause-id> --pass|--fail [note…]',
   '                   Record a human decision for a manual-oracle clause (Decision ledger).',
   '  urtext decisions List the Decision ledger, newest first.',
+  '  urtext ui [--port <n>] [--no-open]',
+  '                   Open a local review panel to adjudicate manual clauses by',
+  '                   click; writes the Decision ledger. Ctrl-C to quit.',
   '',
   'The registry lives at .urtext/registry.sqlite under the current directory.',
 ].join('\n')
@@ -475,4 +479,35 @@ const run = (argv: string[]): number => {
   }
 }
 
-process.exit(run(process.argv.slice(2)))
+/** `ui` is long-running and owns its db for the whole session, so it lives
+ * outside the synchronous `run` (which closes the db in a finally). */
+const runUi = async (argv: string[]): Promise<number> => {
+  const root = process.cwd()
+  const portFlag = argv.indexOf('--port')
+  const port = portFlag >= 0 ? Number(argv[portFlag + 1]) : undefined
+  if (port !== undefined && !Number.isInteger(port)) {
+    console.error('Usage: urtext ui [--port <n>] [--no-open]')
+    return 1
+  }
+  const db = openWorkspaceRegistry(root)
+  scanWorkspace(db, root)
+  const handle = await startUiServer(db, root, {
+    ...(port !== undefined ? { port } : {}),
+    open: !argv.includes('--no-open'),
+    decider: reviewerName(),
+  })
+  console.log(`review: ${handle.url}  (Ctrl-C to quit)`)
+  const { promise } = Promise.withResolvers<number>()
+  process.on('SIGINT', () => {
+    handle.close()
+    db.close()
+    process.exit(0)
+  })
+  return promise
+}
+
+if (process.argv[2] === 'ui') {
+  runUi(process.argv.slice(3)).then((code) => process.exit(code))
+} else {
+  process.exit(run(process.argv.slice(2)))
+}

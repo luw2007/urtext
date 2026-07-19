@@ -1,0 +1,149 @@
+import { spawnSync } from 'node:child_process'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+import DatabaseConstructor, { type Database } from 'better-sqlite3'
+import { afterEach, beforeEach, describe, expect, test } from 'vitest'
+
+import { recordDecision } from '../src/decision.js'
+import { openRegistry } from '../src/registry.js'
+import { scanWorkspace } from '../src/scanner.js'
+import { verifyWorkspace } from '../src/verifier.js'
+import { buildUiSnapshot, renderPage, handleDecide } from '../src/review-ui.js'
+
+let db: Database
+const tempDirs: string[] = []
+
+const git = (root: string, ...args: string[]) => {
+  const result = spawnSync('git', args, { cwd: root, encoding: 'utf8' })
+  if (result.status !== 0) throw new Error(`git ${args.join(' ')} failed: ${result.stderr}`)
+}
+
+/** A git repo with a manual C001, a runnable C002 (cmd:true), verified. */
+const setupRepo = (extraClauseLine?: string): string => {
+  const root = mkdtempSync(join(tmpdir(), 'urtext-ui-'))
+  tempDirs.push(root)
+  git(root, 'init', '-q')
+  git(root, 'config', 'user.email', 'test@urtext.dev')
+  git(root, 'config', 'user.name', 'test')
+  mkdirSync(join(root, 'specs/x'), { recursive: true })
+  const lines = ['## C001 design intent <!-- oracle:manual -->', '## C002 label <!-- oracle:cmd:true -->']
+  if (extraClauseLine) lines.push(extraClauseLine)
+  writeFileSync(join(root, 'specs/x/spec.md'), lines.join('\n'))
+  git(root, 'add', '-A')
+  git(root, 'commit', '-q', '-m', 'baseline')
+  scanWorkspace(db, root)
+  verifyWorkspace(db, root)
+  return root
+}
+
+beforeEach(() => {
+  db = new DatabaseConstructor(':memory:')
+  openRegistry(db)
+})
+
+afterEach(() => {
+  db.close()
+  for (const dir of tempDirs.splice(0)) rmSync(dir, { force: true, recursive: true })
+})
+
+describe('buildUiSnapshot', () => {
+  test('undecided manual clause is actionable and pending', () => {
+    const root = setupRepo()
+    const snap = buildUiSnapshot(db, root)
+    const c1 = snap.clauses.find((c) => c.clauseId === 'C001')!
+    expect(c1.decisionVerdict).toBe('none')
+    expect(c1.actionable).toBe(true)
+    expect(snap.totalManual).toBe(1)
+    expect(snap.decided).toBe(0)
+  })
+
+  test('a recorded pass at HEAD reflects as decided, not actionable', () => {
+    const root = setupRepo()
+    recordDecision(db, { specPath: 'specs/x/spec.md', clauseId: 'C001', verdict: 'pass', decider: 'alice' }, root, 1)
+    const snap = buildUiSnapshot(db, root)
+    const c1 = snap.clauses.find((c) => c.clauseId === 'C001')!
+    expect(c1.decisionVerdict).toBe('pass')
+    expect(c1.actionable).toBe(false)
+    expect(snap.decided).toBe(1)
+  })
+
+  test('a runnable clause is never a manual review row', () => {
+    const root = setupRepo()
+    const snap = buildUiSnapshot(db, root)
+    const c2 = snap.clauses.find((c) => c.clauseId === 'C002')!
+    expect(c2.decisionVerdict).toBe('n/a')
+    expect(c2.actionable).toBe(false)
+  })
+
+  test('a decision made at a stale HEAD does not clear the clause', () => {
+    const root = setupRepo()
+    recordDecision(db, { specPath: 'specs/x/spec.md', clauseId: 'C001', verdict: 'pass', decider: 'alice' }, root, 1)
+    // HEAD moves — the decision now describes a prior code state.
+    writeFileSync(join(root, 'other.txt'), 'x')
+    git(root, 'add', '-A')
+    git(root, 'commit', '-q', '-m', 'move head')
+    const snap = buildUiSnapshot(db, root)
+    const c1 = snap.clauses.find((c) => c.clauseId === 'C001')!
+    expect(c1.decisionVerdict).toBe('none')
+    expect(c1.actionable).toBe(true)
+  })
+})
+
+describe('renderPage', () => {
+  test('actionable row renders decide buttons; decided row does not', () => {
+    const root = setupRepo()
+    let html = renderPage(buildUiSnapshot(db, root), 'tok')
+    expect(html).toContain('data-key="specs/x/spec.md#C001" data-v="pass"')
+    recordDecision(db, { specPath: 'specs/x/spec.md', clauseId: 'C001', verdict: 'pass', decider: 'alice' }, root, 1)
+    html = renderPage(buildUiSnapshot(db, root), 'tok')
+    expect(html).not.toContain('data-key="specs/x/spec.md#C001"')
+    expect(html).toContain('✓ pass')
+  })
+
+  test('runnable clause is not rendered as a review row', () => {
+    const root = setupRepo()
+    const html = renderPage(buildUiSnapshot(db, root), 'tok')
+    expect(html).not.toContain('C002')
+  })
+
+  test('csrf token is embedded and a hostile title cannot break the markup', () => {
+    const root = setupRepo(`## C003 <script>'"&x <!-- oracle:manual -->`)
+    const html = renderPage(buildUiSnapshot(db, root), 'my-token')
+    expect(html).toContain('<meta name="csrf" content="my-token">')
+    expect(html).not.toContain('<script>\'"&x')
+    expect(html).toContain('&lt;script&gt;')
+  })
+})
+
+describe('handleDecide', () => {
+  test('a valid manual decision records and returns 200', () => {
+    const root = setupRepo()
+    const res = handleDecide(db, root, { key: 'specs/x/spec.md#C001', verdict: 'pass' }, 'alice')
+    expect(res.status).toBe(200)
+    expect(res.body).toEqual({ ok: true })
+    expect(buildUiSnapshot(db, root).decided).toBe(1)
+  })
+
+  test('a non-manual clause is rejected (P2 guard)', () => {
+    const root = setupRepo()
+    const res = handleDecide(db, root, { key: 'specs/x/spec.md#C002', verdict: 'pass' }, 'alice')
+    expect(res.status).toBe(400)
+    expect(res.body).toHaveProperty('error')
+  })
+
+  test('an unknown clause is rejected', () => {
+    const root = setupRepo()
+    const res = handleDecide(db, root, { key: 'specs/x/spec.md#C999', verdict: 'pass' }, 'alice')
+    expect(res.status).toBe(400)
+  })
+
+  test('a malformed verdict or key is rejected without touching the ledger', () => {
+    const root = setupRepo()
+    expect(handleDecide(db, root, { key: 'specs/x/spec.md#C001', verdict: 'maybe' }, 'a').status).toBe(400)
+    expect(handleDecide(db, root, { key: 'nohash', verdict: 'pass' }, 'a').status).toBe(400)
+    expect(handleDecide(db, root, 'not-an-object', 'a').status).toBe(400)
+    expect(buildUiSnapshot(db, root).decided).toBe(0)
+  })
+})

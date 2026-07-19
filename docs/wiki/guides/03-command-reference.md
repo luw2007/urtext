@@ -116,6 +116,18 @@ $ urtext decisions
 No decisions recorded.
 ```
 
+### `urtext ui [--port <n>] [--no-open]`
+Open a local review panel to adjudicate `manual`-oracle clauses by click. Starts
+an **ephemeral** foreground server on `127.0.0.1` (random port unless `--port`),
+opens your browser (`--no-open` skips it), and blocks until **Ctrl-C**. Each
+pending manual clause gets pass/fail buttons; a click posts to the same guarded
+`recordDecision` path as `urtext decide`, so the verdict lands in the `decisions`
+ledger and `gate` sees it immediately. Already-decided clauses show their verdict
+with no buttons. This is an interactive-session process — not a daemon (no fork,
+no pid file, no auto-start), the same category as the editor `git rebase -i`
+spawns (VISION P8). Hardening: loopback-only, per-session CSRF token, same-origin
+and JSON-content-type checks, request-body cap. Exit 0 on Ctrl-C.
+
 ## Exit-code summary
 
 This table is a working guide, not an exhaustive spec (the CLI in `src/cli.ts` is
