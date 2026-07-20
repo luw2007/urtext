@@ -8,6 +8,8 @@
  *                         fails on unmapped working-tree changes (VISION P3).
  *   urtext status [--json] [--wip-limit <n>]
  *                         One item-keyed queue: human lane vs agent lane.
+ *   urtext brief <spec-path>#<clause-id> | <file>:<line>[-<end>]
+ *                         Full adjudication context + freshness hash (P2).
  *   urtext impact <spec-path>#<clause-id>
  *                         Reverse closure over the refs graph: affected clauses + tasks.
  *   urtext map <spec-path>#<clause-id> <file>:<start>-<end> [note…]
@@ -32,6 +34,7 @@ import { join } from 'node:path'
 import DatabaseConstructor from 'better-sqlite3'
 
 import { coverage, exportRequest, importVerdicts, type AuditVerdictInput } from './audit.js'
+import { buildBrief, renderBriefText, type BriefHistoryLine } from './brief.js'
 import { blame, detectUnmapped, recordAck, recordMapping } from './dwarf.js'
 import { listDecisions, recordDecision } from './decision.js'
 import { adjudicate } from './gate.js'
@@ -39,7 +42,7 @@ import { impact } from './linker.js'
 import { openRegistry } from './registry.js'
 import { scanWorkspace } from './scanner.js'
 import { buildStatus } from './status.js'
-import { currentHead, recordReview } from './review.js'
+import { currentHead, listReviews, recordReview } from './review.js'
 import { verifyWorkspace } from './verifier.js'
 import { startUiServer } from './ui-server.js'
 
@@ -56,6 +59,11 @@ const USAGE = [
   '                   One item-keyed queue: human lane (adjudications whose',
   '                   prerequisites are met, unmapped changes) + agent lane',
   '                   (remediable prerequisites). exit 1 when anything is pending.',
+  '  urtext brief <spec-path>#<clause-id> | <file>:<line>[-<end>] [--json]',
+  '                   Full adjudication context for a clause — text, mapped code,',
+  '                   evidence, audit, impact — plus the brief-hash quoted back',
+  '                   via `review`/`decide` --brief. Refuses building/link-broken',
+  '                   revisions (no approvable hash, fail-closed).',
   '  urtext impact <spec-path>#<clause-id>',
   '                   List clauses and tasks affected if the clause changes.',
   '  urtext map <spec-path>#<clause-id> <file>:<start>-<end> [note…]',
@@ -153,6 +161,7 @@ const run = (argv: string[]): number => {
     check: true,
     verify: true,
     status: true,
+    brief: true,
     impact: true,
     map: true,
     ack: true,
@@ -284,6 +293,70 @@ const run = (argv: string[]): number => {
       }
       if (report.items.length === 0) console.log('nothing pending — the gate should be green')
       return report.items.length > 0 ? 1 : 0
+    }
+
+    if (command === 'brief') {
+      const target = argv[1]
+      const clause = parseClauseTarget(target)
+      const range = clause ? null : parseRangeTarget(target)
+      if (!clause && !range) {
+        console.error('Usage: urtext brief <spec-path>#<clause-id> | <file>:<line>[-<end>] [--json]')
+        return 1
+      }
+      scanWorkspace(db, workspaceRoot)
+      const targets: { specPath: string; clauseId: string }[] = []
+      if (clause) targets.push(clause)
+      else if (range) {
+        for (const entry of blame(db, range.filePath, range.lineStart)) {
+          if (!targets.some((t) => t.specPath === entry.specPath && t.clauseId === entry.clauseId)) {
+            targets.push({ specPath: entry.specPath, clauseId: entry.clauseId })
+          }
+        }
+        if (targets.length === 0) {
+          console.error(
+            `No clause constrains ${range.filePath}:${range.lineStart} — nothing to brief (try \`urtext blame\`).`
+          )
+          return 1
+        }
+      }
+      const outcomes = targets.map((t) => buildBrief(db, workspaceRoot, t))
+      if (argv.includes('--json')) {
+        const payload = outcomes.map((outcome) =>
+          outcome.kind === 'built'
+            ? outcome.brief
+            : { error: { code: outcome.code, message: outcome.message } }
+        )
+        console.log(JSON.stringify(clause ? payload[0] : payload, null, 2))
+        return outcomes.some((outcome) => outcome.kind === 'refused') ? 1 : 0
+      }
+      let refused = false
+      outcomes.forEach((outcome, index) => {
+        if (index > 0) console.log('')
+        if (outcome.kind === 'refused') {
+          refused = true
+          console.error(`[${outcome.code}] ${outcome.message}`)
+          return
+        }
+        const { specPath, clauseId } = outcome.brief.manifest
+        const history: BriefHistoryLine[] = [
+          ...listReviews(db)
+            .filter((record) => record.specPath === specPath && record.clauseId === clauseId)
+            .map((record) => ({
+              when: record.createdAt,
+              what: `review ${record.decision} @ ${record.commitSha.slice(0, 7)} by ${record.reviewer}`,
+              note: record.note,
+            })),
+          ...listDecisions(db)
+            .filter((record) => record.specPath === specPath && record.clauseId === clauseId)
+            .map((record) => ({
+              when: record.createdAt,
+              what: `decide ${record.verdict} @ ${record.commitSha.slice(0, 7)} by ${record.decider}`,
+              note: record.note,
+            })),
+        ].sort((a, b) => b.when - a.when)
+        console.log(renderBriefText(outcome.brief, history))
+      })
+      return refused ? 1 : 0
     }
 
     if (command === 'review') {

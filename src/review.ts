@@ -134,3 +134,25 @@ export const reviewsAtHead = (db: Database, headSha: string): Map<string, Review
   for (const row of rows) map.set(`${row.spec_path}#${row.clause_id}`, row.decision)
   return map
 }
+
+export interface ReviewRecord {
+  specPath: string
+  clauseId: string
+  commitSha: string
+  decision: ReviewDecision
+  reviewer: string
+  note: string | null
+  createdAt: number
+}
+
+/** The full review ledger, newest first (brief history readback). */
+export const listReviews = (db: Database): ReviewRecord[] => {
+  ensureReviewLedger(db)
+  return db
+    .prepare(
+      `SELECT spec_path AS specPath, clause_id AS clauseId, commit_sha AS commitSha,
+              decision, reviewer, note, created_at AS createdAt
+       FROM reviews ORDER BY id DESC`
+    )
+    .all() as ReviewRecord[]
+}
