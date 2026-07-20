@@ -1,7 +1,7 @@
 import { writeFileSync, mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { spawnSync, type SpawnSyncReturns } from 'node:child_process'
+import { spawn, spawnSync, type SpawnSyncReturns } from 'node:child_process'
 
 import type { AuditRequest, AuditVerdictInput } from './audit.js'
 
@@ -133,6 +133,39 @@ export const runAuditAgent = (
     }
     if (result.status !== 0) return { kind: 'rejected', message: `auditor exited ${result.status ?? 'by signal'}` }
     const verdicts = normalize(parseJson(result.stdout), new Set(request.items.map((item) => item.evidenceId)), auditorName(options))
+    return verdicts === null
+      ? { kind: 'rejected', message: 'auditor output must be complete, exact JSON verdict coverage' }
+      : { kind: 'completed', verdicts }
+  } catch {
+    return { kind: 'rejected', message: 'auditor output is not valid JSON' }
+  } finally {
+    temp.cleanup()
+  }
+}
+
+export const runAuditAgentAsync = async (request: AuditRequest, options: AuditorOptions): Promise<AuditRunnerResult> => {
+  if (request.items.length === 0) return { kind: 'completed', verdicts: [] }
+  const temp = schemaPath()
+  try {
+    const { command, args } = commandFor(options, temp.path)
+    const output = await new Promise<{ stdout: string; error?: Error }>((resolve) => {
+      const child = spawn(command, args, { stdio: ['pipe', 'pipe', 'ignore'] })
+      let stdout = ''
+      let settled = false
+      const finish = (result: { stdout: string; error?: Error }) => {
+        if (!settled) { settled = true; resolve(result) }
+      }
+      const timer = setTimeout(() => { child.kill(); finish({ stdout, error: new Error('ETIMEDOUT') }) }, 300_000)
+      child.stdout.on('data', (chunk: Buffer) => { stdout += chunk })
+      child.on('error', (error) => { clearTimeout(timer); finish({ stdout, error }) })
+      child.on('close', (code) => { clearTimeout(timer); finish(code === 0 ? { stdout } : { stdout, error: new Error(`auditor exited ${code ?? 'by signal'}`) }) })
+      child.stdin.end(instruction(request))
+    })
+    if (output.error) {
+      const timedOut = output.error.message === 'ETIMEDOUT'
+      return { kind: 'rejected', message: timedOut ? 'auditor timed out' : output.error.message }
+    }
+    const verdicts = normalize(parseJson(output.stdout), new Set(request.items.map((item) => item.evidenceId)), auditorName(options))
     return verdicts === null
       ? { kind: 'rejected', message: 'auditor output must be complete, exact JSON verdict coverage' }
       : { kind: 'completed', verdicts }

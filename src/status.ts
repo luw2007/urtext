@@ -83,7 +83,7 @@ const NEXT_HINT: Record<StatusReason, string> = {
   missing_evidence: 'run `urtext verify`',
   evidence_failing: 'fix the implementation, then `urtext verify`',
   stale: 'upstream changed — re-run `urtext verify`',
-  unaudited: '`urtext audit --export` → different-preset audit → `urtext audit --import`',
+  unaudited: '`urtext audit --run <claude|codex|omp>` | `urtext audit --export` → different-preset audit → `urtext audit --import`',
   audit_disagreement: 'resolve the meta-audit disagreement (D3): fix the oracle or re-audit',
   review_rejected: 'address the rejection, then `urtext brief` + `urtext review --approve --brief <hash>`',
   worktree_dirty: 'uncommitted edits ride a clean-tree approval — commit (HEAD moves, re-review) or revert',

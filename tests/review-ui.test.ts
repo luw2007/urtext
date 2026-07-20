@@ -10,7 +10,7 @@ import { recordDecision } from '../src/decision.js'
 import { openRegistry } from '../src/registry.js'
 import { scanWorkspace } from '../src/scanner.js'
 import { verifyWorkspace } from '../src/verifier.js'
-import { buildUiSnapshot, renderPage, handleDecide, handleBrief } from '../src/review-ui.js'
+import { buildUiSnapshot, renderPage, handleDecide, handleBrief, handleAuditRun } from '../src/review-ui.js'
 
 let db: Database
 const tempDirs: string[] = []
@@ -108,6 +108,16 @@ describe('renderPage', () => {
     expect(html).not.toContain('data-key="specs/x/spec.md#C002"')
   })
 
+  test('unaudited agent work renders selectable headless audit controls', () => {
+    const root = setupRepo()
+    const html = renderPage(buildUiSnapshot(db, root), 'tok')
+    expect(html).toContain('id="audit-runner"')
+    expect(html).toContain('value="claude"')
+    expect(html).toContain('value="codex"')
+    expect(html).toContain('value="omp"')
+    expect(html).toContain('/api/audit-run')
+  })
+
   test('csrf token is embedded and a hostile title cannot break the markup', () => {
     const root = setupRepo(`## C003 <script>'"&x <!-- oracle:manual -->`)
     const html = renderPage(buildUiSnapshot(db, root), 'my-token')
@@ -160,6 +170,13 @@ describe('handleDecide', () => {
     expect(handleDecide(db, root, { key: 'nohash', verdict: 'pass', note: 'x' }, 'a').status).toBe(400)
     expect(handleDecide(db, root, 'not-an-object', 'a').status).toBe(400)
     expect(buildUiSnapshot(db, root).decided).toBe(0)
+  })
+})
+
+describe('handleAuditRun', () => {
+  test('rejects malformed client selections before invoking an auditor', async () => {
+    await expect(handleAuditRun(db, { auditor: 'unknown' })).resolves.toMatchObject({ status: 400 })
+    await expect(handleAuditRun(db, { auditor: 'claude', profile: 'audit' })).resolves.toMatchObject({ status: 400 })
   })
 })
 

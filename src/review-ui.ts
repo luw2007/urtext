@@ -14,6 +14,8 @@
  */
 import type { Database } from 'better-sqlite3'
 
+import { runAuditAgentAsync, type AuditorId } from './audit-runner.js'
+import { coverage, exportRequest, importVerdicts } from './audit.js'
 import { buildBrief, renderBriefText, type BriefHistoryLine, type ClauseTarget } from './brief.js'
 import { detectUnmapped } from './dwarf.js'
 import { adjudicate } from './gate.js'
@@ -99,6 +101,15 @@ const queueRow = (item: StatusItem): string => {
   return `<tr><td>${esc(item.key)}${title}${risk}</td><td>${esc(item.primary)}${secondary}</td><td>${action}</td></tr>`
 }
 
+const auditControls = (items: StatusItem[]): string => {
+  const auditable = items.filter((item) => item.reasons.includes('unaudited') || item.reasons.includes('audit_disagreement')).length
+  if (auditable === 0) return ''
+  return `<form id="audit-runner"><label>Audit ${auditable} evidence item(s) with
+    <select name="auditor"><option value="claude">Claude Code</option><option value="codex">Codex</option><option value="omp">OMP</option></select></label>
+    <input name="model" placeholder="model (optional)"><input name="profile" placeholder="profile (Codex/OMP only)">
+    <button type="submit">Run audit</button> <small>D3 preset separation remains your responsibility.</small></form>`
+}
+
 /** Render the self-contained console page. No inline handlers; a delegated
  * listener reads `data-*`, fetches the brief-hash, and posts with the session
  * CSRF token. */
@@ -121,6 +132,7 @@ export const renderPage = (snapshot: UiSnapshot, csrfToken: string): string => {
   const wip = snapshot.status.wip.exceeded
     ? `<p style="color:#b80">warning: human queue ${snapshot.status.counts.human} exceeds wip limit ${snapshot.status.wip.limit} — consider smaller changes</p>`
     : ''
+  const audit = auditControls(snapshot.status.items)
   return `<!doctype html><html><head><meta charset="utf-8">
 <meta name="csrf" content="${esc(csrfToken)}">
 <title>urtext console</title>
@@ -133,7 +145,7 @@ ${wip}
 <h3>Your queue (${human.length})</h3>
 <table>${humanRows || '<tr><td>nothing — prerequisites pending or all clear</td></tr>'}</table>
 <h3>Agent lane (${agent.length})</h3>
-<table>${agentRows || '<tr><td>empty</td></tr>'}</table>
+${audit}<table>${agentRows || '<tr><td>empty</td></tr>'}</table>
 <h3>Decided manual clauses at HEAD (${decidedRows ? snapshot.decided : 0})</h3>
 <table>${decidedRows || '<tr><td>none yet</td></tr>'}</table>
 <script>
@@ -154,6 +166,12 @@ document.addEventListener('click', async (e) => {
     body: JSON.stringify({ key, verdict: b.dataset.v, briefHash: bj.briefHash, ...(note.trim() ? { note: note.trim() } : {}) }) })
   const j = await r.json(); if (j.error) { alert(j.error); return }
   location.reload()
+})
+document.getElementById('audit-runner')?.addEventListener('submit', async (e) => {
+  e.preventDefault(); const form = new FormData(e.currentTarget)
+  const r = await fetch('/api/audit-run', { method: 'POST', headers: { 'content-type': 'application/json', 'x-csrf': csrf },
+    body: JSON.stringify({ auditor: form.get('auditor'), model: form.get('model'), profile: form.get('profile') }) })
+  const j = await r.json(); if (j.error) { alert(j.error); return } location.reload()
 })
 </script></body></html>`
 }
@@ -202,6 +220,43 @@ export const handleBrief = (db: Database, root: string, spec: unknown, clause: u
       briefHash: outcome.brief.briefHash,
       text: renderBriefText(outcome.brief, briefHistory(db, target)),
     },
+  }
+}
+
+export interface AuditRunResult {
+  status: number
+  body: { ok: true; message: string } | { error: string }
+}
+
+export const handleAuditRun = async (db: Database, input: unknown): Promise<AuditRunResult> => {
+  if (typeof input !== 'object' || input === null || !('auditor' in input)) {
+    return { status: 400, body: { error: 'need auditor: claude, codex, or omp' } }
+  }
+  const auditor = input.auditor
+  const model = 'model' in input ? input.model : undefined
+  const profile = 'profile' in input ? input.profile : undefined
+  if ((auditor !== 'claude' && auditor !== 'codex' && auditor !== 'omp') ||
+      (model !== undefined && typeof model !== 'string') || (profile !== undefined && typeof profile !== 'string') ||
+      (auditor === 'claude' && profile !== undefined && profile !== '')) {
+    return { status: 400, body: { error: 'invalid auditor, model, or profile' } }
+  }
+  const result = await runAuditAgentAsync(exportRequest(db), {
+    id: auditor,
+    ...(typeof model === 'string' && model.trim() ? { model: model.trim() } : {}),
+    ...(typeof profile === 'string' && profile.trim() ? { profile: profile.trim() } : {}),
+  })
+  if (result.kind === 'rejected') return { status: 422, body: { error: result.message ?? 'audit runner rejected' } }
+  if (result.verdicts === undefined || result.verdicts.length === 0) {
+    return { status: 200, body: { ok: true, message: 'No decided, current evidence to audit.' } }
+  }
+  const outcome = importVerdicts(db, result.verdicts, Date.now())
+  if (outcome.kind === 'rejected') return { status: 422, body: { error: outcome.message } }
+  const report = coverage(db)
+  return {
+    status: report.counts.disagree > 0 ? 409 : 200,
+    body: report.counts.disagree > 0
+      ? { error: `imported ${outcome.count} verdict(s); ${report.counts.disagree} disagreement(s) require human action` }
+      : { ok: true, message: `imported ${outcome.count} verdict(s)` },
   }
 }
 
