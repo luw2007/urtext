@@ -21,13 +21,17 @@ export interface OracleResult {
 
 const OUTPUT_CAP = 4_000
 
+/** Per-oracle wall-clock budget; override for slow gates (e.g. Docker suites). */
+const envTimeout = Number(process.env.URTEXT_ORACLE_TIMEOUT_MS)
+const ORACLE_TIMEOUT_MS = Number.isInteger(envTimeout) && envTimeout > 0 ? envTimeout : 300_000
+
 const capOutput = (stdout: string, stderr: string): string => {
   const combined = `${stdout}\n${stderr}`.trim()
   return combined.length > OUTPUT_CAP ? `${combined.slice(0, OUTPUT_CAP)}\n…[truncated]` : combined
 }
 
 const runCommand = (command: string, args: string[], cwd: string): OracleResult => {
-  const result = spawnSync(command, args, { cwd, encoding: 'utf8', timeout: 300_000 })
+  const result = spawnSync(command, args, { cwd, encoding: 'utf8', timeout: ORACLE_TIMEOUT_MS })
   if (result.error) {
     return { verdict: 'fail', exitCode: null, output: String(result.error) }
   }
