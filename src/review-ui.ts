@@ -107,7 +107,7 @@ const auditControls = (items: StatusItem[]): string => {
   return `<form id="audit-runner"><label>Audit ${auditable} evidence item(s) with
     <select name="auditor"><option value="claude">Claude Code</option><option value="codex">Codex</option><option value="omp">OMP</option></select></label>
     <input name="model" placeholder="model (optional)"><input name="profile" placeholder="profile (Codex/OMP only)">
-    <button type="submit">Run audit</button> <small>D3 preset separation remains your responsibility.</small></form>`
+    <button type="submit">Run audit</button> <output id="audit-progress" aria-live="polite"></output> <small>D3 preset separation remains your responsibility.</small></form>`
 }
 
 /** Render the self-contained console page. No inline handlers; a delegated
@@ -168,10 +168,15 @@ document.addEventListener('click', async (e) => {
   location.reload()
 })
 document.getElementById('audit-runner')?.addEventListener('submit', async (e) => {
-  e.preventDefault(); const form = new FormData(e.currentTarget)
-  const r = await fetch('/api/audit-run', { method: 'POST', headers: { 'content-type': 'application/json', 'x-csrf': csrf },
-    body: JSON.stringify({ auditor: form.get('auditor'), model: form.get('model'), profile: form.get('profile') }) })
-  const j = await r.json(); if (j.error) { alert(j.error); return } location.reload()
+  e.preventDefault(); const form = e.currentTarget; const button = form.querySelector('button'); const progress = document.getElementById('audit-progress')
+  button.disabled = true; progress.textContent = 'Running audit; this can take several minutes…'
+  const fields = new FormData(form)
+  try {
+    const r = await fetch('/api/audit-run', { method: 'POST', headers: { 'content-type': 'application/json', 'x-csrf': csrf },
+      body: JSON.stringify({ auditor: fields.get('auditor'), model: fields.get('model'), profile: fields.get('profile') }) })
+    const j = await r.json(); if (j.error) { progress.textContent = j.error; button.disabled = false; return }
+    progress.textContent = j.message + ' Refreshing queue…'; location.reload()
+  } catch { progress.textContent = 'Audit request failed; no verdicts were imported.'; button.disabled = false }
 })
 </script></body></html>`
 }
@@ -253,10 +258,13 @@ export const handleAuditRun = async (db: Database, input: unknown): Promise<Audi
   if (outcome.kind === 'rejected') return { status: 422, body: { error: outcome.message } }
   const report = coverage(db)
   return {
-    status: report.counts.disagree > 0 ? 409 : 200,
-    body: report.counts.disagree > 0
-      ? { error: `imported ${outcome.count} verdict(s); ${report.counts.disagree} disagreement(s) require human action` }
-      : { ok: true, message: `imported ${outcome.count} verdict(s)` },
+    status: 200,
+    body: {
+      ok: true,
+      message: report.counts.disagree > 0
+        ? `imported ${outcome.count} verdict(s); ${report.counts.disagree} disagreement(s) moved to Your queue.`
+        : `imported ${outcome.count} verdict(s)`,
+    },
   }
 }
 

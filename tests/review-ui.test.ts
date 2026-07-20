@@ -116,6 +116,9 @@ describe('renderPage', () => {
     expect(html).toContain('value="codex"')
     expect(html).toContain('value="omp"')
     expect(html).toContain('/api/audit-run')
+    expect(html).toContain('id="audit-progress"')
+    expect(html).toContain('Running audit; this can take several minutes…')
+    expect(html).toContain('button.disabled = true')
   })
 
   test('csrf token is embedded and a hostile title cannot break the markup', () => {
