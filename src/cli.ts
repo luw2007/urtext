@@ -6,6 +6,8 @@
  *   urtext check [--diff] Index, then report errors; exit 1 when any file is `building`
  *                         or any cross-file ref is unknown. `--diff` additionally
  *                         fails on unmapped working-tree changes (VISION P3).
+ *   urtext status [--json] [--wip-limit <n>]
+ *                         One item-keyed queue: human lane vs agent lane.
  *   urtext impact <spec-path>#<clause-id>
  *                         Reverse closure over the refs graph: affected clauses + tasks.
  *   urtext map <spec-path>#<clause-id> <file>:<start>-<end> [note…]
@@ -36,6 +38,7 @@ import { adjudicate } from './gate.js'
 import { impact } from './linker.js'
 import { openRegistry } from './registry.js'
 import { scanWorkspace } from './scanner.js'
+import { buildStatus } from './status.js'
 import { currentHead, recordReview } from './review.js'
 import { verifyWorkspace } from './verifier.js'
 import { startUiServer } from './ui-server.js'
@@ -49,6 +52,10 @@ const USAGE = [
   '                   working-tree changes.',
   '  urtext verify    Index + check, then run every clause oracle and record evidence;',
   '                   exit 1 on any failing clause.',
+  '  urtext status [--json] [--wip-limit <n>]',
+  '                   One item-keyed queue: human lane (adjudications whose',
+  '                   prerequisites are met, unmapped changes) + agent lane',
+  '                   (remediable prerequisites). exit 1 when anything is pending.',
   '  urtext impact <spec-path>#<clause-id>',
   '                   List clauses and tasks affected if the clause changes.',
   '  urtext map <spec-path>#<clause-id> <file>:<start>-<end> [note…]',
@@ -145,6 +152,7 @@ const run = (argv: string[]): number => {
     index: true,
     check: true,
     verify: true,
+    status: true,
     impact: true,
     map: true,
     ack: true,
@@ -209,7 +217,12 @@ const run = (argv: string[]): number => {
         }
         unmappedCount = unmappedReport.unmapped.length
       }
-      const report = adjudicate(db, unmappedCount, currentHead(workspaceRoot) ?? undefined)
+      const head = currentHead(workspaceRoot)
+      const report = adjudicate(db, unmappedCount, head ?? undefined)
+      if (argv.includes('--json')) {
+        console.log(JSON.stringify({ schema: 'urtext.gate/1', head, ...report }, null, 2))
+        return report.overall === 'auto-pass' ? 0 : 1
+      }
       for (const decision of report.decisions) {
         const marker = decision.decision === 'auto-pass' ? '✓' : '⊗'
         const risk = decision.risk === 'high' ? ' [high]' : ''
@@ -219,6 +232,58 @@ const run = (argv: string[]): number => {
       console.log(`\noverall: ${report.overall}`)
       for (const reason of report.reasons) console.log(`  · ${reason}`)
       return report.overall === 'auto-pass' ? 0 : 1
+    }
+
+    if (command === 'status') {
+      const wipFlag = argv.indexOf('--wip-limit')
+      const wipLimit = wipFlag >= 0 ? Number(argv[wipFlag + 1]) : undefined
+      if (wipLimit !== undefined && (!Number.isInteger(wipLimit) || wipLimit < 1)) {
+        console.error('Usage: urtext status [--json] [--wip-limit <n>]')
+        return 1
+      }
+      scanWorkspace(db, workspaceRoot)
+      const unmappedReport = detectUnmapped(db, workspaceRoot)
+      if ('error' in unmappedReport) {
+        console.error(unmappedReport.error)
+        return 1
+      }
+      const report = buildStatus(db, {
+        head: currentHead(workspaceRoot),
+        unmapped: unmappedReport.unmapped,
+        ...(wipLimit !== undefined ? { wipLimit } : {}),
+      })
+      if (argv.includes('--json')) {
+        console.log(JSON.stringify(report, null, 2))
+        return report.items.length > 0 ? 1 : 0
+      }
+      const head = report.head ? report.head.slice(0, 7) : 'n/a'
+      console.log(
+        `status @ ${head} — ${report.counts.human} for you, ${report.counts.agent} for the agent, ${report.counts.autoPass} auto-pass`
+      )
+      const lanes = [
+        { lane: 'human', label: 'your queue', marker: '⊗' },
+        { lane: 'agent', label: 'agent lane', marker: '·' },
+      ] as const
+      for (const { lane, label, marker } of lanes) {
+        const items = report.items.filter((item) => item.lane === lane)
+        if (items.length === 0) continue
+        console.log(`\n${label} (${items.length}):`)
+        for (const item of items) {
+          const risk = item.risk === 'high' ? ' [high]' : ''
+          const title = item.title ? ` ${item.title}` : ''
+          const secondary =
+            item.reasons.length > 1 ? ` (+${item.reasons.slice(1).join(', ')})` : ''
+          console.log(`  ${marker} ${item.key}${title}${risk} — ${item.primary}${secondary}`)
+          console.log(`      next: ${item.next}`)
+        }
+      }
+      if (report.wip.exceeded) {
+        console.log(
+          `\nwarning: human queue ${report.counts.human} exceeds wip limit ${report.wip.limit} — scrutiny degrades on large batches; consider smaller changes`
+        )
+      }
+      if (report.items.length === 0) console.log('nothing pending — the gate should be green')
+      return report.items.length > 0 ? 1 : 0
     }
 
     if (command === 'review') {
@@ -381,61 +446,122 @@ const run = (argv: string[]): number => {
     }
 
     const report = scanWorkspace(db, workspaceRoot)
+    const jsonMode = command === 'check' && argv.includes('--json')
     if (report.units.length === 0) {
+      if (jsonMode) {
+        console.log(
+          JSON.stringify(
+            { schema: 'urtext.check/1', failures: 0, building: [], linkErrors: [], stale: report.stale, unmapped: [] },
+            null,
+            2
+          )
+        )
+        return 0
+      }
       console.log('No feature units found under specs/.')
       return 0
     }
 
     let buildingCount = 0
+    const building: {
+      specPath: string
+      revision: number
+      errors: { line: number; code: string; message: string }[]
+    }[] = []
     for (const { specPath, outcome } of report.outcomes) {
       if (outcome.kind === 'unchanged') {
-        console.log(`  = ${specPath} (rev ${outcome.revision}, unchanged)`)
+        if (!jsonMode) console.log(`  = ${specPath} (rev ${outcome.revision}, unchanged)`)
         continue
       }
       if (outcome.kind === 'tombstoned') {
-        console.log(`  - ${specPath} (rev ${outcome.revision}, tombstoned)`)
+        if (!jsonMode) console.log(`  - ${specPath} (rev ${outcome.revision}, tombstoned)`)
         continue
       }
       const marker = outcome.status === 'ready' ? '✓' : '✗'
-      console.log(`  ${marker} ${specPath} (rev ${outcome.revision}, ${outcome.status})`)
+      if (!jsonMode) console.log(`  ${marker} ${specPath} (rev ${outcome.revision}, ${outcome.status})`)
       if (outcome.status === 'building') {
         buildingCount++
-        for (const error of outcome.errors) {
-          console.log(`      line ${error.line + 1}: [${error.code}] ${error.message}`)
+        building.push({
+          specPath,
+          revision: outcome.revision,
+          errors: outcome.errors.map((error) => ({
+            line: error.line + 1,
+            code: error.code,
+            message: error.message,
+          })),
+        })
+        if (!jsonMode) {
+          for (const error of outcome.errors) {
+            console.log(`      line ${error.line + 1}: [${error.code}] ${error.message}`)
+          }
         }
       }
     }
 
-    for (const error of report.linkErrors) {
-      console.log(
-        `  ✗ ${error.specPath} line ${error.line + 1}: [${error.code}] ${error.message}`
-      )
-    }
-    if (report.stale.staleClauses.length > 0) {
-      const list = report.stale.staleClauses
-        .map((clause) => `${clause.specPath}#${clause.clauseId}`)
-        .join(', ')
-      console.log(
-        `  ~ stale: ${list} (${report.stale.invalidatedEvidence} evidence row(s) invalidated)`
-      )
+    if (!jsonMode) {
+      for (const error of report.linkErrors) {
+        console.log(
+          `  ✗ ${error.specPath} line ${error.line + 1}: [${error.code}] ${error.message}`
+        )
+      }
+      if (report.stale.staleClauses.length > 0) {
+        const list = report.stale.staleClauses
+          .map((clause) => `${clause.specPath}#${clause.clauseId}`)
+          .join(', ')
+        console.log(
+          `  ~ stale: ${list} (${report.stale.invalidatedEvidence} evidence row(s) invalidated)`
+        )
+      }
     }
 
     let failures = buildingCount + report.linkErrors.length
 
     // check --diff: unmapped working-tree changes are a validation failure
     // (VISION P3 — source-of-truth flip is enforced, not prompt-disciplined).
+    let unmappedHunks: { filePath: string; lineStart: number; lineEnd: number }[] = []
     if (command === 'check' && argv.includes('--diff')) {
       const unmappedReport = detectUnmapped(db, workspaceRoot)
       if ('error' in unmappedReport) {
+        if (jsonMode) {
+          console.log(JSON.stringify({ schema: 'urtext.check/1', error: unmappedReport.error }, null, 2))
+          return 1
+        }
         console.error(`\n${unmappedReport.error}`)
         return 1
       }
-      for (const hunk of unmappedReport.unmapped) {
-        console.log(
-          `  ⚠ unmapped ${hunk.filePath}:${hunk.lineStart}-${hunk.lineEnd} — map to a clause, ack, or write back to spec`
-        )
+      unmappedHunks = unmappedReport.unmapped
+      if (!jsonMode) {
+        for (const hunk of unmappedReport.unmapped) {
+          console.log(
+            `  ⚠ unmapped ${hunk.filePath}:${hunk.lineStart}-${hunk.lineEnd} — map to a clause, ack, or write back to spec`
+          )
+        }
       }
       failures += unmappedReport.unmapped.length
+    }
+
+    if (jsonMode) {
+      console.log(
+        JSON.stringify(
+          {
+            schema: 'urtext.check/1',
+            failures,
+            building,
+            linkErrors: report.linkErrors.map((error) => ({
+              specPath: error.specPath,
+              clauseId: error.clauseId,
+              line: error.line + 1,
+              code: error.code,
+              message: error.message,
+            })),
+            stale: report.stale,
+            unmapped: unmappedHunks,
+          },
+          null,
+          2
+        )
+      )
+      return failures > 0 ? 1 : 0
     }
 
     if (command !== 'index' && failures > 0) {
