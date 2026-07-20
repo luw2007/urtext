@@ -28,9 +28,9 @@ strict + exactOptionalPropertyTypes 下 `tsc --noEmit` 干净。
 
 ## C006 CLI 帮助面命令集变更需人工确认 <!-- oracle:manual -->
 
-当前命令集 `index` / `check` / `verify` / `impact` / `map` / `ack` / `blame` /
-`audit` / `gate` / `review` / `decide` / `decisions` 之外的新命令，需要人工确认
-进入本子句或新增子句。
+当前命令集 `index` / `check` / `verify` / `status` / `brief` / `impact` /
+`map` / `ack` / `blame` / `audit` / `gate` / `review` / `decide` /
+`decisions` / `ui` 之外的新命令，需要人工确认进入本子句或新增子句。
 
 ## C007 悬空引用被拒绝 <!-- oracle:test:tests/linker.test.ts risk:high refs:specs/urtext/spec.md#C003 -->
 
@@ -85,3 +85,25 @@ manual oracle 子句永远 pending，无可运行 oracle 判定；`urtext decide
 要消除的（VISION P3、CLAUDE §18 单一事实源）。`scripts/oracle-wiki.sh command-coverage`
 对 cli.ts 的每个命令做 grep-presence 判定——文本在=覆盖在，缺任一命令即 exit 1。
 与 C006（命令集变更需人工确认）互补：C006 管命令集本身变更，本条管文档随之同步。
+
+## C016 status 双车道队列完整且 item 键控 <!-- oracle:test:tests/status.test.ts refs:specs/urtext/spec.md#C012 -->
+
+`urtext status` 把全部待办合并为单一队列：agent 车道（缺证据/失败/stale/未审计——
+无需判断即可修复的前置项）与人车道（前置已满足的裁决项与 unmapped）。一个子句
+仅出现一次（主阻塞+次因）；存在任一 agent 前置时不进入人车道。`--wip-limit`
+（默认 10，临时值）超限告警。
+
+## C017 brief 单命令产出完整裁决上下文 <!-- oracle:test:tests/brief.test.ts refs:specs/urtext/spec.md#C009 -->
+
+`urtext brief` 对任一活跃子句产出条文全量（title/body/oracle/risk/refs）、映射
+代码内容、证据 digest（内容寻址——等结果重跑不换哈希）、audit 状态、影响闭包与
+brief-hash。building/link-error 修订拒发可批准哈希（fail-closed）；anchor-only
+的 risk/oracle 变更必须改变哈希（text_hash 只含标题+正文，不足以承载）。
+
+## C018 high-risk 批准的新鲜度与洁净前置 <!-- oracle:test:tests/brief-gate.test.ts risk:high refs:specs/urtext/spec.md#C013 -->
+
+`review --approve` 与高危 manual 的 `decide --pass` 必须携带与当前内容重算一致的
+brief-hash 且 worktree 洁净，否则以 brief_required / brief_stale / dirty_worktree
+fail-closed。守卫在 domain 写路径（recordReview/recordDecision），CLI 与 ui 同受检。
+HEAD 绑定语义不变（M5a）；--reject/--fail 无前置（保守方向不设门）。gate 在
+worktree 脏时把已批准高危子句重新路由人工。

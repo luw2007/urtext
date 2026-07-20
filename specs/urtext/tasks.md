@@ -16,3 +16,9 @@
     decisions 表、decide --pass/--fail 绑定 HEAD、gate 接入 Decision 放行 manual 子句、urtext decisions 查询。
 - [x] T009 文档 wiki 与命令参考一致性 oracle <!-- role:coder depends:T008 clauses:C015 -->
     docs/wiki/ 三层内容；scripts/oracle-wiki.sh command-coverage 对 cli.ts 命令集 grep-presence 判定。
+- [x] T010 操作台 status 双车道队列 <!-- role:coder depends:T009 clauses:C016 -->
+    item 键控队列、owner 车道、typed reason、wip 告警；status/gate/check 的 --json envelope。
+- [x] T011 决策简报 brief 与 manifest v1 <!-- role:coder depends:T010 clauses:C017 -->
+    条文全量+映射内容+内容寻址证据 digest+影响闭包；ready-guard；CLI/ui 共享文本渲染器。
+- [x] T012 批准前置强化与 ui 操作台 <!-- role:coder depends:T011 gate:true clauses:C018 -->
+    brief-hash+clean-worktree domain 守卫、gate 脏树重路由、ui 双车道+/brief+hash 直通。

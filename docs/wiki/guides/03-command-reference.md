@@ -21,7 +21,8 @@ live.) Most other commands run this scan first — the exceptions are `ack`,
 Index, then report errors. **Exit 1** on any `building` revision (a file with a
 parse or validation error) or any unknown cross-file `ref`. With `--diff`, it
 additionally fails on unmapped working-tree changes — a hand edit that answers to
-no clause. This is the fail-closed gate on grammar and references.
+no clause. This is the fail-closed gate on grammar and references. `--json`
+emits the `urtext.check/1` envelope (valid JSON even on exit 1).
 
 ### `urtext verify`
 Index and check, then run every clause's oracle and record append-only evidence.
@@ -31,6 +32,31 @@ failing clause oracle. Reports pass-rate and manual-share:
 ```text
 34 pass, 0 fail, 5 pending — pass rate 100%, manual share 13%
 ```
+
+## Operator queue and brief
+
+### `urtext status [--json] [--wip-limit <n>]`
+One item-keyed queue merging every pending obligation, split by who can act. The
+**human lane** holds judgment items whose prerequisites are met — pending
+high-risk reviews, undecided manual clauses, audit disagreements, unmapped
+working-tree changes. The **agent lane** holds remediable prerequisites —
+missing/failing evidence, stale clauses, unaudited evidence; a clause with any
+agent-lane reason stays out of the human queue until those resolve. Each item
+appears once, with a primary blocker, secondary reasons, and a suggested next
+action. `--wip-limit` (default 10, provisional) warns when the human queue grows
+past it — scrutiny degrades on large batches. `--json` emits the
+`urtext.status/1` envelope. **Exit 1** when anything is pending.
+
+### `urtext brief <spec-path>#<clause-id> | <file>:<line>[-<end>] [--json]`
+The full adjudication context for one clause in one command: clause text and
+anchors, mapped code content read from the working tree, the latest evidence
+(content-addressed digest — an identical re-verify keeps the hash stable),
+meta-audit state, the impact closure, and review/decision history. The last line
+is the **brief-hash**: the freshness token that `review --approve` and a
+high-risk `decide --pass` must quote via `--brief <hash>`. A clause on a
+`building` revision or with unresolved refs gets **no approvable hash**
+(fail-closed). A `<file>:<line>` target resolves through `blame` and briefs
+every constraining clause. **Exit 1** when any requested brief is refused.
 
 ## Impact analysis
 
@@ -86,7 +112,10 @@ Risk-tier adjudication with **additive** predicates. Every runnable clause needs
 needs a human `review --approve` at the current HEAD; a manual clause needs a human
 `decide --pass` at the current HEAD instead of runnable evidence (and no
 meta-audit). Everything else routes to a human. `--diff` also counts unmapped
-changes. **Exit 1** when any clause needs a human. *v0 caveat:* the gate matches
+changes; `--json` emits the `urtext.gate/1` envelope. An approved high-risk
+clause is **re-routed to a human while the worktree is dirty** — uncommitted
+edits cannot ride a clean-tree approval. **Exit 1** when any clause needs a
+human. *v0 caveat:* the gate matches
 evidence by clause id, not revision, so re-`verify` before you `gate` (see [the
 gate](../mechanisms/06-meta-audit-gate.md)).
 
@@ -97,16 +126,22 @@ overall: human
 
 ## Human decisions (the ledger)
 
-### `urtext review <spec-path>#<clause-id> --approve|--reject [note…]`
+### `urtext review <spec-path>#<clause-id> --approve|--reject [--brief <hash>] [note…]`
 Record a human code review for a high-risk clause (the unsafe lane). Binds the
-current HEAD sha; if HEAD moves, the review is stale and must be redone. Rejects an
-unknown or non-high-risk clause, or a git failure. Persists to the `reviews` table
-(no CLI readback in v0 — the gate consumes it).
+current HEAD sha; if HEAD moves, the review is stale and must be redone.
+**Approving requires a clean worktree and the current brief-hash** (from
+`urtext brief`): uncommitted edits or a missing/stale hash fail closed
+(`dirty_worktree` / `brief_required` / `brief_stale`). Rejecting needs neither —
+it is the conservative direction. Rejects an unknown or non-high-risk clause, or
+a git failure. Persists to the `reviews` table (history readback via
+`urtext brief`).
 
-### `urtext decide <spec-path>#<clause-id> --pass|--fail [note…]`
+### `urtext decide <spec-path>#<clause-id> --pass|--fail [--brief <hash>] [note…]`
 Record a human decision for a `manual`-oracle clause. Also binds the HEAD sha and
-lands in the `decisions` ledger. Rejects an unknown or non-manual clause, or a git
-failure.
+lands in the `decisions` ledger. **Passing a `risk:high` manual clause requires a
+clean worktree and the current brief-hash**, same as an approval; `--fail` and
+low-risk decisions need neither. Rejects an unknown or non-manual clause, or a
+git failure.
 
 ### `urtext decisions`
 List the Decision ledger, newest first.
@@ -117,16 +152,20 @@ No decisions recorded.
 ```
 
 ### `urtext ui [--port <n>] [--no-open]`
-Open a local review panel to adjudicate `manual`-oracle clauses by click. Starts
-an **ephemeral** foreground server on `127.0.0.1` (random port unless `--port`),
-opens your browser (`--no-open` skips it), and blocks until **Ctrl-C**. Each
-pending manual clause gets pass/fail buttons; a click posts to the same guarded
-`recordDecision` path as `urtext decide`, so the verdict lands in the `decisions`
-ledger and `gate` sees it immediately. Already-decided clauses show their verdict
-with no buttons. This is an interactive-session process — not a daemon (no fork,
-no pid file, no auto-start), the same category as the editor `git rebase -i`
-spawns (VISION P8). Hardening: loopback-only, per-session CSRF token, same-origin
-and JSON-content-type checks, request-body cap. Exit 0 on Ctrl-C.
+Open the local operator console. Starts an **ephemeral** foreground server on
+`127.0.0.1` (random port unless `--port`), opens your browser (`--no-open` skips
+it), and blocks until **Ctrl-C**. The page renders the same two-lane queue as
+`urtext status`, links every clause item to its brief (`/brief` wraps the same
+text `urtext brief` prints), and gives pending manual clauses pass/fail buttons —
+a click fetches the brief-hash and posts to the same guarded `recordDecision`
+path as `urtext decide`, so a high-risk manual clause cannot be passed without
+the current brief (C018) and the verdict lands in the `decisions` ledger
+immediately. High-risk CODE review stays CLI-only: the panel shows the pending
+item and the command, but code is the only reviewable fact (P5). This is an
+interactive-session process — not a daemon (no fork, no pid file, no
+auto-start), the same category as the editor `git rebase -i` spawns (VISION P8).
+Hardening: loopback-only, per-session CSRF token, same-origin and
+JSON-content-type checks, request-body cap. Exit 0 on Ctrl-C.
 
 ## Exit-code summary
 
@@ -137,11 +176,13 @@ authoritative):
 |---|---|
 | `check` | building revision, unknown ref; `--diff` also: unmapped change |
 | `verify` | validation/link error before oracles, or any clause oracle fails |
+| `status` | anything is pending in either lane |
+| `brief` | bad target, or any requested brief is refused (building/link-broken revision, unknown clause) |
 | `audit --import` | current coverage contains a `disagree` |
 | `gate` | any clause needs a human |
 | `map` | unknown clause, bad arguments, git failure, or a range that does not overlap the current `git diff` |
 | `ack` | bad arguments, git failure, or a range that does not overlap the current `git diff` |
-| `review` | unknown or non-high-risk clause, bad arguments, or git failure |
-| `decide` | unknown or non-manual clause, bad arguments, or git failure |
+| `review` | unknown or non-high-risk clause, bad arguments, git failure; `--approve` also: dirty worktree, missing/stale brief-hash |
+| `decide` | unknown or non-manual clause, bad arguments, git failure; high-risk `--pass` also: dirty worktree, missing/stale brief-hash |
 
 All other commands exit 0 on success.
