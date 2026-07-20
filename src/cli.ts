@@ -42,7 +42,7 @@ import { impact } from './linker.js'
 import { openRegistry } from './registry.js'
 import { scanWorkspace } from './scanner.js'
 import { buildStatus } from './status.js'
-import { currentHead, listReviews, recordReview } from './review.js'
+import { currentHead, listReviews, recordReview, worktreeDirty } from './review.js'
 import { verifyWorkspace } from './verifier.js'
 import { startUiServer } from './ui-server.js'
 
@@ -78,10 +78,12 @@ const USAGE = [
   '  urtext gate [--diff]',
   '                   Risk-tier adjudication; --diff also counts unmapped changes.',
   '                   exit 1 when any clause needs a human.',
-  '  urtext review <spec-path>#<clause-id> --approve|--reject [note…]',
+  '  urtext review <spec-path>#<clause-id> --approve|--reject [--brief <hash>] [note…]',
   '                   Record a human code review for a high-risk clause (unsafe lane).',
-  '  urtext decide <spec-path>#<clause-id> --pass|--fail [note…]',
+  '                   Approving requires a clean worktree and the current brief-hash.',
+  '  urtext decide <spec-path>#<clause-id> --pass|--fail [--brief <hash>] [note…]',
   '                   Record a human decision for a manual-oracle clause (Decision ledger).',
+  '                   Passing a risk:high manual clause requires the current brief-hash.',
   '  urtext decisions List the Decision ledger, newest first.',
   '  urtext ui [--port <n>] [--no-open]',
   '                   Open a local review panel to adjudicate manual clauses by',
@@ -227,9 +229,12 @@ const run = (argv: string[]): number => {
         unmappedCount = unmappedReport.unmapped.length
       }
       const head = currentHead(workspaceRoot)
-      const report = adjudicate(db, unmappedCount, head ?? undefined)
+      const dirty = worktreeDirty(workspaceRoot) ?? false
+      const report = adjudicate(db, unmappedCount, head ?? undefined, { dirtyWorktree: dirty })
       if (argv.includes('--json')) {
-        console.log(JSON.stringify({ schema: 'urtext.gate/1', head, ...report }, null, 2))
+        console.log(
+          JSON.stringify({ schema: 'urtext.gate/1', head, worktreeDirty: dirty, ...report }, null, 2)
+        )
         return report.overall === 'auto-pass' ? 0 : 1
       }
       for (const decision of report.decisions) {
@@ -259,6 +264,7 @@ const run = (argv: string[]): number => {
       const report = buildStatus(db, {
         head: currentHead(workspaceRoot),
         unmapped: unmappedReport.unmapped,
+        dirtyWorktree: worktreeDirty(workspaceRoot) ?? false,
         ...(wipLimit !== undefined ? { wipLimit } : {}),
       })
       if (argv.includes('--json')) {
@@ -363,15 +369,27 @@ const run = (argv: string[]): number => {
       const clause = parseClauseTarget(argv[1])
       const mode = argv[2]
       const decision = mode === '--approve' ? 'approve' : mode === '--reject' ? 'reject' : null
-      const note = argv.slice(3).join(' ')
-      if (!clause || decision === null) {
-        console.error('Usage: urtext review <spec-path>#<clause-id> --approve|--reject [note…]')
+      const rest = argv.slice(3)
+      const briefFlag = rest.indexOf('--brief')
+      const briefHash = briefFlag >= 0 ? rest[briefFlag + 1] : undefined
+      if (briefFlag >= 0) rest.splice(briefFlag, 2)
+      const note = rest.join(' ')
+      if (!clause || decision === null || (briefFlag >= 0 && !briefHash)) {
+        console.error(
+          'Usage: urtext review <spec-path>#<clause-id> --approve|--reject [--brief <hash>] [note…]'
+        )
         return 1
       }
       scanWorkspace(db, workspaceRoot)
       const outcome = recordReview(
         db,
-        { ...clause, decision, reviewer: reviewerName(), ...(note ? { note } : {}) },
+        {
+          ...clause,
+          decision,
+          reviewer: reviewerName(),
+          ...(note ? { note } : {}),
+          ...(briefHash ? { briefHash } : {}),
+        },
         workspaceRoot,
         Date.now()
       )
@@ -389,15 +407,27 @@ const run = (argv: string[]): number => {
       const clause = parseClauseTarget(argv[1])
       const mode = argv[2]
       const verdict = mode === '--pass' ? 'pass' : mode === '--fail' ? 'fail' : null
-      const note = argv.slice(3).join(' ')
-      if (!clause || verdict === null) {
-        console.error('Usage: urtext decide <spec-path>#<clause-id> --pass|--fail [note…]')
+      const rest = argv.slice(3)
+      const briefFlag = rest.indexOf('--brief')
+      const briefHash = briefFlag >= 0 ? rest[briefFlag + 1] : undefined
+      if (briefFlag >= 0) rest.splice(briefFlag, 2)
+      const note = rest.join(' ')
+      if (!clause || verdict === null || (briefFlag >= 0 && !briefHash)) {
+        console.error(
+          'Usage: urtext decide <spec-path>#<clause-id> --pass|--fail [--brief <hash>] [note…]'
+        )
         return 1
       }
       scanWorkspace(db, workspaceRoot)
       const outcome = recordDecision(
         db,
-        { ...clause, verdict, decider: reviewerName(), ...(note ? { note } : {}) },
+        {
+          ...clause,
+          verdict,
+          decider: reviewerName(),
+          ...(note ? { note } : {}),
+          ...(briefHash ? { briefHash } : {}),
+        },
         workspaceRoot,
         Date.now()
       )

@@ -33,6 +33,7 @@ export type StatusReason =
   | 'unaudited'
   | 'audit_disagreement'
   | 'review_rejected'
+  | 'worktree_dirty'
   | 'review_needed'
   | 'manual_failed'
   | 'manual_undecided'
@@ -42,6 +43,7 @@ const AGENT_ORDER: StatusReason[] = ['missing_evidence', 'evidence_failing', 'st
 const HUMAN_ORDER: StatusReason[] = [
   'audit_disagreement',
   'review_rejected',
+  'worktree_dirty',
   'review_needed',
   'manual_failed',
   'manual_undecided',
@@ -84,6 +86,7 @@ const NEXT_HINT: Record<StatusReason, string> = {
   unaudited: '`urtext audit --export` → different-preset audit → `urtext audit --import`',
   audit_disagreement: 'resolve the meta-audit disagreement (D3): fix the oracle or re-audit',
   review_rejected: 'address the rejection, then `urtext brief` + `urtext review --approve --brief <hash>`',
+  worktree_dirty: 'uncommitted edits ride a clean-tree approval — commit (HEAD moves, re-review) or revert',
   review_needed: '`urtext brief <key>`, review the code, then `urtext review <key> --approve|--reject --brief <hash>`',
   manual_failed: 'address the recorded failure, then re-`urtext decide`',
   manual_undecided: '`urtext brief <key>`, then `urtext decide <key> --pass|--fail`',
@@ -91,7 +94,7 @@ const NEXT_HINT: Record<StatusReason, string> = {
 }
 
 /** Mirror of the gate's escalation logic as typed reason codes. */
-const clauseReasons = (decision: ClauseDecision): Set<StatusReason> => {
+const clauseReasons = (decision: ClauseDecision, dirtyWorktree: boolean): Set<StatusReason> => {
   const reasons = new Set<StatusReason>()
   const isManual = decision.decisionVerdict !== 'n/a'
   if (decision.evidenceVerdict === 'missing') reasons.add('missing_evidence')
@@ -108,12 +111,13 @@ const clauseReasons = (decision: ClauseDecision): Set<StatusReason> => {
   if (decision.risk === 'high') {
     if (decision.reviewStatus === 'rejected') reasons.add('review_rejected')
     else if (decision.reviewStatus === 'none') reasons.add('review_needed')
+    else if (decision.reviewStatus === 'approved' && dirtyWorktree) reasons.add('worktree_dirty')
   }
   return reasons
 }
 
-const clauseItem = (decision: ClauseDecision): StatusItem | null => {
-  const present = clauseReasons(decision)
+const clauseItem = (decision: ClauseDecision, dirtyWorktree: boolean): StatusItem | null => {
+  const present = clauseReasons(decision, dirtyWorktree)
   if (present.size === 0) return null
   const ordered = [...AGENT_ORDER, ...HUMAN_ORDER].filter((reason) => present.has(reason))
   const lane: StatusLane = AGENT_ORDER.some((reason) => present.has(reason)) ? 'agent' : 'human'
@@ -141,14 +145,19 @@ export interface StatusInput {
   head: string | null
   /** Working-tree hunks with no mapping/ack/spec write-back (dwarf.detectUnmapped). */
   unmapped: DiffHunk[]
+  /** Uncommitted worktree state (review.worktreeDirty) — re-queues approved high-risk clauses. */
+  dirtyWorktree?: boolean
   wipLimit?: number
 }
 
 export const buildStatus = (db: Database, input: StatusInput): StatusReport => {
-  const report = adjudicate(db, input.unmapped.length, input.head ?? undefined)
+  const dirty = input.dirtyWorktree ?? false
+  const report = adjudicate(db, input.unmapped.length, input.head ?? undefined, {
+    dirtyWorktree: dirty,
+  })
 
   const clauseItems = report.decisions
-    .map(clauseItem)
+    .map((decision) => clauseItem(decision, dirty))
     .filter((item): item is StatusItem => item !== null)
   const unmappedItems: StatusItem[] = input.unmapped.map((hunk) => ({
     key: `${hunk.filePath}:${hunk.lineStart}-${hunk.lineEnd}`,

@@ -81,12 +81,15 @@ export {
 export {
   recordReview,
   reviewsAtHead,
+  listReviews,
   currentHead,
+  worktreeDirty,
   ensureReviewLedger,
   REVIEW_SCHEMA,
   type ReviewDecision,
   type ReviewInput,
   type ReviewOutcome,
+  type ReviewRecord,
 } from './review.js'
 export {
   recordDecision,
@@ -108,3 +111,23 @@ export {
   type DecideResult,
 } from './review-ui.js'
 export { startUiServer, type UiServerHandle } from './ui-server.js'
+export {
+  buildStatus,
+  DEFAULT_WIP_LIMIT,
+  type StatusItem,
+  type StatusInput,
+  type StatusLane,
+  type StatusReason,
+  type StatusReport,
+} from './status.js'
+export {
+  buildBrief,
+  currentBriefHash,
+  renderBriefText,
+  type Brief,
+  type BriefManifest,
+  type BriefMapping,
+  type BriefOutcome,
+  type BriefHistoryLine,
+  type ClauseTarget,
+} from './brief.js'

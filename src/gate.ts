@@ -106,9 +106,16 @@ const evidenceByClause = (db: Database): Map<string, EvidenceState> => {
  * `unmappedCount` comes from the caller's real-diff scan (0 when unchecked).
  * `headSha`, when given, activates the unsafe lane: a high-risk clause with
  * an `approve` review at that commit is cleared for auto-pass; a `reject` or
- * missing review keeps it human.
+ * missing review keeps it human. `opts.dirtyWorktree` closes the loophole
+ * where uncommitted edits ride an earlier clean-tree approval: an approved
+ * high-risk clause goes back to human until the tree is clean again.
  */
-export const adjudicate = (db: Database, unmappedCount = 0, headSha?: string): GateReport => {
+export const adjudicate = (
+  db: Database,
+  unmappedCount = 0,
+  headSha?: string,
+  opts: { dirtyWorktree?: boolean } = {}
+): GateReport => {
   const evidence = evidenceByClause(db)
   const audits = coverage(db)
   const auditByClause = new Map<string, 'agree' | 'disagree'>()
@@ -136,6 +143,8 @@ export const adjudicate = (db: Database, unmappedCount = 0, headSha?: string): G
       reviewStatus = review === 'approve' ? 'approved' : review === 'reject' ? 'rejected' : 'none'
       if (reviewStatus === 'rejected') reasons.push('high-risk: human code review REJECTED (P5)')
       else if (reviewStatus === 'none') reasons.push('high-risk: needs human code review — `urtext review` (P5)')
+      else if (opts.dirtyWorktree === true)
+        reasons.push('high-risk: worktree dirty since approval — commit or re-review (P5)')
     }
 
     // Memory layer (DESIGN §7): a manual clause is `pending` forever; only a

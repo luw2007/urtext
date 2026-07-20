@@ -16,6 +16,8 @@ import { spawnSync } from 'node:child_process'
 
 import type { Database } from 'better-sqlite3'
 
+import { currentBriefHash } from './brief.js'
+
 export const REVIEW_SCHEMA = `
 CREATE TABLE IF NOT EXISTS reviews (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -41,16 +43,34 @@ export interface ReviewInput {
   decision: ReviewDecision
   reviewer: string
   note?: string
+  /** Freshness token from `urtext brief` — required to approve (P2 hardening). */
+  briefHash?: string
 }
 
 export type ReviewOutcome =
   | { kind: 'recorded'; id: number; commitSha: string }
-  | { kind: 'rejected'; code: 'unknown_clause' | 'not_high_risk' | 'git_failed'; message: string }
+  | {
+      kind: 'rejected'
+      code:
+        | 'unknown_clause'
+        | 'not_high_risk'
+        | 'dirty_worktree'
+        | 'brief_required'
+        | 'brief_stale'
+        | 'git_failed'
+      message: string
+    }
 
 /** Current HEAD sha, or null when not a git repo / git unavailable. */
 export const currentHead = (workspaceRoot: string): string | null => {
   const result = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: workspaceRoot, encoding: 'utf8' })
   return result.error || result.status !== 0 ? null : result.stdout.trim()
+}
+
+/** True when the worktree has uncommitted state; null when git fails. */
+export const worktreeDirty = (workspaceRoot: string): boolean | null => {
+  const result = spawnSync('git', ['status', '--porcelain'], { cwd: workspaceRoot, encoding: 'utf8' })
+  return result.error || result.status !== 0 ? null : result.stdout.trim().length > 0
 }
 
 interface LiveClauseRisk {
@@ -77,6 +97,13 @@ const liveClauseRisk = (db: Database, specPath: string, clauseId: string): 'low'
  * Record a human code-review decision for a high-risk clause, bound to the
  * current HEAD. Only high-risk clauses enter this lane — a low-risk clause
  * rides evidence + meta-audit and needs no code review.
+ *
+ * Approving carries two fail-closed preconditions (P2 hardening; rejecting
+ * is conservative and needs neither):
+ *  - clean worktree — a HEAD-bound approval cannot cover uncommitted edits,
+ *    so they must be committed (moving HEAD → prior approvals lapse) first;
+ *  - a current brief-hash — the approval must reference the clause text,
+ *    mapped code content, and evidence state as they are NOW.
  */
 export const recordReview = (
   db: Database,
@@ -98,6 +125,39 @@ export const recordReview = (
       kind: 'rejected',
       code: 'not_high_risk',
       message: `Clause ${input.specPath}#${input.clauseId} is low-risk; the unsafe lane is for risk:high clauses only.`,
+    }
+  }
+  if (input.decision === 'approve') {
+    const dirty = worktreeDirty(workspaceRoot)
+    if (dirty === null) {
+      return { kind: 'rejected', code: 'git_failed', message: 'git status --porcelain failed' }
+    }
+    if (dirty) {
+      return {
+        kind: 'rejected',
+        code: 'dirty_worktree',
+        message:
+          'Worktree has uncommitted changes — a HEAD-bound approval would not cover them. Commit first, then review.',
+      }
+    }
+    if (!input.briefHash) {
+      return {
+        kind: 'rejected',
+        code: 'brief_required',
+        message: `High-risk approval requires the current brief — run \`urtext brief ${input.specPath}#${input.clauseId}\` and pass --brief <hash>.`,
+      }
+    }
+    const expected = currentBriefHash(db, workspaceRoot, {
+      specPath: input.specPath,
+      clauseId: input.clauseId,
+    })
+    if (expected === null || expected !== input.briefHash) {
+      return {
+        kind: 'rejected',
+        code: 'brief_stale',
+        message:
+          'The provided brief-hash does not match the current content — re-run `urtext brief` and re-read before approving.',
+      }
     }
   }
   const sha = currentHead(workspaceRoot)

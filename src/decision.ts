@@ -19,6 +19,8 @@ import { spawnSync } from 'node:child_process'
 
 import type { Database } from 'better-sqlite3'
 
+import { currentBriefHash } from './brief.js'
+
 export const DECISION_SCHEMA = `
 CREATE TABLE IF NOT EXISTS decisions (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -44,11 +46,23 @@ export interface DecisionInput {
   verdict: DecisionVerdict
   decider: string
   note?: string
+  /** Freshness token from `urtext brief` — required to pass a high-risk manual clause. */
+  briefHash?: string
 }
 
 export type DecisionOutcome =
   | { kind: 'recorded'; id: number; commitSha: string }
-  | { kind: 'rejected'; code: 'unknown_clause' | 'not_manual' | 'git_failed'; message: string }
+  | {
+      kind: 'rejected'
+      code:
+        | 'unknown_clause'
+        | 'not_manual'
+        | 'dirty_worktree'
+        | 'brief_required'
+        | 'brief_stale'
+        | 'git_failed'
+      message: string
+    }
 
 export interface DecisionRecord {
   specPath: string
@@ -66,11 +80,21 @@ export const currentHead = (workspaceRoot: string): string | null => {
   return result.error || result.status !== 0 ? null : result.stdout.trim()
 }
 
-/** Oracle kind of the clause in the latest live revision, or null when absent. */
-const liveClauseOracleKind = (db: Database, specPath: string, clauseId: string): string | null => {
+/** True when the worktree has uncommitted state; null when git fails. */
+const worktreeDirty = (workspaceRoot: string): boolean | null => {
+  const result = spawnSync('git', ['status', '--porcelain'], { cwd: workspaceRoot, encoding: 'utf8' })
+  return result.error || result.status !== 0 ? null : result.stdout.trim().length > 0
+}
+
+/** Oracle kind + risk of the clause in the latest live revision, or null when absent. */
+const liveClauseMeta = (
+  db: Database,
+  specPath: string,
+  clauseId: string
+): { oracleKind: string; risk: 'low' | 'high' } | null => {
   const row = db
     .prepare(
-      `SELECT c.oracle_kind AS oracleKind FROM clauses c
+      `SELECT c.oracle_kind AS oracleKind, c.risk FROM clauses c
        JOIN (
          SELECT spec_path, MAX(revision) AS revision
          FROM revisions WHERE file_kind = 'clauses' GROUP BY spec_path
@@ -78,13 +102,16 @@ const liveClauseOracleKind = (db: Database, specPath: string, clauseId: string):
        JOIN revisions r ON r.spec_path = c.spec_path AND r.revision = c.revision
        WHERE c.spec_path = ? AND c.clause_id = ? AND r.status != 'tombstoned'`
     )
-    .get(specPath, clauseId) as { oracleKind: string | null } | undefined
-  return row === undefined ? null : (row.oracleKind ?? '')
+    .get(specPath, clauseId) as { oracleKind: string | null; risk: 'low' | 'high' } | undefined
+  return row === undefined ? null : { oracleKind: row.oracleKind ?? '', risk: row.risk }
 }
 
 /**
  * Record a human adjudication for a manual-oracle clause, bound to HEAD.
- * Rejects non-manual clauses (they have an objective oracle, P2).
+ * Rejects non-manual clauses (they have an objective oracle, P2). Passing a
+ * HIGH-RISK manual clause carries the same fail-closed preconditions as a
+ * code-review approval: clean worktree + a current brief-hash (P2 hardening;
+ * `--fail` and low-risk decisions are conservative and need neither).
  */
 export const recordDecision = (
   db: Database,
@@ -93,19 +120,52 @@ export const recordDecision = (
   timestamp: number
 ): DecisionOutcome => {
   ensureDecisionLedger(db)
-  const oracleKind = liveClauseOracleKind(db, input.specPath, input.clauseId)
-  if (oracleKind === null) {
+  const meta = liveClauseMeta(db, input.specPath, input.clauseId)
+  if (meta === null) {
     return {
       kind: 'rejected',
       code: 'unknown_clause',
       message: `No live clause ${input.specPath}#${input.clauseId} — run \`urtext index\` first.`,
     }
   }
-  if (oracleKind !== 'manual') {
+  if (meta.oracleKind !== 'manual') {
     return {
       kind: 'rejected',
       code: 'not_manual',
-      message: `Clause ${input.specPath}#${input.clauseId} has a ${oracleKind || 'runnable'} oracle; only manual clauses are humanly adjudicated (P2).`,
+      message: `Clause ${input.specPath}#${input.clauseId} has a ${meta.oracleKind || 'runnable'} oracle; only manual clauses are humanly adjudicated (P2).`,
+    }
+  }
+  if (meta.risk === 'high' && input.verdict === 'pass') {
+    const dirty = worktreeDirty(workspaceRoot)
+    if (dirty === null) {
+      return { kind: 'rejected', code: 'git_failed', message: 'git status --porcelain failed' }
+    }
+    if (dirty) {
+      return {
+        kind: 'rejected',
+        code: 'dirty_worktree',
+        message:
+          'Worktree has uncommitted changes — a HEAD-bound decision would not cover them. Commit first, then decide.',
+      }
+    }
+    if (!input.briefHash) {
+      return {
+        kind: 'rejected',
+        code: 'brief_required',
+        message: `Passing a high-risk manual clause requires the current brief — run \`urtext brief ${input.specPath}#${input.clauseId}\` and pass --brief <hash>.`,
+      }
+    }
+    const expected = currentBriefHash(db, workspaceRoot, {
+      specPath: input.specPath,
+      clauseId: input.clauseId,
+    })
+    if (expected === null || expected !== input.briefHash) {
+      return {
+        kind: 'rejected',
+        code: 'brief_stale',
+        message:
+          'The provided brief-hash does not match the current content — re-run `urtext brief` and re-read before deciding.',
+      }
     }
   }
   const sha = currentHead(workspaceRoot)

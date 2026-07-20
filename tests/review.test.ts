@@ -7,6 +7,7 @@ import DatabaseConstructor, { type Database } from 'better-sqlite3'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 
 import { adjudicate } from '../src/gate.js'
+import { currentBriefHash } from '../src/brief.js'
 import { openRegistry } from '../src/registry.js'
 import { currentHead, recordReview, reviewsAtHead } from '../src/review.js'
 import { scanWorkspace } from '../src/scanner.js'
@@ -49,6 +50,13 @@ const agreeAll = () => {
   }
 }
 
+/** Current brief-hash for C001 — approvals must quote it (P2 hardening). */
+const hashFor = (root: string): string => {
+  const hash = currentBriefHash(db, root, { specPath: 'specs/x/spec.md', clauseId: 'C001' })
+  if (hash === null) throw new Error('expected an approvable brief for C001')
+  return hash
+}
+
 beforeEach(() => {
   db = new DatabaseConstructor(':memory:')
   openRegistry(db)
@@ -64,7 +72,13 @@ describe('recordReview', () => {
     const root = setupRepo()
     const outcome = recordReview(
       db,
-      { specPath: 'specs/x/spec.md', clauseId: 'C001', decision: 'approve', reviewer: 'alice' },
+      {
+        specPath: 'specs/x/spec.md',
+        clauseId: 'C001',
+        decision: 'approve',
+        reviewer: 'alice',
+        briefHash: hashFor(root),
+      },
       root,
       1
     )
@@ -112,7 +126,13 @@ describe('gate unsafe lane', () => {
     agreeAll()
     recordReview(
       db,
-      { specPath: 'specs/x/spec.md', clauseId: 'C001', decision: 'approve', reviewer: 'alice' },
+      {
+        specPath: 'specs/x/spec.md',
+        clauseId: 'C001',
+        decision: 'approve',
+        reviewer: 'alice',
+        briefHash: hashFor(root),
+      },
       root,
       1
     )
@@ -142,7 +162,13 @@ describe('gate unsafe lane', () => {
     agreeAll()
     recordReview(
       db,
-      { specPath: 'specs/x/spec.md', clauseId: 'C001', decision: 'approve', reviewer: 'alice' },
+      {
+        specPath: 'specs/x/spec.md',
+        clauseId: 'C001',
+        decision: 'approve',
+        reviewer: 'alice',
+        briefHash: hashFor(root),
+      },
       root,
       1
     )
@@ -158,7 +184,12 @@ describe('gate unsafe lane', () => {
   test('the latest review at a head wins (reject after approve)', () => {
     const root = setupRepo()
     const key = 'specs/x/spec.md#C001'
-    recordReview(db, { specPath: 'specs/x/spec.md', clauseId: 'C001', decision: 'approve', reviewer: 'a' }, root, 1)
+    recordReview(
+      db,
+      { specPath: 'specs/x/spec.md', clauseId: 'C001', decision: 'approve', reviewer: 'a', briefHash: hashFor(root) },
+      root,
+      1
+    )
     recordReview(db, { specPath: 'specs/x/spec.md', clauseId: 'C001', decision: 'reject', reviewer: 'a' }, root, 2)
     const sha = currentHead(root)
     expect(sha).not.toBeNull()
