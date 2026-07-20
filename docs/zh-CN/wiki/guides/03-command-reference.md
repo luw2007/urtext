@@ -91,14 +91,17 @@ No clause constrains src/verifier.ts:1.
 
 ## 元验证与裁决
 
-### `urtext audit --export | --import <file>`
-跨模型元验证协议。`--export` 会写出
-证据覆盖包（`urtext-meta-audit/v0`），供你在不同 preset 上运行的审计者使用
-（不同 preset 的要求是操作员纪律——import 接受任何 `auditor` 名称）。
-`--import` 会读回它的 `agree`/`disagree` 裁决。若由最新的
-非失效、非 pending 证据上的最新裁决构成的当前覆盖包含 `disagree`，
-则 **Exit 1**。被后来的 `agree` 取代的 disagree，或作用在已失效证据上的
-不计入。
+### `urtext audit --export | --import <file> | --run <claude|codex|omp> [--model <model>] [--profile <profile>]`
+跨模型元验证协议。`--export` 会写出证据覆盖包（`urtext-meta-audit/v0`），供不同
+preset 的审计者使用；`--import` 读回其 `agree`/`disagree` 裁决。`--run` 是自动
+链路：Urtext 导出当前证据，使用所选 headless CLI 的只读/无工具模式审计，严格校验每个
+evidenceId 恰有一个裁决后才一次性导入。外部 CLI 缺失、超时、异常退出或输出不完整时
+exit 2，且不会写入部分裁决；导入完成但存在 `disagree` 时 exit 1。
+
+`--model` 指定审计模型。`--profile` 仅支持 Codex 和 OMP，用于选择本地隔离配置；Claude
+Code 的 `--bare` 不加载本地 profile。`--run` 记录实际选择的客户端/模型/profile 作为
+auditor，但**不强制**不同 preset：evidence 尚未记录 implementation preset，D3 仍是
+操作员责任。选择审计客户端/模型时必须确保其与实现证据的 preset 不同。
 
 ### `urtext gate [--diff]`
 基于风险分级、采用**叠加**谓词的裁决。每个可运行子句都需要

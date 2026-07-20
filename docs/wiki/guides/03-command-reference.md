@@ -97,14 +97,21 @@ No clause constrains src/verifier.ts:1.
 
 ## Meta-verification and adjudication
 
-### `urtext audit --export | --import <file>`
+### `urtext audit --export | --import <file> | --run <claude|codex|omp> [--model <model>] [--profile <profile>]`
 The cross-model meta-verification protocol. `--export` writes the
-evidence-coverage package (`urtext-meta-audit/v0`) for an auditor you run on a
-different preset (the different-preset requirement is operator discipline — the
-import accepts any `auditor` name). `--import` reads back its `agree`/`disagree`
-verdicts. **Exit 1** when the resulting coverage — the latest verdict over the
-latest non-stale, non-pending evidence — contains a `disagree`. A disagreement
-superseded by a later `agree`, or on since-invalidated evidence, is not counted.
+evidence-coverage package (`urtext-meta-audit/v0`) for an external auditor and
+`--import` reads back `agree`/`disagree` verdicts. `--run` automates the export,
+selected headless auditor invocation, strict exact-coverage validation, and one
+atomic import. The selected client runs in its documented no-tools/read-only mode;
+missing clients, timeouts, non-zero exits, or malformed/incomplete output exit 2
+without importing any verdict. A completed import exits 1 when coverage contains a
+`disagree`.
+
+`--model` chooses the auditor model. `--profile` selects an isolated local Codex or
+OMP profile; Claude Code uses `--bare` and does not load a local profile. `--run`
+records the selected client/model/profile as auditor identity, but cannot enforce
+D3 different-preset separation because evidence does not record the implementation
+preset. Selecting a different preset remains the operator's responsibility.
 
 ### `urtext gate [--diff]`
 Risk-tier adjudication with **additive** predicates. Every runnable clause needs

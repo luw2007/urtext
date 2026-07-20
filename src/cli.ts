@@ -35,6 +35,7 @@ import DatabaseConstructor from 'better-sqlite3'
 
 import { coverage, exportRequest, importVerdicts, type AuditVerdictInput } from './audit.js'
 import { buildBrief, renderBriefText } from './brief.js'
+import { runAuditAgent, type AuditorId } from './audit-runner.js'
 import { blame, detectUnmapped, recordAck, recordMapping } from './dwarf.js'
 import { listDecisions, recordDecision } from './decision.js'
 import { adjudicate } from './gate.js'
@@ -85,7 +86,9 @@ const USAGE = [
   '  urtext decide <spec-path>#<clause-id> --pass|--fail [--brief <hash>] [note…]',
   '                   Record a human decision for a manual-oracle clause (Decision ledger).',
   '                   Passing a risk:high manual clause requires the current brief-hash.',
-  '  urtext decisions List the Decision ledger, newest first.',
+  '  urtext audit --export | --import <file> | --run <claude|codex|omp> [--model <model>] [--profile <profile>]',
+  '                   Export/import meta-audits, or invoke a selected headless auditor.',
+  '                   --run does not enforce D3 preset separation; the operator must do so.',
   '  urtext ui [--port <n>] [--no-open]',
   '                   Open a local review panel to adjudicate manual clauses by',
   '                   click; writes the Decision ledger. Ctrl-C to quit.',
@@ -141,6 +144,11 @@ const normalizeVerdicts = (parsed: unknown): AuditVerdictInput[] | null => {
     verdicts.push({ evidenceId, auditor, verdict, ...(note !== undefined ? { note } : {}) })
   }
   return verdicts
+}
+
+const parseAuditor = (value: string | undefined): AuditorId | null => {
+  if (value === 'claude' || value === 'codex' || value === 'omp') return value
+  return null
 }
 
 const openWorkspaceRegistry = (workspaceRoot: string) => {
@@ -214,7 +222,37 @@ const run = (argv: string[]): number => {
         )
         return report.counts.disagree > 0 ? 1 : 0
       }
-      console.error('Usage: urtext audit --export | --import <file>')
+      if (mode === '--run') {
+        const id = parseAuditor(argv[2])
+        const modelFlag = argv.indexOf('--model')
+        const profileFlag = argv.indexOf('--profile')
+        const model = modelFlag >= 0 ? argv[modelFlag + 1] : undefined
+        const profile = profileFlag >= 0 ? argv[profileFlag + 1] : undefined
+        if (!id || (modelFlag >= 0 && !model) || (profileFlag >= 0 && !profile) || (id === 'claude' && profile !== undefined)) {
+          console.error('Usage: urtext audit --run <claude|codex|omp> [--model <model>] [--profile <profile>]')
+          return 2
+        }
+        const result = runAuditAgent(exportRequest(db), { id, ...(model ? { model } : {}), ...(profile ? { profile } : {}) })
+        if (result.kind === 'rejected') {
+          console.error(`[audit_runner] ${result.message}`)
+          return 2
+        }
+        if (result.verdicts === undefined || result.verdicts.length === 0) {
+          console.log('No decided, current evidence to audit.')
+          return 0
+        }
+        const outcome = importVerdicts(db, result.verdicts, Date.now())
+        if (outcome.kind === 'rejected') {
+          console.error(`[${outcome.code}] ${outcome.message}`)
+          return 2
+        }
+        const report = coverage(db)
+        const cov = report.coverage === null ? 'n/a' : `${Math.round(report.coverage * 100)}%`
+        console.log(`imported ${outcome.count} verdict(s) — coverage ${cov} (${report.counts.agree} agree, ${report.counts.disagree} disagree, ${report.counts.unaudited} unaudited)`)
+        console.error(`D3 remains operator responsibility: selected auditor ${id}${model ? `:${model}` : ''}${profile ? `@${profile}` : ''}; ensure it differs from the implementation preset.`)
+        return report.counts.disagree > 0 ? 1 : 0
+      }
+      console.error('Usage: urtext audit --export | --import <file> | --run <claude|codex|omp> [--model <model>] [--profile <profile>]')
       return 1
     }
 

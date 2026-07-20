@@ -8,11 +8,12 @@ two mechanisms address those gaps: **meta-audit** re-reads the evidence, and the
 
 ## Meta-audit: a second read of the evidence
 
-Urtext itself never calls an LLM. Instead, `urtext audit --export` emits a JSON
-package (protocol `urtext-meta-audit/v0`) — for each decided piece of evidence,
-the clause's meaning, the oracle, and the objective output. An external agent
-reads that package out of process and returns a per-evidence `agree` / `disagree`
-verdict, which `audit --import` feeds back in.
+Urtext can export its JSON package (`urtext audit --export`) for an external
+auditor, or invoke one selected local headless client with `urtext audit --run
+<claude|codex|omp>`. In both forms, each decided piece of evidence includes the
+clause meaning, oracle, and objective output; the auditor returns one
+`agree` / `disagree` verdict per evidence id, which Urtext imports only after
+complete, exact output validation.
 
 The *intent* (DECISIONS D3) is that the auditor runs on a **different preset** from
 the implementer — Codex audits when Claude implemented, and vice versa — so the
