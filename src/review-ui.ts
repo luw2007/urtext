@@ -141,6 +141,9 @@ const csrf = document.querySelector('meta[name=csrf]').content
 document.addEventListener('click', async (e) => {
   const b = e.target.closest('button[data-key]'); if (!b) return
   const key = b.dataset.key
+  const note = prompt(b.dataset.v === 'pass' ? 'One-sentence reason (required to pass):' : 'Reason (optional):')
+  if (note === null) return
+  if (b.dataset.v === 'pass' && !note.trim()) { alert('a one-sentence reason is required to pass'); return }
   const cut = key.lastIndexOf('#')
   const qs = 'spec=' + encodeURIComponent(key.slice(0, cut)) + '&clause=' + encodeURIComponent(key.slice(cut + 1))
   const br = await fetch('/api/brief?' + qs)
@@ -148,7 +151,7 @@ document.addEventListener('click', async (e) => {
   if (bj.error) { alert(bj.error); return }
   const r = await fetch('/api/decide', { method: 'POST',
     headers: { 'content-type': 'application/json', 'x-csrf': csrf },
-    body: JSON.stringify({ key, verdict: b.dataset.v, briefHash: bj.briefHash }) })
+    body: JSON.stringify({ key, verdict: b.dataset.v, briefHash: bj.briefHash, ...(note.trim() ? { note: note.trim() } : {}) }) })
   const j = await r.json(); if (j.error) { alert(j.error); return }
   location.reload()
 })
@@ -216,7 +219,10 @@ export interface DecideResult {
 
 /** Apply one adjudication from the UI. Reuses `recordDecision` guards (P2:
  * non-manual clauses rejected; verdict bound to HEAD; a high-risk manual pass
- * additionally requires the current brief-hash — C018). */
+ * additionally requires the current brief-hash — C018). The ui path further
+ * requires a one-sentence reason to PASS — one-click approval is exactly
+ * where rubber-stamping lives; `fail` is conservative and may omit it. The
+ * CLI keeps `note` optional (typing the command is its own deliberation). */
 export const handleDecide = (
   db: Database,
   root: string,
@@ -224,18 +230,35 @@ export const handleDecide = (
   decider: string
 ): DecideResult => {
   if (typeof input !== 'object' || input === null) return { status: 400, body: { error: 'bad request' } }
-  const { key, verdict, briefHash } = input as { key?: unknown; verdict?: unknown; briefHash?: unknown }
+  const { key, verdict, briefHash, note } = input as {
+    key?: unknown
+    verdict?: unknown
+    briefHash?: unknown
+    note?: unknown
+  }
   if (typeof key !== 'string' || (verdict !== 'pass' && verdict !== 'fail'))
     return { status: 400, body: { error: 'need { key, verdict: pass|fail }' } }
   if (briefHash !== undefined && typeof briefHash !== 'string')
     return { status: 400, body: { error: 'briefHash must be a string' } }
+  if (note !== undefined && typeof note !== 'string')
+    return { status: 400, body: { error: 'note must be a string' } }
+  const trimmedNote = typeof note === 'string' ? note.trim() : ''
+  if (verdict === 'pass' && trimmedNote === '')
+    return { status: 400, body: { error: 'a one-sentence reason (note) is required to pass' } }
   const hash = key.lastIndexOf('#')
   if (hash <= 0) return { status: 400, body: { error: 'bad clause key' } }
   const specPath = key.slice(0, hash)
   const clauseId = key.slice(hash + 1)
   const outcome = recordDecision(
     db,
-    { specPath, clauseId, verdict, decider, ...(briefHash !== undefined ? { briefHash } : {}) },
+    {
+      specPath,
+      clauseId,
+      verdict,
+      decider,
+      ...(trimmedNote ? { note: trimmedNote } : {}),
+      ...(briefHash !== undefined ? { briefHash } : {}),
+    },
     root,
     Date.now()
   )

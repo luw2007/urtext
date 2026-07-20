@@ -146,7 +146,9 @@ No decisions recorded.
 正是 `urtext brief` 打印的同一份文本），待裁决 manual 子句给出 pass/fail
 按钮——点击会先取 brief-hash 再提交到与 `urtext decide` 相同的受守卫
 `recordDecision` 路径，因此高风险 manual 子句没有当前简报无法通过（C018），
-裁决即刻落 `decisions` 账本。高风险**代码**评审保持 CLI-only：面板只展示
+裁决即刻落 `decisions` 账本。点击 **pass** 还会要求输入一句话理由，作为
+决策的 note 落账，并在 ui 写路径上强制非空——一键批准正是盖章化风险所在；
+`fail` 可以不填。高风险**代码**评审保持 CLI-only：面板只展示
 待办与命令，代码是唯一可评审的事实（P5）。这是交互会话期进程——非 daemon
 （不 fork、无 pid 文件、不自启），与 `git rebase -i` 唤起编辑器同类
 （VISION P8）。加固：仅 loopback、会话级 CSRF token、同源与 JSON

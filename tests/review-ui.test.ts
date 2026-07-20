@@ -118,31 +118,46 @@ describe('renderPage', () => {
 })
 
 describe('handleDecide', () => {
-  test('a valid manual decision records and returns 200', () => {
+  test('a valid manual decision with a reason records and returns 200', () => {
     const root = setupRepo()
-    const res = handleDecide(db, root, { key: 'specs/x/spec.md#C001', verdict: 'pass' }, 'alice')
+    const res = handleDecide(
+      db,
+      root,
+      { key: 'specs/x/spec.md#C001', verdict: 'pass', note: 'intent matches the shipped design' },
+      'alice'
+    )
     expect(res.status).toBe(200)
     expect(res.body).toEqual({ ok: true })
     expect(buildUiSnapshot(db, root).decided).toBe(1)
   })
 
+  test('pass needs a one-sentence reason; fail stays conservative without one', () => {
+    const root = setupRepo()
+    expect(handleDecide(db, root, { key: 'specs/x/spec.md#C001', verdict: 'pass' }, 'a').status).toBe(400)
+    expect(
+      handleDecide(db, root, { key: 'specs/x/spec.md#C001', verdict: 'pass', note: '   ' }, 'a').status
+    ).toBe(400)
+    expect(buildUiSnapshot(db, root).decided).toBe(0)
+    expect(handleDecide(db, root, { key: 'specs/x/spec.md#C001', verdict: 'fail' }, 'a').status).toBe(200)
+  })
+
   test('a non-manual clause is rejected (P2 guard)', () => {
     const root = setupRepo()
-    const res = handleDecide(db, root, { key: 'specs/x/spec.md#C002', verdict: 'pass' }, 'alice')
+    const res = handleDecide(db, root, { key: 'specs/x/spec.md#C002', verdict: 'pass', note: 'x' }, 'alice')
     expect(res.status).toBe(400)
     expect(res.body).toHaveProperty('error')
   })
 
   test('an unknown clause is rejected', () => {
     const root = setupRepo()
-    const res = handleDecide(db, root, { key: 'specs/x/spec.md#C999', verdict: 'pass' }, 'alice')
+    const res = handleDecide(db, root, { key: 'specs/x/spec.md#C999', verdict: 'pass', note: 'x' }, 'alice')
     expect(res.status).toBe(400)
   })
 
   test('a malformed verdict or key is rejected without touching the ledger', () => {
     const root = setupRepo()
     expect(handleDecide(db, root, { key: 'specs/x/spec.md#C001', verdict: 'maybe' }, 'a').status).toBe(400)
-    expect(handleDecide(db, root, { key: 'nohash', verdict: 'pass' }, 'a').status).toBe(400)
+    expect(handleDecide(db, root, { key: 'nohash', verdict: 'pass', note: 'x' }, 'a').status).toBe(400)
     expect(handleDecide(db, root, 'not-an-object', 'a').status).toBe(400)
     expect(buildUiSnapshot(db, root).decided).toBe(0)
   })
@@ -171,10 +186,15 @@ describe('operator console (v3)', () => {
   test('high-risk manual decide from the ui needs the brief-hash it can fetch', () => {
     const root = setupRepo('## C003 ship gate <!-- oracle:manual risk:high -->')
     const key = 'specs/x/spec.md#C003'
-    expect(handleDecide(db, root, { key, verdict: 'pass' }, 'a').status).toBe(400)
+    expect(handleDecide(db, root, { key, verdict: 'pass', note: 'x' }, 'a').status).toBe(400)
     const brief = handleBrief(db, root, 'specs/x/spec.md', 'C003')
     if (!('ok' in brief.body)) throw new Error('expected a brief')
-    const res = handleDecide(db, root, { key, verdict: 'pass', briefHash: brief.body.briefHash }, 'a')
+    const res = handleDecide(
+      db,
+      root,
+      { key, verdict: 'pass', briefHash: brief.body.briefHash, note: 'gate reviewed against brief' },
+      'a'
+    )
     expect(res.status).toBe(200)
   })
 })

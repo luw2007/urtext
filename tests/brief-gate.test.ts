@@ -162,7 +162,7 @@ describe('C018 decide hardening (high-risk manual only)', () => {
     const result = handleDecide(
       db,
       root,
-      { key: 'specs/x/spec.md#C002', verdict: 'pass' },
+      { key: 'specs/x/spec.md#C002', verdict: 'pass', note: 'x' },
       'alice'
     )
     expect(result.status).toBe(400)

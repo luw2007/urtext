@@ -160,7 +160,10 @@ text `urtext brief` prints), and gives pending manual clauses pass/fail buttons 
 a click fetches the brief-hash and posts to the same guarded `recordDecision`
 path as `urtext decide`, so a high-risk manual clause cannot be passed without
 the current brief (C018) and the verdict lands in the `decisions` ledger
-immediately. High-risk CODE review stays CLI-only: the panel shows the pending
+immediately. Clicking **pass** additionally prompts for a one-sentence reason,
+recorded as the decision's ledger note and enforced on the ui write path —
+one-click approval is where rubber-stamping lives; `fail` may omit it.
+High-risk CODE review stays CLI-only: the panel shows the pending
 item and the command, but code is the only reviewable fact (P5). This is an
 interactive-session process — not a daemon (no fork, no pid file, no
 auto-start), the same category as the editor `git rebase -i` spawns (VISION P8).
