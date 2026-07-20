@@ -10,7 +10,7 @@ import { recordDecision } from '../src/decision.js'
 import { openRegistry } from '../src/registry.js'
 import { scanWorkspace } from '../src/scanner.js'
 import { verifyWorkspace } from '../src/verifier.js'
-import { buildUiSnapshot, renderPage, handleDecide } from '../src/review-ui.js'
+import { buildUiSnapshot, renderPage, handleDecide, handleBrief } from '../src/review-ui.js'
 
 let db: Database
 const tempDirs: string[] = []
@@ -102,10 +102,10 @@ describe('renderPage', () => {
     expect(html).toContain('✓ pass')
   })
 
-  test('runnable clause is not rendered as a review row', () => {
+  test('runnable clause never gets decide buttons (it may sit in the agent lane)', () => {
     const root = setupRepo()
     const html = renderPage(buildUiSnapshot(db, root), 'tok')
-    expect(html).not.toContain('C002')
+    expect(html).not.toContain('data-key="specs/x/spec.md#C002"')
   })
 
   test('csrf token is embedded and a hostile title cannot break the markup', () => {
@@ -145,5 +145,36 @@ describe('handleDecide', () => {
     expect(handleDecide(db, root, { key: 'nohash', verdict: 'pass' }, 'a').status).toBe(400)
     expect(handleDecide(db, root, 'not-an-object', 'a').status).toBe(400)
     expect(buildUiSnapshot(db, root).decided).toBe(0)
+  })
+})
+
+describe('operator console (v3)', () => {
+  test('snapshot carries the status queue: manual undecided sits in the human lane', () => {
+    const root = setupRepo()
+    const snap = buildUiSnapshot(db, root)
+    const item = snap.status.items.find((entry) => entry.key === 'specs/x/spec.md#C001')
+    expect(item).toMatchObject({ lane: 'human', primary: 'manual_undecided' })
+  })
+
+  test('handleBrief returns the hash + the shared rendered text', () => {
+    const root = setupRepo()
+    const ok = handleBrief(db, root, 'specs/x/spec.md', 'C001')
+    expect(ok.status).toBe(200)
+    if (!('ok' in ok.body)) throw new Error('expected a brief')
+    expect(ok.body.briefHash).toMatch(/^[0-9a-f]{12}$/)
+    expect(ok.body.text).toContain('design intent')
+    expect(ok.body.text).toContain('brief-hash:')
+    expect(handleBrief(db, root, 'specs/x/spec.md', 'C999').status).toBe(404)
+    expect(handleBrief(db, root, null, 'C001').status).toBe(400)
+  })
+
+  test('high-risk manual decide from the ui needs the brief-hash it can fetch', () => {
+    const root = setupRepo('## C003 ship gate <!-- oracle:manual risk:high -->')
+    const key = 'specs/x/spec.md#C003'
+    expect(handleDecide(db, root, { key, verdict: 'pass' }, 'a').status).toBe(400)
+    const brief = handleBrief(db, root, 'specs/x/spec.md', 'C003')
+    if (!('ok' in brief.body)) throw new Error('expected a brief')
+    const res = handleDecide(db, root, { key, verdict: 'pass', briefHash: brief.body.briefHash }, 'a')
+    expect(res.status).toBe(200)
   })
 })

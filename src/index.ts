@@ -106,9 +106,13 @@ export {
   buildUiSnapshot,
   renderPage,
   handleDecide,
+  handleBrief,
+  renderBriefPage,
+  briefHistory,
   type UiSnapshot,
   type UiClause,
   type DecideResult,
+  type BriefApiResult,
 } from './review-ui.js'
 export { startUiServer, type UiServerHandle } from './ui-server.js'
 export {

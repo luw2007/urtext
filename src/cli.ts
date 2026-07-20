@@ -34,7 +34,7 @@ import { join } from 'node:path'
 import DatabaseConstructor from 'better-sqlite3'
 
 import { coverage, exportRequest, importVerdicts, type AuditVerdictInput } from './audit.js'
-import { buildBrief, renderBriefText, type BriefHistoryLine } from './brief.js'
+import { buildBrief, renderBriefText } from './brief.js'
 import { blame, detectUnmapped, recordAck, recordMapping } from './dwarf.js'
 import { listDecisions, recordDecision } from './decision.js'
 import { adjudicate } from './gate.js'
@@ -42,7 +42,8 @@ import { impact } from './linker.js'
 import { openRegistry } from './registry.js'
 import { scanWorkspace } from './scanner.js'
 import { buildStatus } from './status.js'
-import { currentHead, listReviews, recordReview, worktreeDirty } from './review.js'
+import { currentHead, recordReview, worktreeDirty } from './review.js'
+import { briefHistory } from './review-ui.js'
 import { verifyWorkspace } from './verifier.js'
 import { startUiServer } from './ui-server.js'
 
@@ -344,23 +345,7 @@ const run = (argv: string[]): number => {
           return
         }
         const { specPath, clauseId } = outcome.brief.manifest
-        const history: BriefHistoryLine[] = [
-          ...listReviews(db)
-            .filter((record) => record.specPath === specPath && record.clauseId === clauseId)
-            .map((record) => ({
-              when: record.createdAt,
-              what: `review ${record.decision} @ ${record.commitSha.slice(0, 7)} by ${record.reviewer}`,
-              note: record.note,
-            })),
-          ...listDecisions(db)
-            .filter((record) => record.specPath === specPath && record.clauseId === clauseId)
-            .map((record) => ({
-              when: record.createdAt,
-              what: `decide ${record.verdict} @ ${record.commitSha.slice(0, 7)} by ${record.decider}`,
-              note: record.note,
-            })),
-        ].sort((a, b) => b.when - a.when)
-        console.log(renderBriefText(outcome.brief, history))
+        console.log(renderBriefText(outcome.brief, briefHistory(db, { specPath, clauseId })))
       })
       return refused ? 1 : 0
     }
