@@ -110,8 +110,9 @@ export const startUiServer = (
       }
       if (req.method === 'GET' && url.pathname === '/') {
         scanWorkspace(db, root)
+        const audit = url.searchParams.get('audit')
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
-        res.end(renderPage(buildUiSnapshot(db, root), csrfToken))
+        res.end(renderPage(buildUiSnapshot(db, root), csrfToken, audit ?? undefined))
         return
       }
       res.writeHead(404, { 'content-type': 'text/plain' })

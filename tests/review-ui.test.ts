@@ -121,6 +121,13 @@ describe('renderPage', () => {
     expect(html).toContain('button.disabled = true')
   })
 
+  test('renders an audit completion notice after queue refresh', () => {
+    const root = setupRepo()
+    const html = renderPage(buildUiSnapshot(db, root), 'tok', 'imported 39 verdict(s); 22 disagreement(s) moved to Your queue.')
+    expect(html).toContain('id="audit-result"')
+    expect(html).toContain('22 disagreement(s) moved to Your queue.')
+  })
+
   test('csrf token is embedded and a hostile title cannot break the markup', () => {
     const root = setupRepo(`## C003 <script>'"&x <!-- oracle:manual -->`)
     const html = renderPage(buildUiSnapshot(db, root), 'my-token')

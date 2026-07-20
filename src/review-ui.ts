@@ -113,7 +113,7 @@ const auditControls = (items: StatusItem[]): string => {
 /** Render the self-contained console page. No inline handlers; a delegated
  * listener reads `data-*`, fetches the brief-hash, and posts with the session
  * CSRF token. */
-export const renderPage = (snapshot: UiSnapshot, csrfToken: string): string => {
+export const renderPage = (snapshot: UiSnapshot, csrfToken: string, auditResult?: string): string => {
   const human = snapshot.status.items.filter((item) => item.lane === 'human')
   const agent = snapshot.status.items.filter((item) => item.lane === 'agent')
   const decidedRows = snapshot.clauses
@@ -132,6 +132,7 @@ export const renderPage = (snapshot: UiSnapshot, csrfToken: string): string => {
   const wip = snapshot.status.wip.exceeded
     ? `<p style="color:#b80">warning: human queue ${snapshot.status.counts.human} exceeds wip limit ${snapshot.status.wip.limit} — consider smaller changes</p>`
     : ''
+  const notice = auditResult ? `<p id="audit-result" style="color:#075">${esc(auditResult)}</p>` : ''
   const audit = auditControls(snapshot.status.items)
   return `<!doctype html><html><head><meta charset="utf-8">
 <meta name="csrf" content="${esc(csrfToken)}">
@@ -142,6 +143,7 @@ h3{margin:.4rem 0}button{margin-left:.3rem;cursor:pointer}</style></head><body>
 <h2>urtext console <small style="color:#999">· Ctrl-C to quit</small></h2>
 <p>HEAD ${esc(snapshot.head?.slice(0, 7) ?? 'n/a')}${dirty} — ${snapshot.status.counts.human} for you, ${snapshot.status.counts.agent} for the agent, ${snapshot.status.counts.autoPass} auto-pass · ${snapshot.decided}/${snapshot.totalManual} manual decided</p>
 ${wip}
+${notice}
 <h3>Your queue (${human.length})</h3>
 <table>${humanRows || '<tr><td>nothing — prerequisites pending or all clear</td></tr>'}</table>
 <h3>Agent lane (${agent.length})</h3>
@@ -175,7 +177,7 @@ document.getElementById('audit-runner')?.addEventListener('submit', async (e) =>
     const r = await fetch('/api/audit-run', { method: 'POST', headers: { 'content-type': 'application/json', 'x-csrf': csrf },
       body: JSON.stringify({ auditor: fields.get('auditor'), model: fields.get('model'), profile: fields.get('profile') }) })
     const j = await r.json(); if (j.error) { progress.textContent = j.error; button.disabled = false; return }
-    progress.textContent = j.message + ' Refreshing queue…'; location.reload()
+    progress.textContent = j.message + ' Refreshing queue…'; location.href = '/?audit=' + encodeURIComponent(j.message)
   } catch { progress.textContent = 'Audit request failed; no verdicts were imported.'; button.disabled = false }
 })
 </script></body></html>`
