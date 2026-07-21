@@ -255,6 +255,7 @@ describe('browser high-risk review', () => {
     expect(html).toContain('高风险代码审查：specs/x/spec.md#C001 pay guard')
     expect(html).toContain('id="explain-btn"')
     expect(html).toContain('/api/explain')
+    expect(html).toContain('<option value="omp" selected>')
     expect(html).toContain('data-d="approve"')
     expect(html).toContain('/api/review')
     // No hard-coded consequence template — the examples come from the AI, not the page.
