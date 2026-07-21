@@ -110,15 +110,28 @@ const unwrapResult = (value: unknown): unknown => {
 }
 
 const parseJson = (output: string): unknown => {
-  const parsed: unknown = JSON.parse(output)
-  if (Array.isArray(parsed)) {
-    const resultEvent = parsed.find(
-      (event): event is { type: string; result: unknown } =>
-        typeof event === 'object' && event !== null && 'type' in event && event.type === 'result'
-    )
-    return resultEvent !== undefined ? unwrapResult(resultEvent) : parsed
+  try {
+    const parsed: unknown = JSON.parse(output)
+    if (Array.isArray(parsed)) {
+      const resultEvent = parsed.find(
+        (event): event is { type: string; result: unknown } =>
+          typeof event === 'object' && event !== null && 'type' in event && event.type === 'result'
+      )
+      return resultEvent !== undefined ? unwrapResult(resultEvent) : parsed
+    }
+    return unwrapResult(parsed)
+  } catch {
+    // Traex prints hook/banner lines before its final structured JSON. Accept only
+    // a complete trailing JSON line; normalize still enforces exact verdict shape.
+    for (const line of output.trim().split('\n').reverse()) {
+      try {
+        return unwrapResult(JSON.parse(line))
+      } catch {
+        continue
+      }
+    }
+    throw new Error('no JSON result')
   }
-  return unwrapResult(parsed)
 }
 
 const normalize = (value: unknown, expectedIds: Set<number>, auditor: string): AuditVerdictInput[] | null => {
@@ -165,9 +178,10 @@ export const runAuditAgent = (
     return verdicts === null
       ? { kind: 'rejected', message: 'auditor output must be complete, exact JSON verdict coverage' }
       : { kind: 'completed', verdicts }
-  } catch {
-    return { kind: 'rejected', message: 'auditor output is not valid JSON' }
-  } finally {
+  } catch (error) {
+    return { kind: 'rejected', message: `auditor output is not valid JSON: ${error instanceof Error ? error.message : String(error)}` }
+  }
+  finally {
     temp.cleanup()
   }
 }

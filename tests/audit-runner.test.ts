@@ -91,6 +91,13 @@ describe('audit runner adapters', () => {
     expect(result.verdicts).toHaveLength(2)
   })
 
+  test('unwraps Traex hook output to its final JSON result', () => {
+    const output = ['hook: UserPromptSubmit', 'TRAE CLI', JSON.stringify({ verdicts: [{ evidenceId: 11, verdict: 'agree', note: 'ok' }, { evidenceId: 12, verdict: 'agree', note: 'ok' }] })].join('\n')
+    const result = runAuditAgent(request, { id: 'traex', model: 'kimi-k2.6' }, () => response(output))
+    expect(result).toMatchObject({ kind: 'completed' })
+    expect(result.verdicts).toHaveLength(2)
+  })
+
   test.each([
     ['prose', 'here is the JSON\n{"verdicts":[]}'],
     ['unknown id', JSON.stringify({ verdicts: [{ evidenceId: 11, verdict: 'agree', note: 'ok' }, { evidenceId: 13, verdict: 'agree', note: 'no' }] })],
