@@ -125,7 +125,7 @@ export const startUiServer = (
         if ('error' in result.body) return json(result.status, result.body)
         const key = `${url.searchParams.get('spec')}#${url.searchParams.get('clause')}`
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
-        res.end(renderBriefPage(result.body.text, csrfToken, key, result.body.briefHash, result.body.reviewable))
+        res.end(renderBriefPage(result.body.text, csrfToken, key, result.body.briefHash, result.body.reviewable, result.body.facts))
         return
       }
       if (req.method === 'GET' && url.pathname === '/') {

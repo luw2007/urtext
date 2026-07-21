@@ -251,15 +251,23 @@ describe('browser high-risk review', () => {
     if (!('ok' in brief.body)) throw new Error('expected a brief')
     expect(brief.body.risk).toBe('high')
     expect(brief.body.reviewable).toBe(true)
-    const html = renderBriefPage(brief.body.text, 'tok', 'specs/x/spec.md#C001', brief.body.briefHash, true)
+    const html = renderBriefPage(brief.body.text, 'tok', 'specs/x/spec.md#C001', brief.body.briefHash, true, brief.body.facts)
     expect(html).toContain('id="review-impact"')
-    expect(html).toContain('leaves your queue and the gate auto-passes')
-    expect(html).toContain('lapses automatically when HEAD moves')
-    expect(html).toContain('gate keeps failing until the code is changed')
-    expect(html).toContain('id="review-form"')
+    expect(html).toContain('高风险代码审查：specs/x/spec.md#C001 pay guard')
+    expect(html).toContain('本条款立即离开你的队列，gate 对它 auto-pass')
+    expect(html).toContain('这条批准自动失效')
+    expect(html).toContain('gate 会一直失败，直到有人改代码')
+    expect(html).toContain('没有下游依赖')
     expect(html).toContain('data-d="approve"')
     expect(html).toContain('/api/review')
     expect(renderBriefPage(brief.body.text, 'tok', 'k', 'h', false)).not.toContain('id="review-form"')
+  })
+
+  test('impact copy names the mapped files and dependent count concretely', () => {
+    const root = setupReviewable()
+    const brief = handleBrief(db, root, 'specs/x/spec.md', 'C001')
+    if (!('ok' in brief.body)) throw new Error('expected a brief')
+    expect(brief.body.facts).toMatchObject({ title: expect.stringContaining('pay guard'), dependents: 0 })
   })
 
   test('approve records through recordReview guards with a current brief-hash', () => {

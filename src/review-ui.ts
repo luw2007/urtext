@@ -204,9 +204,17 @@ export const briefHistory = (db: Database, target: ClauseTarget): BriefHistoryLi
       })),
   ].sort((a, b) => b.when - a.when)
 
+export interface ReviewFacts {
+  title: string
+  files: string[]
+  dependents: number
+}
+
 export interface BriefApiResult {
   status: number
-  body: { ok: true; briefHash: string; text: string; risk: 'low' | 'high'; reviewable: boolean } | { error: string }
+  body:
+    | { ok: true; briefHash: string; text: string; risk: 'low' | 'high'; reviewable: boolean; facts: ReviewFacts }
+    | { error: string }
 }
 
 /** Build one clause's brief for the console (JSON api + the /brief page). */
@@ -228,6 +236,7 @@ export const handleBrief = (db: Database, root: string, spec: unknown, clause: u
     manifest.evidence?.verdict === 'pass' &&
     manifest.auditVerdict === 'agree' &&
     !manifest.stale
+  const files = [...new Set(manifest.mappings.map((m) => m.filePath))]
   return {
     status: 200,
     body: {
@@ -236,6 +245,11 @@ export const handleBrief = (db: Database, root: string, spec: unknown, clause: u
       text: renderBriefText(outcome.brief, briefHistory(db, target)),
       risk: manifest.risk,
       reviewable,
+      facts: {
+        title: `${manifest.specPath}#${manifest.clauseId} ${manifest.title}`,
+        files,
+        dependents: outcome.brief.impact.affectedClauses.length,
+      },
     },
   }
 }
@@ -333,18 +347,30 @@ export const renderBriefPage = (
   csrfToken: string,
   key: string,
   briefHash: string,
-  reviewable: boolean
+  reviewable: boolean,
+  facts?: ReviewFacts
 ): string => {
+  const fileList = facts && facts.files.length > 0 ? facts.files.join('、') : '（该条款尚无映射代码）'
+  const dep = facts?.dependents ?? 0
+  const depApprove =
+    dep > 0
+      ? `本条款有 ${dep} 个下游条款依赖它；批准后它们的门禁前置随之满足，可继续推进。`
+      : '本条款没有下游依赖，批准只影响它自身的门禁状态。'
+  const depReject =
+    dep > 0
+      ? `在改代码前，依赖它的 ${dep} 个下游条款也无法通过整体门禁。`
+      : '它没有下游依赖，拒绝只让它自身继续留在队列。'
   const controls = reviewable
     ? `<form id="review-form" data-key="${esc(key)}" data-brief="${esc(briefHash)}">
-<p><b>High-risk code review.</b> You are attesting that the code above satisfies this clause. The verdict binds the current HEAD.</p>
+<p><b>高风险代码审查：${esc(facts?.title ?? key)}</b></p>
+<p>你正在为上方代码背书——确认 <code>${esc(fileList)}</code> 的实现确实满足本条款要求。证据已通过、元审计已同意，只差这一步人工看代码。判定绑定当前 HEAD。</p>
 <dl id="review-impact">
-<dt>✓ approve</dt><dd>Records an approval at the current HEAD. This clause leaves your queue and the gate auto-passes it (evidence + audit + review all green). The approval lapses automatically when HEAD moves — new commits require a fresh review. Requires a clean worktree, the current brief-hash (attached for you), and a one-sentence reason.</dd>
-<dt>✗ reject</dt><dd>Records a rejection. The clause stays in your queue, flagged code-review REJECTED, and the gate keeps failing until the code is changed, re-verified, and re-reviewed. Conservative: no clean worktree, brief-hash, or reason required.</dd>
-<dt>do nothing</dt><dd>The clause stays under review_needed; the overall gate remains blocked (exit 1).</dd>
+<dt>✓ 批准（approve）会怎样</dt><dd>系统记录一条绑定当前 HEAD 的批准。本条款立即离开你的队列，gate 对它 auto-pass（证据+审计+审查三者皆绿）。${esc(depApprove)}一旦有人再次提交、HEAD 变化，这条批准自动失效——因为代码可能已改，必须重新审查。前置：工作区干净、当前 brief-hash（已自动附带）、一句批准理由。</dd>
+<dt>✗ 拒绝（reject）会怎样</dt><dd>系统记录一条拒绝。本条款留在队列并标记“代码审查未通过”，gate 会一直失败，直到有人改代码、重新 <code>verify</code>、再重新审查。${esc(depReject)}拒绝是保守方向，不要求干净工作区、brief-hash 或理由。</dd>
+<dt>不处理会怎样</dt><dd>本条款停留在 review_needed，整体 gate 保持阻塞（退出码 1），无法合并放行。</dd>
 </dl>
-<button type="button" data-d="approve">✓ approve</button>
-<button type="button" data-d="reject">✗ reject</button>
+<button type="button" data-d="approve">✓ 批准</button>
+<button type="button" data-d="reject">✗ 拒绝</button>
 <span id="review-msg" aria-live="polite"></span></form>`
     : ''
   const script = reviewable
@@ -355,9 +381,9 @@ const msg = document.getElementById('review-msg')
 form.addEventListener('click', async (e) => {
   const b = e.target.closest('button[data-d]'); if (!b) return
   const decision = b.dataset.d
-  const note = prompt(decision === 'approve' ? 'One-sentence reason (required to approve):' : 'Reason (optional):')
+  const note = prompt(decision === 'approve' ? '请填写一句批准理由（必填）：' : '拒绝理由（可选）：')
   if (note === null) return
-  if (decision === 'approve' && !note.trim()) { msg.textContent = 'a one-sentence reason is required to approve'; return }
+  if (decision === 'approve' && !note.trim()) { msg.textContent = '批准必须填写一句理由'; return }
   const r = await fetch('/api/review', { method: 'POST', headers: { 'content-type': 'application/json', 'x-csrf': csrf },
     body: JSON.stringify({ key: form.dataset.key, decision, briefHash: form.dataset.brief, ...(note.trim() ? { note: note.trim() } : {}) }) })
   const j = await r.json(); if (j.error) { msg.textContent = j.error; return }
