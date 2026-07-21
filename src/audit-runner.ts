@@ -207,24 +207,29 @@ export interface AgentTextResult {
 }
 
 /** Command for a plain-text (no JSON schema) prompt to a selected client — used
- * for on-demand explanation, not adjudication. Same read-only/no-tools posture. */
-const textCommandFor = ({ id, model, profile }: AuditorOptions): { command: string; args: string[] } => {
+ * for on-demand explanation, not adjudication. Same read-only/no-tools posture.
+ * `viaStdin` is false for clients that only accept the prompt as an argv arg
+ * (omp reads its prompt from argv, not stdin — unlike claude/codex). */
+const textCommandFor = (
+  { id, model, profile }: AuditorOptions,
+  prompt: string
+): { command: string; args: string[]; viaStdin: boolean } => {
   const modelArgs = model ? ['--model', model] : []
   const profileArgs = profile ? ['--profile', profile] : []
   switch (id) {
     case 'claude':
-      return { command: 'claude', args: ['--print', '--bare', '--no-session-persistence', '--tools', '', ...modelArgs] }
+      return { command: 'claude', args: ['--print', '--bare', '--no-session-persistence', '--tools', '', ...modelArgs], viaStdin: true }
     case 'codex':
-      return { command: 'codex', args: ['exec', '--ephemeral', '--sandbox', 'read-only', ...modelArgs, ...profileArgs, '-'] }
+      return { command: 'codex', args: ['exec', '--ephemeral', '--sandbox', 'read-only', ...modelArgs, ...profileArgs, '-'], viaStdin: true }
     case 'omp':
-      return { command: 'omp', args: ['--print', '--no-tools', '--no-session', '--no-skills', '--no-rules', ...modelArgs, ...profileArgs] }
+      return { command: 'omp', args: ['--print', '--no-tools', '--no-session', '--no-skills', '--no-rules', ...modelArgs, ...profileArgs, prompt], viaStdin: false }
   }
 }
 
 /** Run a plain-text prompt through a selected headless client and return its
  * text output. Fail-closed: missing client / non-zero / timeout → rejected. */
 export const runAgentText = async (prompt: string, options: AuditorOptions): Promise<AgentTextResult> => {
-  const { command, args } = textCommandFor(options)
+  const { command, args, viaStdin } = textCommandFor(options, prompt)
   try {
     const output = await new Promise<{ stdout: string; error?: Error }>((resolve) => {
       const child = spawn(command, args, { stdio: ['pipe', 'pipe', 'ignore'] })
@@ -236,8 +241,7 @@ export const runAgentText = async (prompt: string, options: AuditorOptions): Pro
       const timer = setTimeout(() => { child.kill(); finish({ stdout, error: new Error('ETIMEDOUT') }) }, auditTimeoutMs())
       child.stdout.on('data', (chunk: Buffer) => { stdout += chunk })
       child.on('error', (error) => { clearTimeout(timer); finish({ stdout, error }) })
-      child.on('close', (code) => { clearTimeout(timer); finish(code === 0 ? { stdout } : { stdout, error: new Error(`agent exited ${code ?? 'by signal'}`) }) })
-      child.stdin.end(prompt)
+      child.stdin.end(viaStdin ? prompt : '')
     })
     if (output.error) {
       const timedOut = output.error.message === 'ETIMEDOUT'
