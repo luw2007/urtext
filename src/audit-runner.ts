@@ -8,6 +8,14 @@ import type { AuditRequest, AuditVerdictInput } from './audit.js'
 export const AUDITORS = ['claude', 'codex', 'omp'] as const
 export type AuditorId = (typeof AUDITORS)[number]
 
+/** Audit runs invoke an external agent CLI end-to-end; large batches on slow
+ * models are minutes-long. Default 60 min; override with URTEXT_AUDIT_TIMEOUT_MS. */
+export const auditTimeoutMs = (): number => {
+  const raw = process.env.URTEXT_AUDIT_TIMEOUT_MS
+  const parsed = raw ? Number(raw) : NaN
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : 3_600_000
+}
+
 export interface AuditorOptions {
   id: AuditorId
   model?: string
@@ -123,7 +131,7 @@ export const runAuditAgent = (
   const temp = schemaPath()
   try {
     const { command, args } = commandFor(options, temp.path)
-    const result = spawn(command, args, { input: instruction(request), encoding: 'utf8', timeout: 300_000 })
+    const result = spawn(command, args, { input: instruction(request), encoding: 'utf8', timeout: auditTimeoutMs() })
     if (result.error) {
       const timedOut = 'code' in result.error && result.error.code === 'ETIMEDOUT'
       return {
@@ -155,7 +163,7 @@ export const runAuditAgentAsync = async (request: AuditRequest, options: Auditor
       const finish = (result: { stdout: string; error?: Error }) => {
         if (!settled) { settled = true; resolve(result) }
       }
-      const timer = setTimeout(() => { child.kill(); finish({ stdout, error: new Error('ETIMEDOUT') }) }, 300_000)
+      const timer = setTimeout(() => { child.kill(); finish({ stdout, error: new Error('ETIMEDOUT') }) }, auditTimeoutMs())
       child.stdout.on('data', (chunk: Buffer) => { stdout += chunk })
       child.on('error', (error) => { clearTimeout(timer); finish({ stdout, error }) })
       child.on('close', (code) => { clearTimeout(timer); finish(code === 0 ? { stdout } : { stdout, error: new Error(`auditor exited ${code ?? 'by signal'}`) }) })

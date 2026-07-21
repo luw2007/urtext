@@ -171,7 +171,7 @@ document.addEventListener('click', async (e) => {
 })
 document.getElementById('audit-runner')?.addEventListener('submit', async (e) => {
   e.preventDefault(); const form = e.currentTarget; const button = form.querySelector('button'); const progress = document.getElementById('audit-progress')
-  button.disabled = true; progress.textContent = 'Running audit; this can take several minutes…'
+  button.disabled = true; progress.textContent = 'Running audit; large batches on slow models can take many minutes…'
   const fields = new FormData(form)
   try {
     const r = await fetch('/api/audit-run', { method: 'POST', headers: { 'content-type': 'application/json', 'x-csrf': csrf },

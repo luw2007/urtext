@@ -102,6 +102,9 @@ exit 2，且不会写入部分裁决；导入完成但存在 `disagree` 时 exit
 Code 的 `--bare` 不加载本地 profile。`--run` 记录实际选择的客户端/模型/profile 作为
 auditor，但**不强制**不同 preset：evidence 尚未记录 implementation preset，D3 仍是
 操作员责任。选择审计客户端/模型时必须确保其与实现证据的 preset 不同。
+每次 `--run` 都会端到端调用外部 agent CLI；大批量在慢模型上耗时以分钟计。runner 施加
+墙钟超时，默认 60 分钟，可用 `URTEXT_AUDIT_TIMEOUT_MS`（正整数毫秒）覆盖；超时即拒绝本次
+运行且不导入任何裁决。
 
 ### `urtext gate [--diff]`
 基于风险分级、采用**叠加**谓词的裁决。每个可运行子句都需要

@@ -112,6 +112,10 @@ OMP profile; Claude Code uses `--bare` and does not load a local profile. `--run
 records the selected client/model/profile as auditor identity, but cannot enforce
 D3 different-preset separation because evidence does not record the implementation
 preset. Selecting a different preset remains the operator's responsibility.
+Each audit run invokes the external agent CLI end-to-end; large batches on slow
+models take minutes. The runner enforces a wall-clock timeout, default 60 minutes,
+overridable via `URTEXT_AUDIT_TIMEOUT_MS` (positive integer milliseconds); on
+timeout the run is rejected and no verdict is imported.
 
 ### `urtext gate [--diff]`
 Risk-tier adjudication with **additive** predicates. Every runnable clause needs

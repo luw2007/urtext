@@ -2,7 +2,7 @@ import type { SpawnSyncReturns } from 'node:child_process'
 
 import { describe, expect, test } from 'vitest'
 
-import { commandFor, runAuditAgent } from '../src/audit-runner.js'
+import { auditTimeoutMs, commandFor, runAuditAgent } from '../src/audit-runner.js'
 import type { AuditRequest } from '../src/audit.js'
 
 const request: AuditRequest = {
@@ -95,5 +95,17 @@ describe('audit runner adapters', () => {
       throw new Error('must not spawn')
     })
     expect(result).toEqual({ kind: 'completed', verdicts: [] })
+  })
+})
+
+describe('auditTimeoutMs', () => {
+  test('defaults to 60 minutes and honors a positive override', () => {
+    delete process.env.URTEXT_AUDIT_TIMEOUT_MS
+    expect(auditTimeoutMs()).toBe(3_600_000)
+    process.env.URTEXT_AUDIT_TIMEOUT_MS = '120000'
+    expect(auditTimeoutMs()).toBe(120_000)
+    process.env.URTEXT_AUDIT_TIMEOUT_MS = '0'
+    expect(auditTimeoutMs()).toBe(3_600_000)
+    delete process.env.URTEXT_AUDIT_TIMEOUT_MS
   })
 })

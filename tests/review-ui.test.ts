@@ -117,7 +117,7 @@ describe('renderPage', () => {
     expect(html).toContain('value="omp"')
     expect(html).toContain('/api/audit-run')
     expect(html).toContain('id="audit-progress"')
-    expect(html).toContain('Running audit; this can take several minutes…')
+    expect(html).toContain('Running audit; large batches on slow models can take many minutes…')
     expect(html).toContain('button.disabled = true')
   })
 
