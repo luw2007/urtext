@@ -337,7 +337,12 @@ export const renderBriefPage = (
 ): string => {
   const controls = reviewable
     ? `<form id="review-form" data-key="${esc(key)}" data-brief="${esc(briefHash)}">
-<p>High-risk code review — you are approving that the code above satisfies this clause. Bound to the current HEAD; it lapses when HEAD moves.</p>
+<p><b>High-risk code review.</b> You are attesting that the code above satisfies this clause. The verdict binds the current HEAD.</p>
+<dl id="review-impact">
+<dt>✓ approve</dt><dd>Records an approval at the current HEAD. This clause leaves your queue and the gate auto-passes it (evidence + audit + review all green). The approval lapses automatically when HEAD moves — new commits require a fresh review. Requires a clean worktree, the current brief-hash (attached for you), and a one-sentence reason.</dd>
+<dt>✗ reject</dt><dd>Records a rejection. The clause stays in your queue, flagged code-review REJECTED, and the gate keeps failing until the code is changed, re-verified, and re-reviewed. Conservative: no clean worktree, brief-hash, or reason required.</dd>
+<dt>do nothing</dt><dd>The clause stays under review_needed; the overall gate remains blocked (exit 1).</dd>
+</dl>
 <button type="button" data-d="approve">✓ approve</button>
 <button type="button" data-d="reject">✗ reject</button>
 <span id="review-msg" aria-live="polite"></span></form>`
@@ -361,7 +366,7 @@ form.addEventListener('click', async (e) => {
 </script>`
     : ''
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="csrf" content="${esc(csrfToken)}"><title>urtext brief</title>
-<style>body{font:14px system-ui;margin:2rem;max-width:70rem}pre{background:#f7f7f7;padding:1rem;overflow-x:auto}button{margin-right:.4rem;cursor:pointer}#review-msg{color:#c00;margin-left:.5rem}</style>
+<style>body{font:14px system-ui;margin:2rem;max-width:70rem}pre{background:#f7f7f7;padding:1rem;overflow-x:auto}button{margin-right:.4rem;cursor:pointer}#review-msg{color:#c00;margin-left:.5rem}#review-impact{background:#f7f7f7;padding:.6rem 1rem;border-left:3px solid #ccc}#review-impact dt{font-weight:600;margin-top:.5rem}#review-impact dd{margin:.1rem 0 .3rem 1.2rem;color:#333}</style>
 </head><body><p><a href="/">← console</a></p><pre>${esc(text)}</pre>${controls}${script}</body></html>`
 }
 
