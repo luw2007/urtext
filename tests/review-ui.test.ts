@@ -256,6 +256,10 @@ describe('browser high-risk review', () => {
     expect(html).toContain('id="explain-btn"')
     expect(html).toContain('/api/explain')
     expect(html).toContain('<option value="omp" selected>')
+    expect(html).toContain('id="explain-model" value="deepseek/deepseek-v4-flash"')
+    expect(html).toContain("claude: 'sonnet'")
+    expect(html).toContain("codex: 'gpt-5.6-terra'")
+    expect(html).toContain('explainModel.value = defaultModel[explainAuditor.value]')
     expect(html).toContain('data-d="approve"')
     expect(html).toContain('/api/review')
     // No hard-coded consequence template — the examples come from the AI, not the page.

@@ -398,6 +398,7 @@ export const renderBriefPage = (
 <p>映射代码：<code>${esc(fileList)}</code>　下游依赖条款：${dep} 个。证据已通过、元审计已同意，只差人工看代码。判定绑定当前 HEAD。</p>
 <p>批准前，可让 AI 基于本条款的条文与代码，现场生成批准/拒绝的具体后果实例：
 <select id="explain-auditor"><option value="omp" selected>OMP</option><option value="claude">Claude Code</option><option value="codex">Codex</option></select>
+<input id="explain-model" value="deepseek/deepseek-v4-flash" aria-label="模型" title="切换客户端会填入该客户端默认模型；可直接修改" />
 <button type="button" id="explain-btn">生成实例说明</button></p>
 <div id="explain-out" aria-live="polite"></div>
 <button type="button" data-d="approve">✓ 批准</button>
@@ -421,12 +422,16 @@ form.addEventListener('click', async (e) => {
   location.href = '/'
 })
 const explainBtn = document.getElementById('explain-btn')
+const explainAuditor = document.getElementById('explain-auditor')
+const explainModel = document.getElementById('explain-model')
+const defaultModel = { omp: 'deepseek/deepseek-v4-flash', claude: 'sonnet', codex: 'gpt-5.6-terra' }
+explainAuditor.addEventListener('change', () => { explainModel.value = defaultModel[explainAuditor.value] })
 explainBtn.addEventListener('click', async () => {
   const out = document.getElementById('explain-out')
   explainBtn.disabled = true; out.textContent = '正在让 AI 基于本条款生成实例，可能需要一会儿…'
   try {
     const r = await fetch('/api/explain', { method: 'POST', headers: { 'content-type': 'application/json', 'x-csrf': csrf },
-      body: JSON.stringify({ key: form.dataset.key, auditor: document.getElementById('explain-auditor').value }) })
+      body: JSON.stringify({ key: form.dataset.key, auditor: explainAuditor.value, model: explainModel.value }) })
     const j = await r.json()
     out.textContent = j.error ? j.error : j.text
   } catch { out.textContent = '生成失败，请重试或换一个客户端。' }
