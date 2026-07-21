@@ -107,8 +107,8 @@ const auditControls = (items: StatusItem[]): string => {
   const auditable = items.filter((item) => item.reasons.includes('unaudited') || item.reasons.includes('audit_disagreement')).length
   if (auditable === 0) return ''
   return `<form id="audit-runner"><label>Audit ${auditable} evidence item(s) with
-    <select name="auditor"><option value="claude">Claude Code</option><option value="codex">Codex</option><option value="omp">OMP</option></select></label>
-    <input name="model" placeholder="model (optional)"><input name="profile" placeholder="profile (Codex/OMP only)">
+    <select name="auditor"><option value="claude">Claude Code</option><option value="codex">Codex</option><option value="traex">Traex</option><option value="omp">OMP</option></select></label>
+    <input name="model" placeholder="model（可选）"><input name="profile" placeholder="profile（Codex/Traex/OMP）">
     <button type="submit">Run audit</button> <output id="audit-progress" aria-live="polite"></output> <small>D3 preset separation remains your responsibility.</small></form>`
 }
 
@@ -304,7 +304,7 @@ export interface ExplainApiResult {
 }
 
 const parseAuditorId = (value: unknown): AuditorId | null =>
-  value === 'claude' || value === 'codex' || value === 'omp' ? value : null
+  value === 'claude' || value === 'codex' || value === 'traex' || value === 'omp' ? value : null
 
 /** On-demand, per-clause explanation of what approving vs rejecting THIS clause
  * means — generated live by a selected headless client from the clause's own
@@ -316,7 +316,7 @@ export const handleExplain = async (db: Database, root: string, input: unknown):
   const auditor = parseAuditorId('auditor' in input ? input.auditor : undefined)
   const model = 'model' in input ? input.model : undefined
   if (typeof key !== 'string' || key.lastIndexOf('#') <= 0 || auditor === null)
-    return { status: 400, body: { error: 'need { key, auditor: claude|codex|omp }' } }
+    return { status: 400, body: { error: 'need { key, auditor: claude|codex|traex|omp }' } }
   if (model !== undefined && typeof model !== 'string')
     return { status: 400, body: { error: 'model must be a string' } }
   const hash = key.lastIndexOf('#')
@@ -345,12 +345,12 @@ export interface AuditRunResult {
 
 export const handleAuditRun = async (db: Database, input: unknown): Promise<AuditRunResult> => {
   if (typeof input !== 'object' || input === null || !('auditor' in input)) {
-    return { status: 400, body: { error: 'need auditor: claude, codex, or omp' } }
+    return { status: 400, body: { error: 'need auditor: claude, codex, traex, or omp' } }
   }
   const auditor = input.auditor
   const model = 'model' in input ? input.model : undefined
   const profile = 'profile' in input ? input.profile : undefined
-  if ((auditor !== 'claude' && auditor !== 'codex' && auditor !== 'omp') ||
+  if ((auditor !== 'claude' && auditor !== 'codex' && auditor !== 'traex' && auditor !== 'omp') ||
       (model !== undefined && typeof model !== 'string') || (profile !== undefined && typeof profile !== 'string') ||
       (auditor === 'claude' && profile !== undefined && profile !== '')) {
     return { status: 400, body: { error: 'invalid auditor, model, or profile' } }
@@ -397,7 +397,7 @@ export const renderBriefPage = (
 <p><b>高风险代码审查：${esc(facts?.title ?? key)}</b></p>
 <p>映射代码：<code>${esc(fileList)}</code>　下游依赖条款：${dep} 个。证据已通过、元审计已同意，只差人工看代码。判定绑定当前 HEAD。</p>
 <p>批准前，可让 AI 基于本条款的条文与代码，现场生成批准/拒绝的具体后果实例：
-<select id="explain-auditor"><option value="omp" selected>OMP</option><option value="claude">Claude Code</option><option value="codex">Codex</option></select>
+<select id="explain-auditor"><option value="omp" selected>OMP</option><option value="claude">Claude Code</option><option value="codex">Codex</option><option value="traex">Traex</option></select>
 <input id="explain-model" value="deepseek/deepseek-v4-flash" aria-label="模型" title="切换客户端会填入该客户端默认模型；可直接修改" />
 <button type="button" id="explain-btn">生成实例说明</button></p>
 <div id="explain-out" aria-live="polite"></div>
@@ -424,7 +424,7 @@ form.addEventListener('click', async (e) => {
 const explainBtn = document.getElementById('explain-btn')
 const explainAuditor = document.getElementById('explain-auditor')
 const explainModel = document.getElementById('explain-model')
-const defaultModel = { omp: 'deepseek/deepseek-v4-flash', claude: 'sonnet', codex: 'gpt-5.6-terra' }
+const defaultModel = { omp: 'deepseek/deepseek-v4-flash', claude: 'sonnet', codex: 'gpt-5.6-terra', traex: 'kimi-k2.6' }
 explainAuditor.addEventListener('change', () => { explainModel.value = defaultModel[explainAuditor.value] })
 explainBtn.addEventListener('click', async () => {
   const out = document.getElementById('explain-out')

@@ -86,7 +86,7 @@ const USAGE = [
   '  urtext decide <spec-path>#<clause-id> --pass|--fail [--brief <hash>] [note…]',
   '                   Record a human decision for a manual-oracle clause (Decision ledger).',
   '                   Passing a risk:high manual clause requires the current brief-hash.',
-  '  urtext audit --export | --import <file> | --run <claude|codex|omp> [--model <model>] [--profile <profile>]',
+  '  urtext audit --export | --import <file> | --run <claude|codex|traex|omp> [--model <model>] [--profile <profile>]',
   '                   Export/import meta-audits, or invoke a selected headless auditor.',
   '                   --run does not enforce D3 preset separation; the operator must do so.',
   '  urtext ui [--port <n>] [--no-open]',
@@ -147,7 +147,7 @@ const normalizeVerdicts = (parsed: unknown): AuditVerdictInput[] | null => {
 }
 
 const parseAuditor = (value: string | undefined): AuditorId | null => {
-  if (value === 'claude' || value === 'codex' || value === 'omp') return value
+  if (value === 'claude' || value === 'codex' || value === 'traex' || value === 'omp') return value
   return null
 }
 
@@ -229,7 +229,7 @@ const run = (argv: string[]): number => {
         const model = modelFlag >= 0 ? argv[modelFlag + 1] : undefined
         const profile = profileFlag >= 0 ? argv[profileFlag + 1] : undefined
         if (!id || (modelFlag >= 0 && !model) || (profileFlag >= 0 && !profile) || (id === 'claude' && profile !== undefined)) {
-          console.error('Usage: urtext audit --run <claude|codex|omp> [--model <model>] [--profile <profile>]')
+          console.error('Usage: urtext audit --run <claude|codex|traex|omp> [--model <model>] [--profile <profile>]')
           return 2
         }
         const result = runAuditAgent(exportRequest(db), { id, ...(model ? { model } : {}), ...(profile ? { profile } : {}) })
@@ -252,7 +252,7 @@ const run = (argv: string[]): number => {
         console.error(`D3 remains operator responsibility: selected auditor ${id}${model ? `:${model}` : ''}${profile ? `@${profile}` : ''}; ensure it differs from the implementation preset.`)
         return report.counts.disagree > 0 ? 1 : 0
       }
-      console.error('Usage: urtext audit --export | --import <file> | --run <claude|codex|omp> [--model <model>] [--profile <profile>]')
+      console.error('Usage: urtext audit --export | --import <file> | --run <claude|codex|traex|omp> [--model <model>] [--profile <profile>]')
       return 1
     }
 

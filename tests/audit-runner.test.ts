@@ -53,6 +53,9 @@ describe('audit runner adapters', () => {
     expect(commandFor({ id: 'codex', model: 'gpt-5.4', profile: 'audit' }, '/tmp/schema').args).toEqual(
       expect.arrayContaining(['exec', '--ephemeral', '--sandbox', 'read-only', '--output-schema', '/tmp/schema', '--model', 'gpt-5.4', '--profile', 'audit', '-'])
     )
+    expect(commandFor({ id: 'traex', model: 'kimi-k2.6', profile: 'audit' }, '/tmp/schema').args).toEqual(
+      expect.arrayContaining(['exec', '--ephemeral', '--sandbox', 'read-only', '--output-schema', '/tmp/schema', '--model', 'kimi-k2.6', '--profile', 'audit', '-'])
+    )
     expect(commandFor({ id: 'omp', profile: 'audit' }, '/tmp/schema').args).toEqual(
       expect.arrayContaining(['--print', '--mode', 'json', '--no-tools', '--no-session', '--no-skills', '--no-rules', '--profile', 'audit'])
     )

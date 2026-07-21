@@ -116,6 +116,7 @@ describe('renderPage', () => {
     expect(html).toContain('value="claude"')
     expect(html).toContain('value="codex"')
     expect(html).toContain('value="omp"')
+    expect(html).toContain('<option value="traex">Traex</option>')
     expect(html).toContain('/api/audit-run')
     expect(html).toContain('id="audit-progress"')
     expect(html).toContain('Running audit; large batches on slow models can take many minutes…')
@@ -261,12 +262,13 @@ describe('browser high-risk review', () => {
     expect(html).toContain("codex: 'gpt-5.6-terra'")
     expect(html).toContain('explainModel.value = defaultModel[explainAuditor.value]')
     expect(html).toContain('data-d="approve"')
+    expect(html).toContain('<option value="traex">Traex</option>')
+    expect(html).toContain("traex: 'kimi-k2.6'")
     expect(html).toContain('/api/review')
     // No hard-coded consequence template — the examples come from the AI, not the page.
     expect(html).not.toContain('gate 对它 auto-pass（证据+审计+审查三者皆绿）')
     expect(renderBriefPage(brief.body.text, 'tok', 'k', 'h', false)).not.toContain('id="review-form"')
   })
-
   test('handleExplain rejects malformed input before invoking any client', async () => {
     const root = setupReviewable()
     await expect(handleExplain(db, root, { key: 'specs/x/spec.md#C001' })).resolves.toMatchObject({ status: 400 })

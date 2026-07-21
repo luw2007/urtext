@@ -5,7 +5,7 @@ import { spawn, spawnSync, type SpawnSyncReturns } from 'node:child_process'
 
 import type { AuditRequest, AuditVerdictInput } from './audit.js'
 
-export const AUDITORS = ['claude', 'codex', 'omp'] as const
+export const AUDITORS = ['claude', 'codex', 'traex', 'omp'] as const
 export type AuditorId = (typeof AUDITORS)[number]
 
 /** Audit runs invoke an external agent CLI end-to-end; large batches on slow
@@ -81,6 +81,11 @@ export const commandFor = ({ id, model, profile }: AuditorOptions, outputSchema:
     case 'codex':
       return {
         command: 'codex',
+        args: ['exec', '--ephemeral', '--sandbox', 'read-only', '--output-schema', outputSchema, ...modelArgs, ...(profile ? ['--profile', profile] : []), '-'],
+      }
+    case 'traex':
+      return {
+        command: 'traecli',
         args: ['exec', '--ephemeral', '--sandbox', 'read-only', '--output-schema', outputSchema, ...modelArgs, ...(profile ? ['--profile', profile] : []), '-'],
       }
     case 'omp':
@@ -221,6 +226,8 @@ const textCommandFor = (
       return { command: 'claude', args: ['--print', '--bare', '--no-session-persistence', '--tools', '', ...modelArgs], viaStdin: true }
     case 'codex':
       return { command: 'codex', args: ['exec', '--ephemeral', '--sandbox', 'read-only', ...modelArgs, ...profileArgs, '-'], viaStdin: true }
+    case 'traex':
+      return { command: 'traecli', args: ['exec', '--ephemeral', '--sandbox', 'read-only', ...modelArgs, ...profileArgs, '-'], viaStdin: true }
     case 'omp':
       return { command: 'omp', args: ['--print', '--no-tools', '--no-session', '--no-skills', '--no-rules', ...modelArgs, ...profileArgs, prompt], viaStdin: false }
   }

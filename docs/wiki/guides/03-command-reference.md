@@ -97,7 +97,7 @@ No clause constrains src/verifier.ts:1.
 
 ## Meta-verification and adjudication
 
-### `urtext audit --export | --import <file> | --run <claude|codex|omp> [--model <model>] [--profile <profile>]`
+### `urtext audit --export | --import <file> | --run <claude|codex|traex|omp> [--model <model>] [--profile <profile>]`
 The cross-model meta-verification protocol. `--export` writes the
 evidence-coverage package (`urtext-meta-audit/v0`) for an external auditor and
 `--import` reads back `agree`/`disagree` verdicts. `--run` automates the export,

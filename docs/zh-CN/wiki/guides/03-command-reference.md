@@ -91,7 +91,7 @@ No clause constrains src/verifier.ts:1.
 
 ## 元验证与裁决
 
-### `urtext audit --export | --import <file> | --run <claude|codex|omp> [--model <model>] [--profile <profile>]`
+### `urtext audit --export | --import <file> | --run <claude|codex|traex|omp> [--model <model>] [--profile <profile>]`
 跨模型元验证协议。`--export` 会写出证据覆盖包（`urtext-meta-audit/v0`），供不同
 preset 的审计者使用；`--import` 读回其 `agree`/`disagree` 裁决。`--run` 是自动
 链路：Urtext 导出当前证据，使用所选 headless CLI 的只读/无工具模式审计，严格校验每个
