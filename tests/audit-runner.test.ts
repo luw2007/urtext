@@ -71,6 +71,23 @@ describe('audit runner adapters', () => {
     })
   })
 
+  test('unwraps a Claude JSON envelope whose result is a JSON string', () => {
+    const envelope = JSON.stringify({ type: 'result', result: JSON.stringify({ verdicts: [{ evidenceId: 11, verdict: 'agree', note: 'ok' }, { evidenceId: 12, verdict: 'agree', note: 'ok' }] }) })
+    const result = runAuditAgent(request, { id: 'claude', model: 'opus' }, () => response(envelope))
+    expect(result).toMatchObject({ kind: 'completed' })
+    expect(result.verdicts).toHaveLength(2)
+  })
+
+  test('unwraps a Claude stream-json event array', () => {
+    const stream = JSON.stringify([
+      { type: 'system', subtype: 'init' },
+      { type: 'result', result: JSON.stringify({ verdicts: [{ evidenceId: 11, verdict: 'disagree', note: 'weak' }, { evidenceId: 12, verdict: 'agree', note: 'ok' }] }) },
+    ])
+    const result = runAuditAgent(request, { id: 'claude', model: 'opus' }, () => response(stream))
+    expect(result).toMatchObject({ kind: 'completed' })
+    expect(result.verdicts).toHaveLength(2)
+  })
+
   test.each([
     ['prose', 'here is the JSON\n{"verdicts":[]}'],
     ['unknown id', JSON.stringify({ verdicts: [{ evidenceId: 11, verdict: 'agree', note: 'ok' }, { evidenceId: 13, verdict: 'agree', note: 'no' }] })],

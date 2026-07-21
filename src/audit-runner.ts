@@ -91,13 +91,29 @@ export const commandFor = ({ id, model, profile }: AuditorOptions, outputSchema:
   }
 }
 
-const parseJson = (output: string): unknown => {
-  const parsed: unknown = JSON.parse(output)
-  if (typeof parsed === 'object' && parsed !== null && 'result' in parsed) {
-    const result = parsed.result
+/** Unwrap an agent-CLI envelope to the verdicts object. Claude emits either a
+ * single `{result:"<json string>"}` object or a stream-json array of events with
+ * a trailing `{type:"result",result:"<json string>"}`; Codex/OMP emit the object
+ * directly. Parse defensively — any unexpected shape falls through to normalize,
+ * which rejects it. */
+const unwrapResult = (value: unknown): unknown => {
+  if (typeof value === 'object' && value !== null && 'result' in value) {
+    const result = value.result
     return typeof result === 'string' ? JSON.parse(result) : result
   }
-  return parsed
+  return value
+}
+
+const parseJson = (output: string): unknown => {
+  const parsed: unknown = JSON.parse(output)
+  if (Array.isArray(parsed)) {
+    const resultEvent = parsed.find(
+      (event): event is { type: string; result: unknown } =>
+        typeof event === 'object' && event !== null && 'type' in event && event.type === 'result'
+    )
+    return resultEvent !== undefined ? unwrapResult(resultEvent) : parsed
+  }
+  return unwrapResult(parsed)
 }
 
 const normalize = (value: unknown, expectedIds: Set<number>, auditor: string): AuditVerdictInput[] | null => {
