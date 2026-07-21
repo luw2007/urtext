@@ -22,6 +22,14 @@ $ urtext review specs/payment/spec.md#C001 --approve reviewed refund path
 approved specs/payment/spec.md#C001 @ 3f2a1c0 by luw2007
 ```
 
+The same review is available from the `urtext ui` console: the `/brief` page
+renders the mapped code and, when the clause is review-ready (high-risk, evidence
+pass, meta-audit agree, not stale), approve/reject buttons. A click posts to the
+same guarded `recordReview` path as the CLI, so the browser cannot bypass the
+preconditions below — the clean-worktree, current-brief-hash, and HEAD-binding
+checks live in `review.ts`, not in the page. Approving from the browser requires a
+one-sentence reason, the same anti-rubber-stamp rule as a manual pass.
+
 ## The review is bound to a commit
 
 The approval is not a permanent blessing. It binds the **HEAD sha at the moment of

@@ -10,7 +10,8 @@ import { recordDecision } from '../src/decision.js'
 import { openRegistry } from '../src/registry.js'
 import { scanWorkspace } from '../src/scanner.js'
 import { verifyWorkspace } from '../src/verifier.js'
-import { buildUiSnapshot, renderPage, handleDecide, handleBrief, handleAuditRun } from '../src/review-ui.js'
+import { buildUiSnapshot, renderPage, handleDecide, handleReview, handleBrief, handleAuditRun, renderBriefPage } from '../src/review-ui.js'
+import { importVerdicts, latestEvidence } from '../src/audit.js'
 
 let db: Database
 const tempDirs: string[] = []
@@ -223,5 +224,60 @@ describe('operator console (v3)', () => {
       'a'
     )
     expect(res.status).toBe(200)
+  })
+})
+
+/** High-risk runnable clause, verified + audit-agreed → review-ready. */
+const setupReviewable = (): string => {
+  const root = mkdtempSync(join(tmpdir(), 'urtext-ui-rv-'))
+  tempDirs.push(root)
+  git(root, 'init', '-q')
+  git(root, 'config', 'user.email', 'test@urtext.dev')
+  git(root, 'config', 'user.name', 'test')
+  mkdirSync(join(root, 'specs/x'), { recursive: true })
+  writeFileSync(join(root, 'specs/x/spec.md'), '## C001 pay guard <!-- oracle:cmd:true risk:high -->')
+  git(root, 'add', '-A')
+  git(root, 'commit', '-q', '-m', 'baseline')
+  scanWorkspace(db, root)
+  verifyWorkspace(db, root)
+  for (const e of latestEvidence(db)) importVerdicts(db, [{ evidenceId: e.id, auditor: 'codex', verdict: 'agree' }], 1)
+  return root
+}
+
+describe('browser high-risk review', () => {
+  test('a review-ready high-risk clause exposes approve/reject buttons on its brief page', () => {
+    const root = setupReviewable()
+    const brief = handleBrief(db, root, 'specs/x/spec.md', 'C001')
+    if (!('ok' in brief.body)) throw new Error('expected a brief')
+    expect(brief.body.risk).toBe('high')
+    expect(brief.body.reviewable).toBe(true)
+    const html = renderBriefPage(brief.body.text, 'tok', 'specs/x/spec.md#C001', brief.body.briefHash, true)
+    expect(html).toContain('id="review-form"')
+    expect(html).toContain('data-d="approve"')
+    expect(html).toContain('/api/review')
+    expect(renderBriefPage(brief.body.text, 'tok', 'k', 'h', false)).not.toContain('id="review-form"')
+  })
+
+  test('approve records through recordReview guards with a current brief-hash', () => {
+    const root = setupReviewable()
+    const key = 'specs/x/spec.md#C001'
+    const brief = handleBrief(db, root, 'specs/x/spec.md', 'C001')
+    if (!('ok' in brief.body)) throw new Error('expected a brief')
+    expect(handleReview(db, root, { key, decision: 'approve', briefHash: brief.body.briefHash }, 'a').status).toBe(400)
+    const ok = handleReview(db, root, { key, decision: 'approve', briefHash: brief.body.briefHash, note: 'refund path reviewed' }, 'a')
+    expect(ok).toEqual({ status: 200, body: { ok: true } })
+  })
+
+  test('approve without a brief-hash or on a low-risk clause is rejected (guards not bypassed)', () => {
+    const root = setupReviewable()
+    const key = 'specs/x/spec.md#C001'
+    expect(handleReview(db, root, { key, decision: 'approve', note: 'x' }, 'a').status).toBe(400)
+    expect(handleReview(db, root, { key, decision: 'bogus', note: 'x' }, 'a').status).toBe(400)
+  })
+
+  test('reject is conservative — no brief-hash or note required', () => {
+    const root = setupReviewable()
+    const res = handleReview(db, root, { key: 'specs/x/spec.md#C001', decision: 'reject' }, 'a')
+    expect(res).toEqual({ status: 200, body: { ok: true } })
   })
 })

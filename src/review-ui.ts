@@ -8,9 +8,11 @@
  * `adjudicate`, writes through `recordDecision` — the same guarded domain path
  * as the CLI, so a high-risk manual clause cannot be passed from the browser
  * without the current brief-hash (C018; the guard lives in decision.ts, not
- * here). High-risk CODE review stays CLI-only: the panel shows the pending
- * item and the command, but code is the only reviewable fact (P5) and this
- * page does not show code.
+ * here). High-risk CODE review is also available from the browser: the /brief
+ * page shows the mapped code and, when the clause is review-ready, approve/reject
+ * buttons that post to the SAME guarded `recordReview` path (P5 preconditions —
+ * high-risk only, clean worktree, current brief-hash, HEAD binding — live in
+ * review.ts, not here, so the browser cannot bypass them).
  */
 import type { Database } from 'better-sqlite3'
 
@@ -21,7 +23,7 @@ import { detectUnmapped } from './dwarf.js'
 import { adjudicate } from './gate.js'
 import { buildStatus, type StatusItem, type StatusReport } from './status.js'
 import { currentHead, listDecisions, recordDecision } from './decision.js'
-import { listReviews, worktreeDirty } from './review.js'
+import { listReviews, recordReview, worktreeDirty } from './review.js'
 
 export interface UiClause {
   specPath: string
@@ -204,7 +206,7 @@ export const briefHistory = (db: Database, target: ClauseTarget): BriefHistoryLi
 
 export interface BriefApiResult {
   status: number
-  body: { ok: true; briefHash: string; text: string } | { error: string }
+  body: { ok: true; briefHash: string; text: string; risk: 'low' | 'high'; reviewable: boolean } | { error: string }
 }
 
 /** Build one clause's brief for the console (JSON api + the /brief page). */
@@ -220,14 +222,66 @@ export const handleBrief = (db: Database, root: string, spec: unknown, clause: u
       body: { error: `[${outcome.code}] ${outcome.message}` },
     }
   }
+  const manifest = outcome.brief.manifest
+  const reviewable =
+    manifest.risk === 'high' &&
+    manifest.evidence?.verdict === 'pass' &&
+    manifest.auditVerdict === 'agree' &&
+    !manifest.stale
   return {
     status: 200,
     body: {
       ok: true,
       briefHash: outcome.brief.briefHash,
       text: renderBriefText(outcome.brief, briefHistory(db, target)),
+      risk: manifest.risk,
+      reviewable,
     },
   }
+}
+
+export interface ReviewApiResult {
+  status: number
+  body: { ok: true } | { error: string }
+}
+
+/** Apply one high-risk code review from the /brief page. Reuses recordReview's
+ * fail-closed guards (unsafe lane P5): high-risk only, clean worktree, current
+ * brief-hash, HEAD binding. Approving requires a one-sentence reason — the same
+ * anti-rubber-stamp rule as manual pass; rejecting is conservative. */
+export const handleReview = (db: Database, root: string, input: unknown, reviewer: string): ReviewApiResult => {
+  if (typeof input !== 'object' || input === null) return { status: 400, body: { error: 'bad request' } }
+  const key = 'key' in input ? input.key : undefined
+  const decision = 'decision' in input ? input.decision : undefined
+  const briefHash = 'briefHash' in input ? input.briefHash : undefined
+  const note = 'note' in input ? input.note : undefined
+  if (typeof key !== 'string' || (decision !== 'approve' && decision !== 'reject'))
+    return { status: 400, body: { error: 'need { key, decision: approve|reject }' } }
+  if (briefHash !== undefined && typeof briefHash !== 'string')
+    return { status: 400, body: { error: 'briefHash must be a string' } }
+  if (note !== undefined && typeof note !== 'string')
+    return { status: 400, body: { error: 'note must be a string' } }
+  const trimmedNote = typeof note === 'string' ? note.trim() : ''
+  if (decision === 'approve' && trimmedNote === '')
+    return { status: 400, body: { error: 'a one-sentence reason (note) is required to approve' } }
+  const hash = key.lastIndexOf('#')
+  if (hash <= 0) return { status: 400, body: { error: 'bad clause key' } }
+  const outcome = recordReview(
+    db,
+    {
+      specPath: key.slice(0, hash),
+      clauseId: key.slice(hash + 1),
+      decision,
+      reviewer,
+      ...(trimmedNote ? { note: trimmedNote } : {}),
+      ...(briefHash !== undefined ? { briefHash } : {}),
+    },
+    root,
+    Date.now()
+  )
+  return outcome.kind === 'recorded'
+    ? { status: 200, body: { ok: true } }
+    : { status: 400, body: { error: outcome.message } }
 }
 
 export interface AuditRunResult {
@@ -270,12 +324,46 @@ export const handleAuditRun = async (db: Database, input: unknown): Promise<Audi
   }
 }
 
-/** The /brief page: the SAME text the CLI prints, wrapped in <pre> — one
- * renderer, no second source of truth. */
-export const renderBriefPage = (text: string): string =>
-  `<!doctype html><html><head><meta charset="utf-8"><title>urtext brief</title>
-<style>body{font:14px system-ui;margin:2rem;max-width:70rem}pre{background:#f7f7f7;padding:1rem;overflow-x:auto}</style>
-</head><body><p><a href="/">← console</a></p><pre>${esc(text)}</pre></body></html>`
+/** The /brief page: the SAME brief text the CLI prints (one renderer), plus, for
+ * a reviewable high-risk clause, approve/reject buttons that post to the same
+ * guarded recordReview path as the CLI (P5). Non-reviewable clauses show only the
+ * text — the buttons never appear where the gate would reject them anyway. */
+export const renderBriefPage = (
+  text: string,
+  csrfToken: string,
+  key: string,
+  briefHash: string,
+  reviewable: boolean
+): string => {
+  const controls = reviewable
+    ? `<form id="review-form" data-key="${esc(key)}" data-brief="${esc(briefHash)}">
+<p>High-risk code review — you are approving that the code above satisfies this clause. Bound to the current HEAD; it lapses when HEAD moves.</p>
+<button type="button" data-d="approve">✓ approve</button>
+<button type="button" data-d="reject">✗ reject</button>
+<span id="review-msg" aria-live="polite"></span></form>`
+    : ''
+  const script = reviewable
+    ? `<script>
+const csrf = document.querySelector('meta[name=csrf]').content
+const form = document.getElementById('review-form')
+const msg = document.getElementById('review-msg')
+form.addEventListener('click', async (e) => {
+  const b = e.target.closest('button[data-d]'); if (!b) return
+  const decision = b.dataset.d
+  const note = prompt(decision === 'approve' ? 'One-sentence reason (required to approve):' : 'Reason (optional):')
+  if (note === null) return
+  if (decision === 'approve' && !note.trim()) { msg.textContent = 'a one-sentence reason is required to approve'; return }
+  const r = await fetch('/api/review', { method: 'POST', headers: { 'content-type': 'application/json', 'x-csrf': csrf },
+    body: JSON.stringify({ key: form.dataset.key, decision, briefHash: form.dataset.brief, ...(note.trim() ? { note: note.trim() } : {}) }) })
+  const j = await r.json(); if (j.error) { msg.textContent = j.error; return }
+  location.href = '/'
+})
+</script>`
+    : ''
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="csrf" content="${esc(csrfToken)}"><title>urtext brief</title>
+<style>body{font:14px system-ui;margin:2rem;max-width:70rem}pre{background:#f7f7f7;padding:1rem;overflow-x:auto}button{margin-right:.4rem;cursor:pointer}#review-msg{color:#c00;margin-left:.5rem}</style>
+</head><body><p><a href="/">← console</a></p><pre>${esc(text)}</pre>${controls}${script}</body></html>`
+}
 
 export interface DecideResult {
   status: number
