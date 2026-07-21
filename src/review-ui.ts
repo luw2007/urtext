@@ -16,7 +16,7 @@
  */
 import type { Database } from 'better-sqlite3'
 
-import { runAuditAgentAsync, type AuditorId } from './audit-runner.js'
+import { runAgentText, runAuditAgentAsync, type AuditorId } from './audit-runner.js'
 import { coverage, exportRequest, importVerdicts } from './audit.js'
 import { buildBrief, renderBriefText, type BriefHistoryLine, type ClauseTarget } from './brief.js'
 import { detectUnmapped } from './dwarf.js'
@@ -298,6 +298,46 @@ export const handleReview = (db: Database, root: string, input: unknown, reviewe
     : { status: 400, body: { error: outcome.message } }
 }
 
+export interface ExplainApiResult {
+  status: number
+  body: { ok: true; text: string } | { error: string }
+}
+
+const parseAuditorId = (value: unknown): AuditorId | null =>
+  value === 'claude' || value === 'codex' || value === 'omp' ? value : null
+
+/** On-demand, per-clause explanation of what approving vs rejecting THIS clause
+ * means — generated live by a selected headless client from the clause's own
+ * brief (title, body, mapped code, evidence, impact), not a hard-coded template.
+ * Read-only: no ledger write, no tools; the model only explains consequences. */
+export const handleExplain = async (db: Database, root: string, input: unknown): Promise<ExplainApiResult> => {
+  if (typeof input !== 'object' || input === null) return { status: 400, body: { error: 'bad request' } }
+  const key = 'key' in input ? input.key : undefined
+  const auditor = parseAuditorId('auditor' in input ? input.auditor : undefined)
+  const model = 'model' in input ? input.model : undefined
+  if (typeof key !== 'string' || key.lastIndexOf('#') <= 0 || auditor === null)
+    return { status: 400, body: { error: 'need { key, auditor: claude|codex|omp }' } }
+  if (model !== undefined && typeof model !== 'string')
+    return { status: 400, body: { error: 'model must be a string' } }
+  const hash = key.lastIndexOf('#')
+  const outcome = buildBrief(db, root, { specPath: key.slice(0, hash), clauseId: key.slice(hash + 1) })
+  if (outcome.kind === 'refused') return { status: 409, body: { error: outcome.message } }
+  const prompt = [
+    '你是 Urtext 的资深审查助手。下面是一个高风险条款的完整裁决简报（条文、映射代码、证据、影响闭包）。',
+    '用中文，基于这个条款的具体内容，向人类审查者说明：',
+    '1. 如果批准（approve）这条，对系统有什么实际影响——结合该条款真实约束和它保护的代码路径，举一个具体、可能发生的场景；',
+    '2. 如果拒绝（reject）这条，会怎样，以及在什么情况下应该拒绝——同样给一个具体例子；',
+    '3. 一句话给出你的倾向和理由。',
+    '不要泛泛而谈或复述通用流程；紧扣本条款的语义与代码。不要执行任何命令或修改文件，只解释。',
+    '',
+    renderBriefText(outcome.brief, briefHistory(db, { specPath: key.slice(0, hash), clauseId: key.slice(hash + 1) })),
+  ].join('\n')
+  const result = await runAgentText(prompt, { id: auditor, ...(typeof model === 'string' && model.trim() ? { model: model.trim() } : {}) })
+  return result.kind === 'completed' && result.text !== undefined
+    ? { status: 200, body: { ok: true, text: result.text } }
+    : { status: 422, body: { error: result.message ?? 'agent failed' } }
+}
+
 export interface AuditRunResult {
   status: number
   body: { ok: true; message: string } | { error: string }
@@ -352,23 +392,15 @@ export const renderBriefPage = (
 ): string => {
   const fileList = facts && facts.files.length > 0 ? facts.files.join('、') : '（该条款尚无映射代码）'
   const dep = facts?.dependents ?? 0
-  const depApprove =
-    dep > 0
-      ? `本条款有 ${dep} 个下游条款依赖它；批准后它们的门禁前置随之满足，可继续推进。`
-      : '本条款没有下游依赖，批准只影响它自身的门禁状态。'
-  const depReject =
-    dep > 0
-      ? `在改代码前，依赖它的 ${dep} 个下游条款也无法通过整体门禁。`
-      : '它没有下游依赖，拒绝只让它自身继续留在队列。'
   const controls = reviewable
     ? `<form id="review-form" data-key="${esc(key)}" data-brief="${esc(briefHash)}">
 <p><b>高风险代码审查：${esc(facts?.title ?? key)}</b></p>
-<p>你正在为上方代码背书——确认 <code>${esc(fileList)}</code> 的实现确实满足本条款要求。证据已通过、元审计已同意，只差这一步人工看代码。判定绑定当前 HEAD。</p>
-<dl id="review-impact">
-<dt>✓ 批准（approve）会怎样</dt><dd>系统记录一条绑定当前 HEAD 的批准。本条款立即离开你的队列，gate 对它 auto-pass（证据+审计+审查三者皆绿）。${esc(depApprove)}一旦有人再次提交、HEAD 变化，这条批准自动失效——因为代码可能已改，必须重新审查。前置：工作区干净、当前 brief-hash（已自动附带）、一句批准理由。</dd>
-<dt>✗ 拒绝（reject）会怎样</dt><dd>系统记录一条拒绝。本条款留在队列并标记“代码审查未通过”，gate 会一直失败，直到有人改代码、重新 <code>verify</code>、再重新审查。${esc(depReject)}拒绝是保守方向，不要求干净工作区、brief-hash 或理由。</dd>
-<dt>不处理会怎样</dt><dd>本条款停留在 review_needed，整体 gate 保持阻塞（退出码 1），无法合并放行。</dd>
-</dl>
+<p>映射代码：<code>${esc(fileList)}</code>　下游依赖条款：${dep} 个。证据已通过、元审计已同意，只差人工看代码。判定绑定当前 HEAD。</p>
+<p>批准前，可让 AI 基于本条款的条文与代码，现场生成批准/拒绝的具体后果实例：
+<select id="explain-auditor"><option value="claude">Claude Code</option><option value="codex">Codex</option><option value="omp">OMP</option></select>
+<input id="explain-model" placeholder="model（可选）">
+<button type="button" id="explain-btn">生成实例说明</button></p>
+<div id="explain-out" aria-live="polite"></div>
 <button type="button" data-d="approve">✓ 批准</button>
 <button type="button" data-d="reject">✗ 拒绝</button>
 <span id="review-msg" aria-live="polite"></span></form>`
@@ -389,10 +421,22 @@ form.addEventListener('click', async (e) => {
   const j = await r.json(); if (j.error) { msg.textContent = j.error; return }
   location.href = '/'
 })
+const explainBtn = document.getElementById('explain-btn')
+explainBtn.addEventListener('click', async () => {
+  const out = document.getElementById('explain-out')
+  explainBtn.disabled = true; out.textContent = '正在让 AI 基于本条款生成实例，可能需要一会儿…'
+  try {
+    const r = await fetch('/api/explain', { method: 'POST', headers: { 'content-type': 'application/json', 'x-csrf': csrf },
+      body: JSON.stringify({ key: form.dataset.key, auditor: document.getElementById('explain-auditor').value, model: document.getElementById('explain-model').value }) })
+    const j = await r.json()
+    out.textContent = j.error ? j.error : j.text
+  } catch { out.textContent = '生成失败，请重试或换一个客户端。' }
+  explainBtn.disabled = false
+})
 </script>`
     : ''
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="csrf" content="${esc(csrfToken)}"><title>urtext brief</title>
-<style>body{font:14px system-ui;margin:2rem;max-width:70rem}pre{background:#f7f7f7;padding:1rem;overflow-x:auto}button{margin-right:.4rem;cursor:pointer}#review-msg{color:#c00;margin-left:.5rem}#review-impact{background:#f7f7f7;padding:.6rem 1rem;border-left:3px solid #ccc}#review-impact dt{font-weight:600;margin-top:.5rem}#review-impact dd{margin:.1rem 0 .3rem 1.2rem;color:#333}</style>
+<style>body{font:14px system-ui;margin:2rem;max-width:70rem}pre{background:#f7f7f7;padding:1rem;overflow-x:auto}button{margin-right:.4rem;cursor:pointer}#review-msg{color:#c00;margin-left:.5rem}#explain-out{white-space:pre-wrap;background:#f7f7f7;padding:.6rem 1rem;border-left:3px solid #7a7;margin:.6rem 0;min-height:1rem}</style>
 </head><body><p><a href="/">← console</a></p><pre>${esc(text)}</pre>${controls}${script}</body></html>`
 }
 

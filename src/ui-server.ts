@@ -17,7 +17,7 @@ import { randomBytes } from 'node:crypto'
 import type { Database } from 'better-sqlite3'
 
 import { scanWorkspace } from './scanner.js'
-import { buildUiSnapshot, renderPage, handleDecide, handleReview, handleBrief, handleAuditRun, renderBriefPage } from './review-ui.js'
+import { buildUiSnapshot, renderPage, handleDecide, handleReview, handleExplain, handleBrief, handleAuditRun, renderBriefPage } from './review-ui.js'
 
 export interface UiServerHandle {
   url: string
@@ -93,6 +93,26 @@ export const startUiServer = (
           return json(400, { error: 'malformed json' })
         }
         const result = handleReview(db, root, input, opts.decider)
+        return json(result.status, result.body)
+      }
+      if (req.method === 'POST' && url.pathname === '/api/explain') {
+        if (!isSameOrigin(req, port)) return json(403, { error: 'forbidden origin' })
+        if (req.headers['x-csrf'] !== csrfToken) return json(403, { error: 'bad csrf token' })
+        if (!String(req.headers['content-type'] ?? '').includes('application/json'))
+          return json(415, { error: 'expected application/json' })
+        let body = ''
+        for await (const chunk of req) {
+          body += chunk
+          if (body.length > MAX_BODY) return json(413, { error: 'request too large' })
+        }
+        let input: unknown
+        try {
+          input = JSON.parse(body || '{}')
+        } catch {
+          return json(400, { error: 'malformed json' })
+        }
+        scanWorkspace(db, root)
+        const result = await handleExplain(db, root, input)
         return json(result.status, result.body)
       }
       if (req.method === 'POST' && url.pathname === '/api/audit-run') {

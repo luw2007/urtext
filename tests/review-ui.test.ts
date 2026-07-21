@@ -10,7 +10,7 @@ import { recordDecision } from '../src/decision.js'
 import { openRegistry } from '../src/registry.js'
 import { scanWorkspace } from '../src/scanner.js'
 import { verifyWorkspace } from '../src/verifier.js'
-import { buildUiSnapshot, renderPage, handleDecide, handleReview, handleBrief, handleAuditRun, renderBriefPage } from '../src/review-ui.js'
+import { buildUiSnapshot, renderPage, handleDecide, handleReview, handleExplain, handleBrief, handleAuditRun, renderBriefPage } from '../src/review-ui.js'
 import { importVerdicts, latestEvidence } from '../src/audit.js'
 
 let db: Database
@@ -245,29 +245,28 @@ const setupReviewable = (): string => {
 }
 
 describe('browser high-risk review', () => {
-  test('a review-ready high-risk clause exposes approve/reject buttons on its brief page', () => {
+  test('a review-ready high-risk clause exposes review buttons and the AI explain control', () => {
     const root = setupReviewable()
     const brief = handleBrief(db, root, 'specs/x/spec.md', 'C001')
     if (!('ok' in brief.body)) throw new Error('expected a brief')
     expect(brief.body.risk).toBe('high')
     expect(brief.body.reviewable).toBe(true)
     const html = renderBriefPage(brief.body.text, 'tok', 'specs/x/spec.md#C001', brief.body.briefHash, true, brief.body.facts)
-    expect(html).toContain('id="review-impact"')
     expect(html).toContain('高风险代码审查：specs/x/spec.md#C001 pay guard')
-    expect(html).toContain('本条款立即离开你的队列，gate 对它 auto-pass')
-    expect(html).toContain('这条批准自动失效')
-    expect(html).toContain('gate 会一直失败，直到有人改代码')
-    expect(html).toContain('没有下游依赖')
+    expect(html).toContain('id="explain-btn"')
+    expect(html).toContain('/api/explain')
     expect(html).toContain('data-d="approve"')
     expect(html).toContain('/api/review')
+    // No hard-coded consequence template — the examples come from the AI, not the page.
+    expect(html).not.toContain('gate 对它 auto-pass（证据+审计+审查三者皆绿）')
     expect(renderBriefPage(brief.body.text, 'tok', 'k', 'h', false)).not.toContain('id="review-form"')
   })
 
-  test('impact copy names the mapped files and dependent count concretely', () => {
+  test('handleExplain rejects malformed input before invoking any client', async () => {
     const root = setupReviewable()
-    const brief = handleBrief(db, root, 'specs/x/spec.md', 'C001')
-    if (!('ok' in brief.body)) throw new Error('expected a brief')
-    expect(brief.body.facts).toMatchObject({ title: expect.stringContaining('pay guard'), dependents: 0 })
+    await expect(handleExplain(db, root, { key: 'specs/x/spec.md#C001' })).resolves.toMatchObject({ status: 400 })
+    await expect(handleExplain(db, root, { key: 'nohash', auditor: 'claude' })).resolves.toMatchObject({ status: 400 })
+    await expect(handleExplain(db, root, { key: 'specs/x/spec.md#C001', auditor: 'bogus' })).resolves.toMatchObject({ status: 400 })
   })
 
   test('approve records through recordReview guards with a current brief-hash', () => {

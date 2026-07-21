@@ -199,3 +199,53 @@ export const runAuditAgentAsync = async (request: AuditRequest, options: Auditor
     temp.cleanup()
   }
 }
+
+export interface AgentTextResult {
+  kind: 'completed' | 'rejected'
+  text?: string
+  message?: string
+}
+
+/** Command for a plain-text (no JSON schema) prompt to a selected client — used
+ * for on-demand explanation, not adjudication. Same read-only/no-tools posture. */
+const textCommandFor = ({ id, model, profile }: AuditorOptions): { command: string; args: string[] } => {
+  const modelArgs = model ? ['--model', model] : []
+  const profileArgs = profile ? ['--profile', profile] : []
+  switch (id) {
+    case 'claude':
+      return { command: 'claude', args: ['--print', '--bare', '--no-session-persistence', '--tools', '', ...modelArgs] }
+    case 'codex':
+      return { command: 'codex', args: ['exec', '--ephemeral', '--sandbox', 'read-only', ...modelArgs, ...profileArgs, '-'] }
+    case 'omp':
+      return { command: 'omp', args: ['--print', '--no-tools', '--no-session', '--no-skills', '--no-rules', ...modelArgs, ...profileArgs] }
+  }
+}
+
+/** Run a plain-text prompt through a selected headless client and return its
+ * text output. Fail-closed: missing client / non-zero / timeout → rejected. */
+export const runAgentText = async (prompt: string, options: AuditorOptions): Promise<AgentTextResult> => {
+  const { command, args } = textCommandFor(options)
+  try {
+    const output = await new Promise<{ stdout: string; error?: Error }>((resolve) => {
+      const child = spawn(command, args, { stdio: ['pipe', 'pipe', 'ignore'] })
+      let stdout = ''
+      let settled = false
+      const finish = (result: { stdout: string; error?: Error }) => {
+        if (!settled) { settled = true; resolve(result) }
+      }
+      const timer = setTimeout(() => { child.kill(); finish({ stdout, error: new Error('ETIMEDOUT') }) }, auditTimeoutMs())
+      child.stdout.on('data', (chunk: Buffer) => { stdout += chunk })
+      child.on('error', (error) => { clearTimeout(timer); finish({ stdout, error }) })
+      child.on('close', (code) => { clearTimeout(timer); finish(code === 0 ? { stdout } : { stdout, error: new Error(`agent exited ${code ?? 'by signal'}`) }) })
+      child.stdin.end(prompt)
+    })
+    if (output.error) {
+      const timedOut = output.error.message === 'ETIMEDOUT'
+      return { kind: 'rejected', message: timedOut ? 'agent timed out' : output.error.message }
+    }
+    const text = output.stdout.trim()
+    return text.length > 0 ? { kind: 'completed', text } : { kind: 'rejected', message: 'agent returned no text' }
+  } catch {
+    return { kind: 'rejected', message: 'agent invocation failed' }
+  }
+}
