@@ -262,6 +262,7 @@ export const runAgentText = async (prompt: string, options: AuditorOptions): Pro
       const timer = setTimeout(() => { child.kill(); finish({ stdout, error: new Error('ETIMEDOUT') }) }, auditTimeoutMs())
       child.stdout.on('data', (chunk: Buffer) => { stdout += chunk })
       child.on('error', (error) => { clearTimeout(timer); finish({ stdout, error }) })
+      child.on('close', (code) => { clearTimeout(timer); finish(code === 0 ? { stdout } : { stdout, error: new Error(`agent exited ${code ?? 'by signal'}`) }) })
       child.stdin.end(viaStdin ? prompt : '')
     })
     if (output.error) {
