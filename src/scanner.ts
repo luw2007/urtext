@@ -32,6 +32,14 @@ export interface ScanReport {
   linkErrors: LinkError[]
   /** Dependents of text-changed clauses; their evidence was invalidated. */
   stale: StaleReport
+  /**
+   * Feature names whose clause files parse cleanly but declare zero clauses —
+   * prose intent with no oracle binding. Not a failure (VISION allows spec
+   * prose), but surfaced so a spec dir with only unenforceable requirements is
+   * visible rather than a silent green. Building files are excluded (their
+   * parse errors are the reported problem).
+   */
+  clauselessUnits: string[]
 }
 
 /** Discover `specs/<feature>/` units. Non-recursive below the feature dir (v0). */
@@ -73,12 +81,17 @@ export const scanWorkspace = (db: Database, workspaceRoot: string): ScanReport =
   const timestamp = Date.now()
 
   const changed: { specPath: string; clauseId: string }[] = []
+  const clauselessUnits: string[] = []
   for (const unit of units) {
     // Clause files first — collect the unit's declared ids for the checklist check.
     const unitClauseIds = new Set<string>()
+    let unitClauseCount = 0
+    let unitHasBuilding = false
     for (const specPath of unit.clauseFiles) {
       const content = readFileSync(join(workspaceRoot, specPath), 'utf8')
       const parsed = parseClauseFile(content)
+      unitClauseCount += parsed.clauses.length
+      if (parsed.errors.length > 0) unitHasBuilding = true
       for (const clause of parsed.clauses) {
         unitClauseIds.add(clause.clauseId)
       }
@@ -89,6 +102,10 @@ export const scanWorkspace = (db: Database, workspaceRoot: string): ScanReport =
         outcome.errors = parsed.errors
       }
       outcomes.push({ specPath, outcome })
+    }
+
+    if (unit.clauseFiles.length > 0 && unitClauseCount === 0 && !unitHasBuilding) {
+      clauselessUnits.push(unit.feature)
     }
 
     if (unit.taskFile) {
@@ -105,5 +122,5 @@ export const scanWorkspace = (db: Database, workspaceRoot: string): ScanReport =
   const linkErrors = linkWorkspace(db)
   const stale = propagateStale(db, changed, timestamp)
 
-  return { units, outcomes, linkErrors, stale }
+  return { units, outcomes, linkErrors, stale, clauselessUnits }
 }

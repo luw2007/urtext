@@ -578,7 +578,7 @@ const run = (argv: string[]): number => {
       if (jsonMode) {
         console.log(
           JSON.stringify(
-            { schema: 'urtext.check/1', failures: 0, building: [], linkErrors: [], stale: report.stale, unmapped: [] },
+            { schema: 'urtext.check/1', failures: 0, building: [], linkErrors: [], stale: report.stale, clauselessUnits: [], unmapped: [] },
             null,
             2
           )
@@ -658,6 +658,11 @@ const run = (argv: string[]): number => {
           `  ~ stale: ${list} (${report.stale.invalidatedEvidence} evidence row(s) invalidated)`
         )
       }
+      if (report.clauselessUnits.length > 0) {
+        console.log(
+          `  ⚠ no executable clause: ${report.clauselessUnits.join(', ')} — spec prose binds no oracle (add a \`## C<n> … <!-- oracle:… -->\` clause or move it out of specs/)`
+        )
+      }
     }
 
     let failures = buildingCount + report.linkErrors.length
@@ -701,6 +706,7 @@ const run = (argv: string[]): number => {
               message: error.message,
             })),
             stale: report.stale,
+            clauselessUnits: report.clauselessUnits,
             unmapped: unmappedHunks,
           },
           null,

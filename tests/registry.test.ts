@@ -148,6 +148,28 @@ describe('scanWorkspace', () => {
       outcomes: [],
       linkErrors: [],
       stale: { staleClauses: [], invalidatedEvidence: 0 },
+      clauselessUnits: [],
     })
+  })
+
+  test('a feature whose clause files declare zero clauses is flagged clauseless, not failed', () => {
+    const root = mkdtempSync(join(tmpdir(), 'urtext-scan-'))
+    tempDirs.push(root)
+    mkdirSync(join(root, 'specs/prose'), { recursive: true })
+    // Spec-Kit-style prose: headings, requirements, no `## C<n> <!-- oracle -->`.
+    writeFileSync(join(root, 'specs/prose/spec.md'), '# Feature\n\n## Requirements\n\n- FR-001 The system MUST do X.\n')
+    const report = scanWorkspace(db, root)
+    expect(report.clauselessUnits).toEqual(['prose'])
+    // Clauseless is a visible hint, not a validation failure — the file is ready.
+    expect(report.outcomes[0]?.outcome).toMatchObject({ status: 'ready' })
+  })
+
+  test('a feature with a building clause file is not flagged clauseless (its errors are the problem)', () => {
+    const root = mkdtempSync(join(tmpdir(), 'urtext-scan-'))
+    tempDirs.push(root)
+    mkdirSync(join(root, 'specs/broken'), { recursive: true })
+    writeFileSync(join(root, 'specs/broken/spec.md'), '## C001 no oracle bound\nbody\n')
+    const report = scanWorkspace(db, root)
+    expect(report.clauselessUnits).toEqual([])
   })
 })
