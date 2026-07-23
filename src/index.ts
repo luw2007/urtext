@@ -107,12 +107,15 @@ export {
   renderPage,
   handleDecide,
   handleBrief,
+  buildSpecImpactView,
   renderBriefPage,
+  renderBriefErrorPage,
   briefHistory,
   type UiSnapshot,
   type UiClause,
   type DecideResult,
   type BriefApiResult,
+  type SpecImpactView,
 } from './review-ui.js'
 export { startUiServer, type UiServerHandle } from './ui-server.js'
 export {

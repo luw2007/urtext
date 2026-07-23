@@ -17,7 +17,7 @@ import { randomBytes } from 'node:crypto'
 import type { Database } from 'better-sqlite3'
 
 import { scanWorkspace } from './scanner.js'
-import { buildUiSnapshot, renderPage, handleDecide, handleReview, handleExplain, handleBrief, handleAuditRun, renderBriefPage } from './review-ui.js'
+import { buildUiSnapshot, renderPage, handleDecide, handleReview, handleExplain, handleBrief, handleAuditRun, renderBriefPage, renderBriefErrorPage } from './review-ui.js'
 
 export interface UiServerHandle {
   url: string
@@ -142,10 +142,14 @@ export const startUiServer = (
       if (req.method === 'GET' && url.pathname === '/brief') {
         scanWorkspace(db, root)
         const result = handleBrief(db, root, url.searchParams.get('spec'), url.searchParams.get('clause'))
-        if ('error' in result.body) return json(result.status, result.body)
+        if ('error' in result.body) {
+          res.writeHead(result.status, { 'content-type': 'text/html; charset=utf-8' })
+          res.end(renderBriefErrorPage(result.body.error))
+          return
+        }
         const key = `${url.searchParams.get('spec')}#${url.searchParams.get('clause')}`
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
-        res.end(renderBriefPage(result.body.text, csrfToken, key, result.body.briefHash, result.body.reviewable, result.body.facts))
+        res.end(renderBriefPage(result.body.text, csrfToken, key, result.body.briefHash, result.body.reviewable, result.body.facts, result.body.view))
         return
       }
       if (req.method === 'GET' && url.pathname === '/') {

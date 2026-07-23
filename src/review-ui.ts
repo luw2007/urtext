@@ -18,7 +18,7 @@ import type { Database } from 'better-sqlite3'
 
 import { runAgentText, runAuditAgentAsync, type AuditorId } from './audit-runner.js'
 import { coverage, exportRequest, importVerdicts } from './audit.js'
-import { buildBrief, renderBriefText, type BriefHistoryLine, type ClauseTarget } from './brief.js'
+import { buildBrief, renderBriefText, type Brief, type BriefHistoryLine, type BriefMapping, type ClauseTarget } from './brief.js'
 import { detectUnmapped } from './dwarf.js'
 import { adjudicate } from './gate.js'
 import { buildStatus, type StatusItem, type StatusReport } from './status.js'
@@ -210,10 +210,32 @@ export interface ReviewFacts {
   dependents: number
 }
 
+export interface SpecImpactView {
+  schema: 'urtext.spec-impact/1'
+  head: string | null
+  target: ClauseTarget
+  risk: 'low' | 'high'
+  stale: boolean
+  hasEvidence: boolean
+  mappings: BriefMapping[]
+  impact: Brief['impact']
+}
+
+export const buildSpecImpactView = (brief: Brief): SpecImpactView => ({
+  schema: 'urtext.spec-impact/1',
+  head: brief.manifest.head,
+  target: { specPath: brief.manifest.specPath, clauseId: brief.manifest.clauseId },
+  risk: brief.manifest.risk,
+  stale: brief.manifest.stale,
+  hasEvidence: brief.manifest.evidence !== null,
+  mappings: brief.manifest.mappings,
+  impact: brief.impact,
+})
+
 export interface BriefApiResult {
   status: number
   body:
-    | { ok: true; briefHash: string; text: string; risk: 'low' | 'high'; reviewable: boolean; facts: ReviewFacts }
+    | { ok: true; briefHash: string; text: string; risk: 'low' | 'high'; reviewable: boolean; facts: ReviewFacts; view: SpecImpactView }
     | { error: string }
 }
 
@@ -245,6 +267,7 @@ export const handleBrief = (db: Database, root: string, spec: unknown, clause: u
       text: renderBriefText(outcome.brief, briefHistory(db, target)),
       risk: manifest.risk,
       reviewable,
+      view: buildSpecImpactView(outcome.brief),
       facts: {
         title: `${manifest.specPath}#${manifest.clauseId} ${manifest.title}`,
         files,
@@ -382,13 +405,39 @@ export const handleAuditRun = async (db: Database, input: unknown): Promise<Audi
  * a reviewable high-risk clause, approve/reject buttons that post to the same
  * guarded recordReview path as the CLI (P5). Non-reviewable clauses show only the
  * text — the buttons never appear where the gate would reject them anyway. */
+const impactSummary = (view: SpecImpactView): string => {
+  const evidence = !view.hasEvidence
+    ? '<span data-state="no-evidence">尚无证据 — 运行 <code>urtext verify</code></span>'
+    : view.stale
+      ? '<span data-state="stale">证据已过期 — 需重新 verify</span>'
+      : '<span data-state="fresh">当前有效</span>'
+  const mapped = view.mappings.length === 0
+    ? '尚无映射代码'
+    : `${view.mappings.length} 个映射范围`
+  const affected = view.impact.affectedClauses
+  const tasks = view.impact.affectedTasks
+  const impact = affected.length === 0 && tasks.length === 0
+    ? '无下游影响'
+    : `影响闭包（潜在波及，非已 stale 列表）：${affected.length} 个条款 + ${tasks.length} 个任务` +
+      affected.map((clause) => ` <a href="${esc(briefHref(clause.specPath, clause.clauseId))}">${esc(`${clause.specPath}#${clause.clauseId}`)}</a>`).join('')
+  return `<section id="spec-impact" aria-label="Spec impact">
+<p><b data-state="risk-${view.risk}">Risk: ${view.risk}</b> · ${evidence}</p>
+<p data-section="mappings"><b>映射代码摘录（当前工作区内容，非 Diff）</b>：${mapped}</p>
+<p data-section="impact"><b>影响闭包（若本条款变化，潜在波及）</b>：${impact}</p>
+</section>`
+}
+
+export const renderBriefErrorPage = (message: string): string =>
+  `<!doctype html><html><head><meta charset="utf-8"><title>urtext brief error</title></head><body><p><a href="/">← console</a></p><p data-state="error">${esc(message)}</p></body></html>`
+
 export const renderBriefPage = (
   text: string,
   csrfToken: string,
   key: string,
   briefHash: string,
   reviewable: boolean,
-  facts?: ReviewFacts
+  facts?: ReviewFacts,
+  view?: SpecImpactView
 ): string => {
   const fileList = facts && facts.files.length > 0 ? facts.files.join('、') : '（该条款尚无映射代码）'
   const dep = facts?.dependents ?? 0
@@ -439,9 +488,10 @@ explainBtn.addEventListener('click', async () => {
 })
 </script>`
     : ''
+  const impact = view ? impactSummary(view) : ''
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="csrf" content="${esc(csrfToken)}"><title>urtext brief</title>
-<style>body{font:14px system-ui;margin:2rem;max-width:70rem}pre{background:#f7f7f7;padding:1rem;overflow-x:auto}button{margin-right:.4rem;cursor:pointer}#review-msg{color:#c00;margin-left:.5rem}#explain-out{white-space:pre-wrap;background:#f7f7f7;padding:.6rem 1rem;border-left:3px solid #7a7;margin:.6rem 0;min-height:1rem}</style>
-</head><body><p><a href="/">← console</a></p><pre>${esc(text)}</pre>${controls}${script}</body></html>`
+<style>body{font:14px system-ui;margin:2rem;max-width:70rem}pre{background:#f7f7f7;padding:1rem;overflow-x:auto}button{margin-right:.4rem;cursor:pointer}#spec-impact{background:#fafafa;border:1px solid #ddd;padding:.6rem 1rem;margin-bottom:1rem}[data-state="risk-high"]{color:#c00}[data-state="risk-low"]{color:#666}[data-state="stale"],[data-state="no-evidence"]{color:#b50}#review-msg{color:#c00;margin-left:.5rem}#explain-out{white-space:pre-wrap;background:#f7f7f7;padding:.6rem 1rem;border-left:3px solid #7a7;margin:.6rem 0;min-height:1rem}</style>
+</head><body><p><a href="/">← console</a></p>${impact}<pre>${esc(text)}</pre>${controls}${script}</body></html>`
 }
 
 export interface DecideResult {

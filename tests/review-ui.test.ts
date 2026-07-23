@@ -229,6 +229,30 @@ describe('operator console (v3)', () => {
     expect(result.body.view.mappings).toEqual([])
   })
 
+  test('brief page renders fresh and stale evidence as distinct states', () => {
+    const root = setupRepo('## C003 guarded path <!-- oracle:cmd:true risk:high -->')
+    const fresh = handleBrief(db, root, 'specs/x/spec.md', 'C003')
+    if (!('ok' in fresh.body)) throw new Error('expected a brief')
+    const freshHtml = renderBriefPage(fresh.body.text, 'tok', 'specs/x/spec.md#C003', fresh.body.briefHash, false, undefined, fresh.body.view)
+    expect(freshHtml).toContain('data-state="fresh"')
+    db.prepare('UPDATE evidence SET invalidated_at = 1 WHERE spec_path = ? AND clause_id = ?').run('specs/x/spec.md', 'C003')
+    const stale = handleBrief(db, root, 'specs/x/spec.md', 'C003')
+    if (!('ok' in stale.body)) throw new Error('expected a brief')
+    const staleHtml = renderBriefPage(stale.body.text, 'tok', 'specs/x/spec.md#C003', stale.body.briefHash, false, undefined, stale.body.view)
+    expect(staleHtml).toContain('data-state="stale"')
+    expect(staleHtml).not.toContain('data-state="fresh"')
+  })
+
+  test('brief page lists dependent clauses as potential impact, not stale state', () => {
+    const root = setupRepo('## C003 dependent <!-- oracle:cmd:true refs:specs/x/spec.md#C002 -->')
+    const result = handleBrief(db, root, 'specs/x/spec.md', 'C002')
+    if (!('ok' in result.body)) throw new Error('expected a brief')
+    const html = renderBriefPage(result.body.text, 'tok', 'specs/x/spec.md#C002', result.body.briefHash, false, undefined, result.body.view)
+    expect(result.body.view.impact.affectedClauses).toEqual([{ specPath: 'specs/x/spec.md', clauseId: 'C003' }])
+    expect(html).toContain('影响闭包（潜在波及，非已 stale 列表）：1 个条款 + 0 个任务')
+    expect(html).toContain('/brief?spec=specs%2Fx%2Fspec.md&amp;clause=C003')
+  })
+
   test('brief page distinguishes risk, evidence, mappings, and potential impact', () => {
     const root = setupRepo('## C003 guarded path <!-- oracle:cmd:true risk:high -->')
     db.prepare('DELETE FROM evidence WHERE spec_path = ? AND clause_id = ?').run('specs/x/spec.md', 'C003')
