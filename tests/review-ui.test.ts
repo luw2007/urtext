@@ -10,7 +10,7 @@ import { recordDecision } from '../src/decision.js'
 import { openRegistry } from '../src/registry.js'
 import { scanWorkspace } from '../src/scanner.js'
 import { verifyWorkspace } from '../src/verifier.js'
-import { buildUiSnapshot, renderPage, handleDecide, handleReview, handleExplain, handleBrief, handleAuditRun, renderBriefPage } from '../src/review-ui.js'
+import { buildUiSnapshot, renderPage, handleDecide, handleReview, handleExplain, handleBrief, handleAuditRun, renderBriefPage, renderBriefErrorPage } from '../src/review-ui.js'
 import { importVerdicts, latestEvidence } from '../src/audit.js'
 
 let db: Database
@@ -210,6 +210,52 @@ describe('operator console (v3)', () => {
     expect(ok.body.text).toContain('brief-hash:')
     expect(handleBrief(db, root, 'specs/x/spec.md', 'C999').status).toBe(404)
     expect(handleBrief(db, root, null, 'C001').status).toBe(400)
+  })
+
+  test('brief api exposes a typed impact projection without inventing facts', () => {
+    const root = setupRepo('## C003 guarded path <!-- oracle:cmd:true risk:high refs:specs/x/spec.md#C002 -->')
+    db.prepare('DELETE FROM evidence WHERE spec_path = ? AND clause_id = ?').run('specs/x/spec.md', 'C003')
+    const result = handleBrief(db, root, 'specs/x/spec.md', 'C003')
+    expect(result.status).toBe(200)
+    if (!('ok' in result.body)) throw new Error('expected a brief')
+    expect(result.body.view).toMatchObject({
+      schema: 'urtext.spec-impact/1',
+      target: { specPath: 'specs/x/spec.md', clauseId: 'C003' },
+      risk: 'high',
+      stale: false,
+      hasEvidence: false,
+    })
+    expect(result.body.view.impact.affectedClauses).toEqual([])
+    expect(result.body.view.mappings).toEqual([])
+  })
+
+  test('brief page distinguishes risk, evidence, mappings, and potential impact', () => {
+    const root = setupRepo('## C003 guarded path <!-- oracle:cmd:true risk:high -->')
+    db.prepare('DELETE FROM evidence WHERE spec_path = ? AND clause_id = ?').run('specs/x/spec.md', 'C003')
+    const result = handleBrief(db, root, 'specs/x/spec.md', 'C003')
+    if (!('ok' in result.body)) throw new Error('expected a brief')
+    const html = renderBriefPage(
+      result.body.text,
+      'tok',
+      'specs/x/spec.md#C003',
+      result.body.briefHash,
+      false,
+      undefined,
+      result.body.view
+    )
+    expect(html).toContain('data-state="risk-high"')
+    expect(html).toContain('data-state="no-evidence"')
+    expect(html).toContain('尚无映射代码')
+    expect(html).toContain('无下游影响')
+    expect(html).toContain('映射代码摘录（当前工作区内容，非 Diff）')
+  })
+
+  test('brief error page escapes the refusal and never emits a risk conclusion', () => {
+    const html = renderBriefErrorPage('[unknown_clause] <script>alert(1)</script>')
+    expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;')
+    expect(html).not.toContain('<script>alert(1)</script>')
+    expect(html).not.toContain('data-state="risk-')
+    expect(html).toContain('data-state="error"')
   })
 
   test('high-risk manual decide from the ui needs the brief-hash it can fetch', () => {
