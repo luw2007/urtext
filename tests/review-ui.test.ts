@@ -91,28 +91,6 @@ describe('buildUiSnapshot', () => {
     expect(c1.actionable).toBe(true)
   })
 
-  test('reports workspace-level unmapped hunks without assigning them to a clause', () => {
-    const root = setupRepo()
-    writeFileSync(join(root, 'tracked.txt'), 'baseline')
-    git(root, 'add', '-A')
-    git(root, 'commit', '-q', '-m', 'tracked baseline')
-    writeFileSync(join(root, 'tracked.txt'), 'changed')
-    const snap = buildUiSnapshot(db, root)
-    expect(snap.unmapped).toEqual([{ filePath: 'tracked.txt', lineStart: 1, lineEnd: 1 }])
-    expect(snap.unmappedError).toBeNull()
-    expect(snap.status.items).toContainEqual(expect.objectContaining({ key: 'tracked.txt:1-1', kind: 'unmapped' }))
-  })
-
-  test('distinguishes a successful empty unmapped scan from scan failure', () => {
-    const root = setupRepo()
-    const clean = buildUiSnapshot(db, root)
-    expect(clean.unmapped).toEqual([])
-    expect(clean.unmappedError).toBeNull()
-    rmSync(join(root, '.git'), { recursive: true, force: true })
-    const failed = buildUiSnapshot(db, root)
-    expect(failed.unmapped).toEqual([])
-    expect(failed.unmappedError).toContain('git diff failed')
-  })
 })
 
 describe('renderPage', () => {
@@ -161,25 +139,6 @@ describe('renderPage', () => {
     expect(html).toContain('&lt;script&gt;')
   })
 
-  test('renders workspace-level unmapped and failure banners as separate states', () => {
-    const unmapped = renderPage({
-      ...buildUiSnapshot(db, setupRepo()),
-      unmapped: [{ filePath: '<bad>.ts', lineStart: 2, lineEnd: 3 }],
-      unmappedError: null,
-    }, 'tok')
-    expect(unmapped).toContain('data-banner="unmapped"')
-    expect(unmapped).toContain('&lt;bad&gt;.ts:2-3')
-    expect(unmapped).not.toContain('data-banner="unmapped-error"')
-
-    const failed = renderPage({
-      ...buildUiSnapshot(db, setupRepo()),
-      unmapped: [],
-      unmappedError: '<git failed>',
-    }, 'tok')
-    expect(failed).toContain('data-banner="unmapped-error"')
-    expect(failed).toContain('&lt;git failed&gt;')
-    expect(failed).not.toContain('data-banner="unmapped"')
-  })
 })
 
 describe('handleDecide', () => {

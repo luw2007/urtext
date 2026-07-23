@@ -19,7 +19,7 @@ import type { Database } from 'better-sqlite3'
 import { runAgentText, runAuditAgentAsync, type AuditorId } from './audit-runner.js'
 import { coverage, exportRequest, importVerdicts } from './audit.js'
 import { buildBrief, renderBriefText, type Brief, type BriefHistoryLine, type BriefMapping, type ClauseTarget } from './brief.js'
-import { detectUnmapped } from './dwarf.js'
+import { detectUnmapped, type DiffHunk } from './dwarf.js'
 import { adjudicate } from './gate.js'
 import { buildStatus, type StatusItem, type StatusReport } from './status.js'
 import { currentHead, listDecisions, recordDecision } from './decision.js'
@@ -46,6 +46,10 @@ export interface UiSnapshot {
   /** Manual clauses decided at HEAD / total manual clauses. */
   decided: number
   totalManual: number
+  /** Workspace-level hunks that have no mapping, acknowledgement, or spec write-back. */
+  unmapped: DiffHunk[]
+  /** Detection failure is distinct from an empty result; render it fail-closed. */
+  unmappedError: string | null
 }
 
 /** Build the console model: status lanes + the manual-decision view. */
@@ -54,6 +58,7 @@ export const buildUiSnapshot = (db: Database, root: string): UiSnapshot => {
   const dirty = worktreeDirty(root) ?? false
   const unmappedReport = detectUnmapped(db, root)
   const unmapped = 'error' in unmappedReport ? [] : unmappedReport.unmapped
+  const unmappedError = 'error' in unmappedReport ? unmappedReport.error : null
   const status = buildStatus(db, { head, unmapped, dirtyWorktree: dirty })
   const report = adjudicate(db, unmapped.length, head ?? undefined, { dirtyWorktree: dirty })
   const clauses: UiClause[] = report.decisions.map((d) => {
@@ -73,6 +78,8 @@ export const buildUiSnapshot = (db: Database, root: string): UiSnapshot => {
     dirty,
     status,
     clauses,
+    unmapped,
+    unmappedError,
     decided: manual.filter((c) => c.decisionVerdict === 'pass' || c.decisionVerdict === 'fail').length,
     totalManual: manual.length,
   }
@@ -136,6 +143,11 @@ export const renderPage = (snapshot: UiSnapshot, csrfToken: string, auditResult?
     : ''
   const notice = auditResult ? `<p id="audit-result" style="color:#075">${esc(auditResult)}</p>` : ''
   const audit = auditControls(snapshot.status.items)
+  const unmappedBanner = snapshot.unmappedError !== null
+    ? `<p data-banner="unmapped-error" style="color:#c00"><b>unmapped 检测失败：</b>${esc(snapshot.unmappedError)} — 本页不能证明不存在未归属变更</p>`
+    : snapshot.unmapped.length > 0
+      ? `<section data-banner="unmapped" style="color:#c00"><b>${snapshot.unmapped.length} 个未归属变更（工作区级，git diff HEAD，未跟踪文件不在检测范围）</b><ul>${snapshot.unmapped.map((hunk) => `<li><code>${esc(`${hunk.filePath}:${hunk.lineStart}-${hunk.lineEnd}`)}</code> — map / ack / spec write-back via CLI</li>`).join('')}</ul></section>`
+      : ''
   return `<!doctype html><html><head><meta charset="utf-8">
 <meta name="csrf" content="${esc(csrfToken)}">
 <title>urtext console</title>
@@ -145,6 +157,7 @@ h3{margin:.4rem 0}button{margin-left:.3rem;cursor:pointer}</style></head><body>
 <h2>urtext console <small style="color:#999">· Ctrl-C to quit</small></h2>
 <p>HEAD ${esc(snapshot.head?.slice(0, 7) ?? 'n/a')}${dirty} — ${snapshot.status.counts.human} for you, ${snapshot.status.counts.agent} for the agent, ${snapshot.status.counts.autoPass} auto-pass · ${snapshot.decided}/${snapshot.totalManual} manual decided</p>
 ${wip}
+${unmappedBanner}
 ${notice}
 <h3>Your queue (${human.length})</h3>
 <table>${humanRows || '<tr><td>nothing — prerequisites pending or all clear</td></tr>'}</table>
