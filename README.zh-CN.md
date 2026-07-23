@@ -28,6 +28,9 @@ mkdir -p specs/coupon
 Given an already-discounted item, When a coupon is applied, Then reject with 409.
 ```
 
+anchor 值不能包含空格——带参数的 `cmd` oracle 需用 `%20` 编码
+（`oracle:cmd:node%20scripts/validate.mjs`），或包一层脚本。
+
 将验收任务绑定到子句（`specs/coupon/tasks.md`）：
 
 ```markdown

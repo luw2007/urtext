@@ -29,7 +29,7 @@ describe('registry revision chain', () => {
     expect(first).toMatchObject({ kind: 'indexed', revision: 1, status: 'ready' })
 
     const unchanged = indexClauseFile(db, { specPath: 'specs/x/spec.md', content: VALID_CLAUSES, timestamp: 2 })
-    expect(unchanged).toEqual({ kind: 'unchanged', revision: 1 })
+    expect(unchanged).toEqual({ kind: 'unchanged', revision: 1, status: 'ready' })
 
     const second = indexClauseFile(db, {
       specPath: 'specs/x/spec.md',
@@ -85,7 +85,7 @@ describe('registry revision chain', () => {
     // Idempotent; a never-indexed path is a no-op.
     expect(
       tombstoneFile(db, { specPath: 'specs/x/spec.md', fileKind: 'clauses', timestamp: 3 })
-    ).toEqual({ kind: 'unchanged', revision: 2 })
+    ).toEqual({ kind: 'unchanged', revision: 2, status: 'tombstoned' })
     expect(tombstoneFile(db, { specPath: 'specs/y/spec.md', fileKind: 'clauses', timestamp: 3 })).toBeNull()
 
     const clauseRows = db

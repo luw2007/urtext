@@ -34,6 +34,10 @@ with a `C<n>` id, and **every clause must bind an oracle**:
 Given an already-discounted item, When a coupon is applied, Then reject with 409.
 ```
 
+Anchor values cannot contain spaces — a `cmd` oracle with arguments encodes
+them as `%20` (`oracle:cmd:node%20scripts/validate.mjs`) or wraps the command
+in a script.
+
 Bind acceptance tasks to clauses (`specs/coupon/tasks.md`):
 
 ```markdown

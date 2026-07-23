@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS evidence (
   exit_code   INTEGER,
   output      TEXT    NOT NULL DEFAULT '',
   created_at  INTEGER NOT NULL,
+  duration_ms INTEGER,
   invalidated_at INTEGER
 );
 `
@@ -39,6 +40,9 @@ export const ensureEvidenceLedger = (db: Database): void => {
   if (!columns.some((column) => column.name === 'invalidated_at')) {
     db.exec('ALTER TABLE evidence ADD COLUMN invalidated_at INTEGER')
   }
+  if (!columns.some((column) => column.name === 'duration_ms')) {
+    db.exec('ALTER TABLE evidence ADD COLUMN duration_ms INTEGER')
+  }
 }
 
 export interface ClauseVerdict {
@@ -50,6 +54,8 @@ export interface ClauseVerdict {
   oracleKind: string
   verdict: Verdict
   output: string
+  /** Oracle wall-clock time; identifies which oracle slows `verify` down. */
+  durationMs: number
 }
 
 export interface VerifyReport {
@@ -90,19 +96,28 @@ const readyClauses = (db: Database): ReadyClauseRow[] =>
     )
     .all() as ReadyClauseRow[]
 
-export const verifyWorkspace = (db: Database, workspaceRoot: string): VerifyReport => {
+export const verifyWorkspace = (
+  db: Database,
+  workspaceRoot: string,
+  only?: { specPath: string; clauseId: string }
+): VerifyReport => {
   ensureEvidenceLedger(db)
   const insert = db.prepare(
     `INSERT INTO evidence
-       (spec_path, revision, clause_id, oracle_kind, oracle_ref, verdict, exit_code, output, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       (spec_path, revision, clause_id, oracle_kind, oracle_ref, verdict, exit_code, output, created_at, duration_ms)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
 
   const verdicts: ClauseVerdict[] = []
   const counts = { pass: 0, fail: 0, pending: 0 }
   let manualCount = 0
 
-  for (const row of readyClauses(db)) {
+  const rows = only
+    ? readyClauses(db).filter(
+        (row) => row.spec_path === only.specPath && row.clause_id === only.clauseId
+      )
+    : readyClauses(db)
+  for (const row of rows) {
     // Rehydrate the minimal ParsedClause surface the runner needs. A `ready`
     // revision guarantees a valid oracle kind (missing/invalid keeps a file
     // at `building`), so a failed guard here means registry corruption.
@@ -119,7 +134,9 @@ export const verifyWorkspace = (db: Database, workspaceRoot: string): VerifyRepo
       body: row.body,
       line: row.line,
     }
+    const startedAt = Date.now()
     const result = runOracle(clause, workspaceRoot)
+    const durationMs = Date.now() - startedAt
 
     insert.run(
       row.spec_path,
@@ -130,7 +147,8 @@ export const verifyWorkspace = (db: Database, workspaceRoot: string): VerifyRepo
       result.verdict,
       result.exitCode,
       result.output,
-      Date.now()
+      Date.now(),
+      durationMs
     )
 
     counts[result.verdict]++
@@ -144,6 +162,7 @@ export const verifyWorkspace = (db: Database, workspaceRoot: string): VerifyRepo
       oracleKind: row.oracle_kind ?? 'missing',
       verdict: result.verdict,
       output: result.output,
+      durationMs,
     })
   }
 

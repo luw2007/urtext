@@ -78,12 +78,15 @@ export const scanWorkspace = (db: Database, workspaceRoot: string): ScanReport =
     const unitClauseIds = new Set<string>()
     for (const specPath of unit.clauseFiles) {
       const content = readFileSync(join(workspaceRoot, specPath), 'utf8')
-      for (const clause of parseClauseFile(content).clauses) {
+      const parsed = parseClauseFile(content)
+      for (const clause of parsed.clauses) {
         unitClauseIds.add(clause.clauseId)
       }
       const outcome = indexClauseFile(db, { specPath, content, timestamp })
       if (outcome.kind === 'indexed') {
         for (const clauseId of outcome.changedClauses) changed.push({ specPath, clauseId })
+      } else if (outcome.kind === 'unchanged' && outcome.status === 'building') {
+        outcome.errors = parsed.errors
       }
       outcomes.push({ specPath, outcome })
     }

@@ -26,7 +26,10 @@ export const parseAnchorFields = (raw: string): ParsedAnchor => {
     if (!token) continue
     const colon = token.indexOf(':')
     if (colon <= 0) {
-      issues.push({ token, message: `Anchor token "${token}" is not a key:value pair.` })
+      issues.push({
+        token,
+        message: `Anchor token "${token}" is not a key:value pair. Values cannot contain spaces — encode them as %20 (e.g. oracle:cmd:node%20scripts/check.mjs) or wrap the command in a script.`,
+      })
       continue
     }
     fields[token.slice(0, colon)] = token.slice(colon + 1)

@@ -24,7 +24,13 @@ import { parseTaskFile, type TaskParseError } from './task-parser.js'
 export type FileKind = 'clauses' | 'tasks'
 
 export type IndexOutcome =
-  | { kind: 'unchanged'; revision: number }
+  | {
+      kind: 'unchanged'
+      revision: number
+      status: 'ready' | 'building' | 'tombstoned'
+      /** Populated by the scanner for building clause files (fail-closed check UX). */
+      errors?: (ClauseParseError | TaskParseError | CrossRefError)[]
+    }
   | {
       kind: 'indexed'
       revision: number
@@ -122,14 +128,14 @@ export const openRegistry = (db: Database): void => {
 const latestRevision = (
   db: Database,
   specPath: string
-): { revision: number; content_hash: string | null; status: string } | undefined =>
+): { revision: number; content_hash: string | null; status: 'ready' | 'building' | 'tombstoned' } | undefined =>
   db
     .prepare(
       `SELECT revision, content_hash, status FROM revisions
        WHERE spec_path = ? ORDER BY revision DESC LIMIT 1`
     )
     .get(specPath) as
-    | { revision: number; content_hash: string | null; status: string }
+    | { revision: number; content_hash: string | null; status: 'ready' | 'building' | 'tombstoned' }
     | undefined
 
 const clauseTextHash = (title: string, body: string | null): string =>
@@ -149,7 +155,7 @@ export const indexClauseFile = (
   const contentHash = hashContent(content)
   const latest = latestRevision(db, specPath)
   if (latest && latest.status !== 'tombstoned' && latest.content_hash === contentHash) {
-    return { kind: 'unchanged', revision: latest.revision }
+    return { kind: 'unchanged', revision: latest.revision, status: latest.status }
   }
 
   const parsed = parseClauseFile(content)
@@ -230,7 +236,7 @@ export const indexTaskFile = (
   const contentHash = hashContent(content)
   const latest = latestRevision(db, specPath)
   if (latest && latest.status !== 'tombstoned' && latest.content_hash === contentHash) {
-    return { kind: 'unchanged', revision: latest.revision }
+    return { kind: 'unchanged', revision: latest.revision, status: latest.status }
   }
 
   const parsed = parseTaskFile(content)
@@ -299,7 +305,7 @@ export const tombstoneFile = (
   const { specPath, fileKind, timestamp } = input
   const latest = latestRevision(db, specPath)
   if (!latest) return null
-  if (latest.status === 'tombstoned') return { kind: 'unchanged', revision: latest.revision }
+  if (latest.status === 'tombstoned') return { kind: 'unchanged', revision: latest.revision, status: 'tombstoned' }
 
   const nextRevision = latest.revision + 1
   db.prepare(

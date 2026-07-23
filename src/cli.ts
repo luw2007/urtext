@@ -55,8 +55,9 @@ const USAGE = [
   '                   Index, then report errors; exit 1 on any building revision',
   '                   or unknown cross-file ref. --diff also fails on unmapped',
   '                   working-tree changes.',
-  '  urtext verify    Index + check, then run every clause oracle and record evidence;',
-  '                   exit 1 on any failing clause.',
+  '  urtext verify [<spec-path>#<clause-id>]',
+  '                   Index + check, then run every clause oracle (or just one)',
+  '                   and record evidence; exit 1 on any failing clause.',
   '  urtext status [--json] [--wip-limit <n>]',
   '                   One item-keyed queue: human lane (adjudications whose',
   '                   prerequisites are met, unmapped changes) + agent lane',
@@ -596,7 +597,26 @@ const run = (argv: string[]): number => {
     }[] = []
     for (const { specPath, outcome } of report.outcomes) {
       if (outcome.kind === 'unchanged') {
-        if (!jsonMode) console.log(`  = ${specPath} (rev ${outcome.revision}, unchanged)`)
+        if (outcome.status === 'building') {
+          // Fail-closed: an unchanged file whose latest revision never became
+          // ready is still a validation failure (scanner re-parses, so the
+          // original errors are reported on every check/verify).
+          buildingCount++
+          const errors = (outcome.errors ?? []).map((error) => ({
+            line: error.line + 1,
+            code: error.code,
+            message: error.message,
+          }))
+          building.push({ specPath, revision: outcome.revision, errors })
+          if (!jsonMode) {
+            console.log(`  ✗ ${specPath} (rev ${outcome.revision}, building, unchanged)`)
+            for (const error of errors) {
+              console.log(`      line ${error.line}: [${error.code}] ${error.message}`)
+            }
+          }
+        } else if (!jsonMode) {
+          console.log(`  = ${specPath} (rev ${outcome.revision}, unchanged)`)
+        }
         continue
       }
       if (outcome.kind === 'tombstoned') {
@@ -696,9 +716,20 @@ const run = (argv: string[]): number => {
     }
     if (command !== 'verify') return 0
 
-    // verify: run every clause oracle against the latest ready revisions.
-    const verifyReport = verifyWorkspace(db, workspaceRoot)
+    // verify: run every clause oracle (or a single targeted clause) against
+    // the latest ready revisions.
+    const verifyTarget = argv[1]
+    const only = parseClauseTarget(verifyTarget)
+    if (verifyTarget !== undefined && !verifyTarget.startsWith('--') && !only) {
+      console.error('Usage: urtext verify [<spec-path>#<clause-id>]')
+      return 1
+    }
+    const verifyReport = verifyWorkspace(db, workspaceRoot, only ?? undefined)
     if (verifyReport.verdicts.length === 0) {
+      if (only) {
+        console.error(`\nNo ready clause matches ${only.specPath}#${only.clauseId}.`)
+        return 1
+      }
       console.log('\nNo clauses to verify.')
       return 0
     }
@@ -707,8 +738,9 @@ const run = (argv: string[]): number => {
       const marker =
         verdict.verdict === 'pass' ? '✓' : verdict.verdict === 'pending' ? '?' : '✗'
       const risk = verdict.risk === 'high' ? ' [high]' : ''
+      const seconds = (verdict.durationMs / 1000).toFixed(verdict.durationMs < 10_000 ? 1 : 0)
       console.log(
-        `  ${marker} ${verdict.clauseId} ${verdict.title}${risk} (${verdict.oracleKind}, ${verdict.verdict})`
+        `  ${marker} ${verdict.clauseId} ${verdict.title}${risk} (${verdict.oracleKind}, ${verdict.verdict}, ${seconds}s)`
       )
       if (verdict.verdict === 'fail') {
         for (const line of verdict.output.split('\n').slice(0, 6)) {
