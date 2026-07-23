@@ -165,18 +165,21 @@ No decisions recorded.
 ### `urtext ui [--port <n>] [--no-open]`
 Open the local operator console. Starts an **ephemeral** foreground server on
 `127.0.0.1` (random port unless `--port`), opens your browser (`--no-open` skips
-it), and blocks until **Ctrl-C**. The page renders the same two-lane queue as
-`urtext status`, links every clause item to its brief (`/brief` wraps the same
-text `urtext brief` prints), and gives pending manual clauses pass/fail buttons —
-a click fetches the brief-hash and posts to the same guarded `recordDecision`
-path as `urtext decide`, so a high-risk manual clause cannot be passed without
-the current brief (C018) and the verdict lands in the `decisions` ledger
-immediately. Clicking **pass** additionally prompts for a one-sentence reason,
-recorded as the decision's ledger note and enforced on the ui write path —
-one-click approval is where rubber-stamping lives; `fail` may omit it.
-High-risk CODE review stays CLI-only: the panel shows the pending
-item and the command, but code is the only reviewable fact (P5). This is an
-interactive-session process — not a daemon (no fork, no pid file, no
+it), and blocks until **Ctrl-C**. The console renders the same two-lane queue as
+`urtext status` and shows workspace-level unmapped hunks prominently; a detection
+failure is a visible error, never an empty all-clear. Every clause item links to
+its brief. The brief keeps the exact text printed by `urtext brief` and adds a
+structured summary of `low|high` risk, evidence freshness, mapped-code excerpts
+(current working-tree content, explicitly not a Git diff), and the potential
+impact closure. Impact and stale state are displayed separately.
+
+Pending manual clauses have pass/fail buttons. The browser fetches the current
+brief-hash and posts to the same guarded `recordDecision` path as `urtext decide`;
+passing additionally requires a one-sentence ledger note. A review-ready high-risk
+code clause exposes approve/reject controls on `/brief`, backed by the same
+`recordReview` guards as the CLI: clean worktree, current brief-hash, and HEAD
+binding. The UI never starts nested `urtext` processes or parses CLI display text.
+This is an interactive-session process — not a daemon (no fork, no pid file, no
 auto-start), the same category as the editor `git rebase -i` spawns (VISION P8).
 Hardening: loopback-only, per-session CSRF token, same-origin and
 JSON-content-type checks, request-body cap. Exit 0 on Ctrl-C.
