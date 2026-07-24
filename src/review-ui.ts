@@ -507,7 +507,7 @@ ${diffs}
 }
 
 export const renderBriefErrorPage = (message: string): string =>
-  `<!doctype html><html><head><meta charset="utf-8"><title>urtext brief error</title></head><body><nav><a href="/">← console</a> · <a href="/#all-specs">查看全部 Specs</a> · <a href="${esc('/' + '')}">刷新状态</a></nav><p data-state="error">${esc(message)}</p></body></html>`
+  `<!doctype html><html><head><meta charset="utf-8"><title>urtext brief error</title></head><body><nav><a href="/">← console</a> · <a href="/#all-specs">查看全部 Specs</a> · <a href="/">刷新状态</a></nav><p data-state="error">${esc(message)}</p></body></html>`
 
 export const renderBriefPage = (
   text: string,
