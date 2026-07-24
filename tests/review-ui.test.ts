@@ -231,6 +231,17 @@ describe('operator console (v3)', () => {
     expect(result.body.view.mappings).toEqual([])
   })
 
+  test('console renders every live clause, including entries absent from both queues', () => {
+    const root = setupRepo()
+    const snapshot = buildUiSnapshot(db, root)
+    snapshot.status.items = snapshot.status.items.filter((item) => item.clauseId !== 'C002')
+    const html = renderPage(snapshot, 'tok')
+    expect(html).toContain('id="all-specs"')
+    expect(html).toContain('data-clause="specs/x/spec.md#C002"')
+    expect(html).toContain('/brief?spec=specs%2Fx%2Fspec.md&amp;clause=C002')
+    expect(html).toContain('刷新状态')
+  })
+
   test('brief page renders fresh and stale evidence as distinct states', () => {
     const root = setupRepo('## C003 guarded path <!-- oracle:cmd:true risk:high -->')
     const fresh = handleBrief(db, root, 'specs/x/spec.md', 'C003')
@@ -271,9 +282,22 @@ describe('operator console (v3)', () => {
     )
     expect(html).toContain('data-state="risk-high"')
     expect(html).toContain('data-state="no-evidence"')
+
     expect(html).toContain('尚无映射代码')
     expect(html).toContain('无下游影响')
     expect(html).toContain('映射代码摘录（当前工作区内容，非 Diff）')
+  })
+
+  test('brief page exposes context navigation and dependent stale states', () => {
+    const root = setupRepo('## C003 dependent <!-- oracle:cmd:true refs:specs/x/spec.md#C002 -->')
+    db.prepare('UPDATE evidence SET invalidated_at = 1 WHERE spec_path = ? AND clause_id = ?').run('specs/x/spec.md', 'C003')
+    const result = handleBrief(db, root, 'specs/x/spec.md', 'C002')
+    if (!('ok' in result.body)) throw new Error('expected a brief')
+    const html = renderBriefPage(result.body.text, 'tok', 'specs/x/spec.md#C002', result.body.briefHash, false, undefined, result.body.view)
+    expect(result.body.view.dependents).toContainEqual(expect.objectContaining({ clauseId: 'C003', stale: true }))
+    expect(html).toContain('data-state="dependent-stale"')
+    expect(html).toContain('查看全部 Specs')
+    expect(html).toContain('刷新状态')
   })
 
   test('brief error page escapes the refusal and never emits a risk conclusion', () => {
@@ -321,6 +345,7 @@ describe('browser high-risk review', () => {
   test('a review-ready high-risk clause exposes review buttons and the AI explain control', () => {
     const root = setupReviewable()
     const brief = handleBrief(db, root, 'specs/x/spec.md', 'C001')
+
     if (!('ok' in brief.body)) throw new Error('expected a brief')
     expect(brief.body.risk).toBe('high')
     expect(brief.body.reviewable).toBe(true)
@@ -340,6 +365,27 @@ describe('browser high-risk review', () => {
     // No hard-coded consequence template — the examples come from the AI, not the page.
     expect(html).not.toContain('gate 对它 auto-pass（证据+审计+审查三者皆绿）')
     expect(renderBriefPage(brief.body.text, 'tok', 'k', 'h', false)).not.toContain('id="review-form"')
+  })
+
+  test('brief page renders escaped mapped blame diff content', () => {
+    const root = setupRepo()
+    const result = handleBrief(db, root, 'specs/x/spec.md', 'C002')
+    if (!('ok' in result.body)) throw new Error('expected a brief')
+    result.body.view.mappings.push({
+      filePath: 'src/<impl>.ts',
+      lineStart: 2,
+      lineEnd: 2,
+      commitSha: 'abcdef0',
+      note: null,
+      content: 'new',
+      diff: '@@ -2 +2 @@\n-const old = "<unsafe>"\n+const next = 1',
+      diffError: null,
+    })
+    const html = renderBriefPage(result.body.text, 'tok', 'specs/x/spec.md#C002', result.body.briefHash, false, undefined, result.body.view)
+    expect(html).toContain('data-section="blame-diff"')
+    expect(html).toContain('src/&lt;impl&gt;.ts:2-2')
+    expect(html).toContain('-const old = &quot;&lt;unsafe&gt;&quot;')
+    expect(html).not.toContain('<unsafe>')
   })
   test('handleExplain rejects malformed input before invoking any client', async () => {
     const root = setupReviewable()

@@ -201,3 +201,46 @@ sh scripts/full-test.sh                  # 预期：ALL GATES PASS
 - 极端路径编码或控制字符对 HTML 渲染的影响——统一 `esc()` 是当前唯一防线，测试仅覆盖常见特殊字符。
 - 页面打开期间用户切换分支/HEAD：服务端每次请求重新 `scanWorkspace` + 聚合，刷新即一致，但"打开着的旧页面"与新 HEAD 的错位无提示。
 - 存量映射漂移导致"可导航但内容不再对应原意"的误导——摘录如实呈现当前内容，语义核对仍属人的判断。
+
+
+## 十一、交互补全修订（2026-07-23，用户验收反馈）
+
+运行态验收确认原计划只交付了 projection，不足以完成“打开 UI 即判断 Spec 影响”的用户任务。以下修订覆盖并取代“Phase 4 默认不做”的决定；本轮必须完整交付。
+
+### 11.1 信息架构
+
+1. **Console / Specs**：首页除双车道队列外，必须提供全部 live clause 浏览表。按 `specPath` 分组，行内展示 clause id、title、risk、evidence/stale 状态与“查看影响”链接。无待办的 auto-pass 条款也必须可进入，不能只从队列访问。
+2. **Clause detail (`/brief`)**：固定顺序呈现导航、条款身份与风险、证据状态、映射状态、Blame Diff、stale dependencies / potential impact、原始 brief、可用审查动作。
+3. **Workspace changes**：unmapped 横幅中的每个 hunk 必须可定位、可复制；显示精确 CLI 命令模板和“刷新状态”入口。不得伪造 Spec 归属。
+
+### 11.2 Blame Diff 合同
+
+- `BriefMapping` 增加 `diff: string | null`、`diffError: string | null`。
+- diff 基线是 mapping 的 `commitSha`，终点是当前工作树：`git diff --unified=3 <commitSha> -- <filePath>`，使用 argv 数组、无 shell。
+- 只保留与 mapping `[lineStart,lineEnd]` 相交的 hunk；同文件远处 hunk 不得泄入当前条款。
+- 多 mapping 按文件/行号稳定排序；UI 按文件分组显示 `<pre data-section="blame-diff">`。
+- 无变化显示“映射范围自记录基线以来无代码变化”；git/解析失败显示明确错误，不降级成空 Diff。
+- 删除、rename、二进制 diff 无法可靠做新侧区间相交时必须标注 unsupported/error，不伪造成功。
+
+### 11.3 stale dependencies 合同
+
+- `stale` 继续表示当前条款自己的证据是否失效。
+- `impact.affectedClauses` 表示潜在下游，不得标成已 stale。
+- UI 必须将 dependent clauses 逐项列出并带链接，同时标注每个 dependent 当前 evidence stale 状态。为此 projection 可增加结构化 dependent 状态，但事实必须来自 registry 最新 evidence，不从文本推断。
+- 空态分别为“当前条款证据有效/无证据”“无下游依赖”，不能统一显示 None。
+
+### 11.4 交互状态
+
+- 服务端同步页没有网络 loading skeleton，但必须提供显式 `刷新状态` 链接；刷新重新 scan 并用当前 HEAD 构建一致快照。
+- detail 页提供返回 console、上一个/下一个 clause（同 spec）、查看全部 Specs。
+- 所有动作使用稳定 `data-*` / link 文本；键盘可访问，动态状态用 `aria-live`。
+- 风险仍只有 `low|high`；不伪造 medium。
+
+### 11.5 新增验收
+
+- 首页可从 Specs 表进入任意 live clause，包括 auto-pass / 非队列条款。
+- 有 mapping 且代码变化时 `/brief` 显示真实 `-old/+new` patch；远处非映射 hunk 不显示。
+- 无 mapping、无变化、diff error 三态可区分。
+- dependent clauses 逐项显示并可导航，stale 状态来源可验证。
+- unmapped hunk 展示精确范围和可复制命令模板；刷新后已 map hunk 消失。
+- HTTP 集成覆盖全部导航和状态；真实浏览器完成：首页 → 任意 Spec → Blame Diff → dependent clause → 返回/刷新。
