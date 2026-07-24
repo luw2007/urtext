@@ -32,6 +32,8 @@ export interface UiClause {
   risk: 'low' | 'high'
   /** Human decision at the current HEAD for a manual clause. */
   decisionVerdict: 'pass' | 'fail' | 'none' | 'n/a'
+  evidenceVerdict: 'pass' | 'fail' | 'pending' | 'missing'
+  stale: boolean
   /** A manual clause still awaiting a human decision — render pass/fail buttons. */
   actionable: boolean
 }
@@ -68,6 +70,8 @@ export const buildUiSnapshot = (db: Database, root: string): UiSnapshot => {
       clauseId: d.clauseId,
       title: d.title,
       risk: d.risk,
+      evidenceVerdict: d.evidenceVerdict,
+      stale: d.stale,
       decisionVerdict: d.decisionVerdict,
       actionable: isManual && d.decisionVerdict === 'none',
     }
@@ -134,6 +138,14 @@ export const renderPage = (snapshot: UiSnapshot, csrfToken: string, auditResult?
     })
     .join('')
   const humanRows = human.map(queueRow).join('')
+  const allSpecs = snapshot.clauses
+    .map((clause) => {
+      const key = `${clause.specPath}#${clause.clauseId}`
+      const evidence = clause.evidenceVerdict === 'missing' ? 'no evidence' : clause.evidenceVerdict
+      const stale = clause.stale ? ' · stale' : ''
+      return `<tr data-clause="${esc(key)}"><td>${esc(clause.specPath)}</td><td><a href="${esc(briefHref(clause.specPath, clause.clauseId))}">${esc(clause.clauseId)}</a> ${esc(clause.title)}</td><td>${esc(clause.risk)}</td><td>${esc(evidence)}${stale}</td></tr>`
+    })
+    .join('')
   const agentRows = agent.map(queueRow).join('')
   const dirty = snapshot.dirty
     ? ' <span style="color:#b80">· worktree dirty</span>'
@@ -146,7 +158,10 @@ export const renderPage = (snapshot: UiSnapshot, csrfToken: string, auditResult?
   const unmappedBanner = snapshot.unmappedError !== null
     ? `<p data-banner="unmapped-error" style="color:#c00"><b>unmapped 检测失败：</b>${esc(snapshot.unmappedError)} — 本页不能证明不存在未归属变更</p>`
     : snapshot.unmapped.length > 0
-      ? `<section data-banner="unmapped" style="color:#c00"><b>${snapshot.unmapped.length} 个未归属变更（工作区级，git diff HEAD，未跟踪文件不在检测范围）</b><ul>${snapshot.unmapped.map((hunk) => `<li><code>${esc(`${hunk.filePath}:${hunk.lineStart}-${hunk.lineEnd}`)}</code> — map / ack / spec write-back via CLI</li>`).join('')}</ul></section>`
+      ? `<section data-banner="unmapped" style="color:#c00"><b>${snapshot.unmapped.length} 个未归属变更（工作区级，git diff HEAD，未跟踪文件不在检测范围）</b><ul>${snapshot.unmapped.map((hunk) => {
+          const range = `${hunk.filePath}:${hunk.lineStart}-${hunk.lineEnd}`
+          return `<li><code>${esc(range)}</code><br><small>映射：<code>urtext map &lt;spec&gt;#&lt;clause&gt; ${esc(range)}</code><br>确认例外：<code>urtext ack ${esc(range)} &lt;reason&gt;</code><br>或先修改对应 spec，再刷新状态。</small></li>`
+        }).join('')}</ul></section>`
       : ''
   return `<!doctype html><html><head><meta charset="utf-8">
 <meta name="csrf" content="${esc(csrfToken)}">
@@ -155,6 +170,7 @@ export const renderPage = (snapshot: UiSnapshot, csrfToken: string, auditResult?
 table{border-collapse:collapse;width:100%;margin-bottom:1.2rem}td{padding:.4rem .6rem;border-bottom:1px solid #eee}
 h3{margin:.4rem 0}button{margin-left:.3rem;cursor:pointer}</style></head><body>
 <h2>urtext console <small style="color:#999">· Ctrl-C to quit</small></h2>
+<nav><a href="#all-specs">查看全部 Specs</a> · <a href="/">刷新状态</a></nav>
 <p>HEAD ${esc(snapshot.head?.slice(0, 7) ?? 'n/a')}${dirty} — ${snapshot.status.counts.human} for you, ${snapshot.status.counts.agent} for the agent, ${snapshot.status.counts.autoPass} auto-pass · ${snapshot.decided}/${snapshot.totalManual} manual decided</p>
 ${wip}
 ${unmappedBanner}
@@ -163,6 +179,7 @@ ${notice}
 <table>${humanRows || '<tr><td>nothing — prerequisites pending or all clear</td></tr>'}</table>
 <h3>Agent lane (${agent.length})</h3>
 ${audit}<table>${agentRows || '<tr><td>empty</td></tr>'}</table>
+<section id="all-specs"><h3>All Specs (${snapshot.clauses.length})</h3><table><thead><tr><th>Spec</th><th>Clause</th><th>Risk</th><th>Evidence</th></tr></thead><tbody>${allSpecs || '<tr><td colspan="4">no live clauses</td></tr>'}</tbody></table></section>
 <h3>Decided manual clauses at HEAD (${decidedRows ? snapshot.decided : 0})</h3>
 <table>${decidedRows || '<tr><td>none yet</td></tr>'}</table>
 <script>
@@ -223,6 +240,19 @@ export interface ReviewFacts {
   dependents: number
 }
 
+export interface ImpactDependent {
+  specPath: string
+  clauseId: string
+  title: string
+  stale: boolean
+  evidenceVerdict: 'pass' | 'fail' | 'pending' | 'missing'
+}
+
+export interface ClauseNavigation {
+  previous: ClauseTarget | null
+  next: ClauseTarget | null
+}
+
 export interface SpecImpactView {
   schema: 'urtext.spec-impact/1'
   head: string | null
@@ -232,9 +262,15 @@ export interface SpecImpactView {
   hasEvidence: boolean
   mappings: BriefMapping[]
   impact: Brief['impact']
+  dependents: ImpactDependent[]
+  navigation: ClauseNavigation
 }
 
-export const buildSpecImpactView = (brief: Brief): SpecImpactView => ({
+export const buildSpecImpactView = (
+  brief: Brief,
+  dependents: ImpactDependent[] = [],
+  navigation: ClauseNavigation = { previous: null, next: null }
+): SpecImpactView => ({
   schema: 'urtext.spec-impact/1',
   head: brief.manifest.head,
   target: { specPath: brief.manifest.specPath, clauseId: brief.manifest.clauseId },
@@ -243,6 +279,8 @@ export const buildSpecImpactView = (brief: Brief): SpecImpactView => ({
   hasEvidence: brief.manifest.evidence !== null,
   mappings: brief.manifest.mappings,
   impact: brief.impact,
+  dependents,
+  navigation,
 })
 
 export interface BriefApiResult {
@@ -271,7 +309,28 @@ export const handleBrief = (db: Database, root: string, spec: unknown, clause: u
     manifest.evidence?.verdict === 'pass' &&
     manifest.auditVerdict === 'agree' &&
     !manifest.stale
-  const files = [...new Set(manifest.mappings.map((m) => m.filePath))]
+  const files = [...new Set(manifest.mappings.map((mapping) => mapping.filePath))]
+  const decisions = adjudicate(db, 0, manifest.head ?? undefined).decisions
+  const decisionByKey = new Map(decisions.map((decision) => [`${decision.specPath}#${decision.clauseId}`, decision]))
+  const dependents: ImpactDependent[] = outcome.brief.impact.affectedClauses.map((dependent) => {
+    const decision = decisionByKey.get(`${dependent.specPath}#${dependent.clauseId}`)
+    return {
+      ...dependent,
+      title: decision?.title ?? '',
+      stale: decision?.stale ?? false,
+      evidenceVerdict: decision?.evidenceVerdict ?? 'missing',
+    }
+  })
+  const sameSpec = decisions.filter((decision) => decision.specPath === manifest.specPath)
+  const currentIndex = sameSpec.findIndex((decision) => decision.clauseId === manifest.clauseId)
+  const toTarget = (index: number): ClauseTarget | null => {
+    const decision = sameSpec[index]
+    return decision ? { specPath: decision.specPath, clauseId: decision.clauseId } : null
+  }
+  const navigation: ClauseNavigation = {
+    previous: toTarget(currentIndex - 1),
+    next: toTarget(currentIndex + 1),
+  }
   return {
     status: 200,
     body: {
@@ -280,11 +339,11 @@ export const handleBrief = (db: Database, root: string, spec: unknown, clause: u
       text: renderBriefText(outcome.brief, briefHistory(db, target)),
       risk: manifest.risk,
       reviewable,
-      view: buildSpecImpactView(outcome.brief),
+      view: buildSpecImpactView(outcome.brief, dependents, navigation),
       facts: {
         title: `${manifest.specPath}#${manifest.clauseId} ${manifest.title}`,
         files,
-        dependents: outcome.brief.impact.affectedClauses.length,
+        dependents: dependents.length,
       },
     },
   }
@@ -414,10 +473,7 @@ export const handleAuditRun = async (db: Database, input: unknown): Promise<Audi
   }
 }
 
-/** The /brief page: the SAME brief text the CLI prints (one renderer), plus, for
- * a reviewable high-risk clause, approve/reject buttons that post to the same
- * guarded recordReview path as the CLI (P5). Non-reviewable clauses show only the
- * text — the buttons never appear where the gate would reject them anyway. */
+/** Structured, escaped facts above the shared textual brief. */
 const impactSummary = (view: SpecImpactView): string => {
   const evidence = !view.hasEvidence
     ? '<span data-state="no-evidence">尚无证据 — 运行 <code>urtext verify</code></span>'
@@ -425,23 +481,33 @@ const impactSummary = (view: SpecImpactView): string => {
       ? '<span data-state="stale">证据已过期 — 需重新 verify</span>'
       : '<span data-state="fresh">当前有效</span>'
   const mapped = view.mappings.length === 0
-    ? '尚无映射代码'
+    ? '尚无映射代码。先在工作树修改目标范围，再运行 <code>urtext map &lt;spec&gt;#&lt;clause&gt; &lt;file&gt;:&lt;start&gt;-&lt;end&gt;</code>'
     : `${view.mappings.length} 个映射范围`
-  const affected = view.impact.affectedClauses
-  const tasks = view.impact.affectedTasks
-  const impact = affected.length === 0 && tasks.length === 0
-    ? '无下游影响'
-    : `影响闭包（潜在波及，非已 stale 列表）：${affected.length} 个条款 + ${tasks.length} 个任务` +
-      affected.map((clause) => ` <a href="${esc(briefHref(clause.specPath, clause.clauseId))}">${esc(`${clause.specPath}#${clause.clauseId}`)}</a>`).join('')
+  const dependents = view.dependents.length === 0
+    ? '无下游依赖'
+    : `<ul>${view.dependents.map((dependent) => {
+        const key = `${dependent.specPath}#${dependent.clauseId}`
+        const state = dependent.stale ? 'dependent-stale' : 'dependent-current'
+        const label = dependent.stale ? 'stale' : dependent.evidenceVerdict
+        return `<li data-state="${state}"><a href="${esc(briefHref(dependent.specPath, dependent.clauseId))}">${esc(key)}</a> ${esc(dependent.title)} — ${esc(label)}</li>`
+      }).join('')}</ul>`
+  const diffs = view.mappings.map((mapping) => {
+    const range = `${mapping.filePath}:${mapping.lineStart}-${mapping.lineEnd}`
+    if (mapping.diffError !== null) return `<section data-section="blame-diff-error"><h4>${esc(range)}</h4><p>${esc(mapping.diffError)}</p></section>`
+    if (mapping.diff === null) return `<section data-section="blame-diff-empty"><h4>${esc(range)}</h4><p>映射范围自记录基线以来无代码变化</p></section>`
+    return `<section data-section="blame-diff"><h4>${esc(range)} · baseline ${esc(mapping.commitSha.slice(0, 7))}</h4><pre>${esc(mapping.diff)}</pre></section>`
+  }).join('')
   return `<section id="spec-impact" aria-label="Spec impact">
 <p><b data-state="risk-${view.risk}">Risk: ${view.risk}</b> · ${evidence}</p>
-<p data-section="mappings"><b>映射代码摘录（当前工作区内容，非 Diff）</b>：${mapped}</p>
-<p data-section="impact"><b>影响闭包（若本条款变化，潜在波及）</b>：${impact}</p>
+<p data-section="mappings"><b>映射状态</b>：${mapped}</p>
+<section data-section="stale-dependencies"><h3>Stale Dependencies / 下游依赖</h3>${dependents}<p>${view.impact.affectedTasks.length} 个关联任务</p></section>
+${view.mappings.length > 0 ? '<h3>Code Blame Diff</h3>' : ''}
+${diffs}
 </section>`
 }
 
 export const renderBriefErrorPage = (message: string): string =>
-  `<!doctype html><html><head><meta charset="utf-8"><title>urtext brief error</title></head><body><p><a href="/">← console</a></p><p data-state="error">${esc(message)}</p></body></html>`
+  `<!doctype html><html><head><meta charset="utf-8"><title>urtext brief error</title></head><body><nav><a href="/">← console</a> · <a href="/#all-specs">查看全部 Specs</a> · <a href="${esc('/' + '')}">刷新状态</a></nav><p data-state="error">${esc(message)}</p></body></html>`
 
 export const renderBriefPage = (
   text: string,
@@ -502,9 +568,13 @@ explainBtn.addEventListener('click', async () => {
 </script>`
     : ''
   const impact = view ? impactSummary(view) : ''
+  const navigation = view
+    ? `${view.navigation.previous ? `<a rel="prev" href="${esc(briefHref(view.navigation.previous.specPath, view.navigation.previous.clauseId))}">← 上一条</a>` : '<span>← 上一条</span>'} · ${view.navigation.next ? `<a rel="next" href="${esc(briefHref(view.navigation.next.specPath, view.navigation.next.clauseId))}">下一条 →</a>` : '<span>下一条 →</span>'}`
+    : ''
+  const refresh = view ? briefHref(view.target.specPath, view.target.clauseId) : '/'
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="csrf" content="${esc(csrfToken)}"><title>urtext brief</title>
-<style>body{font:14px system-ui;margin:2rem;max-width:70rem}pre{background:#f7f7f7;padding:1rem;overflow-x:auto}button{margin-right:.4rem;cursor:pointer}#spec-impact{background:#fafafa;border:1px solid #ddd;padding:.6rem 1rem;margin-bottom:1rem}[data-state="risk-high"]{color:#c00}[data-state="risk-low"]{color:#666}[data-state="stale"],[data-state="no-evidence"]{color:#b50}#review-msg{color:#c00;margin-left:.5rem}#explain-out{white-space:pre-wrap;background:#f7f7f7;padding:.6rem 1rem;border-left:3px solid #7a7;margin:.6rem 0;min-height:1rem}</style>
-</head><body><p><a href="/">← console</a></p>${impact}<pre>${esc(text)}</pre>${controls}${script}</body></html>`
+<style>body{font:14px system-ui;margin:2rem;max-width:70rem}nav{margin-bottom:1rem}pre{background:#f7f7f7;padding:1rem;overflow-x:auto}button{margin-right:.4rem;cursor:pointer}#spec-impact{background:#fafafa;border:1px solid #ddd;padding:.6rem 1rem;margin-bottom:1rem}[data-state="risk-high"]{color:#c00}[data-state="risk-low"]{color:#666}[data-state="stale"],[data-state="no-evidence"],[data-state="dependent-stale"]{color:#b50}#review-msg{color:#c00;margin-left:.5rem}#explain-out{white-space:pre-wrap;background:#f7f7f7;padding:.6rem 1rem;border-left:3px solid #7a7;margin:.6rem 0;min-height:1rem}</style>
+</head><body><nav><a href="/">← console</a> · <a href="/#all-specs">查看全部 Specs</a> · <a href="${esc(refresh)}">刷新状态</a>${navigation ? ` · ${navigation}` : ''}</nav>${impact}<details><summary>原始裁决简报</summary><pre>${esc(text)}</pre></details>${controls}${script}</body></html>`
 }
 
 export interface DecideResult {

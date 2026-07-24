@@ -107,3 +107,10 @@ brief-hash 且 worktree 洁净，否则以 brief_required / brief_stale / dirty_
 fail-closed。守卫在 domain 写路径（recordReview/recordDecision），CLI 与 ui 同受检。
 HEAD 绑定语义不变（M5a）；--reject/--fail 无前置（保守方向不设门）。gate 在
 worktree 脏时把已批准高危子句重新路由人工。
+
+## C019 UI 完整呈现 Spec 影响与映射 Diff <!-- oracle:test:tests/spec-impact-interactions.test.ts risk:high refs:specs/urtext/spec.md#C017 -->
+
+`urtext ui` 必须可浏览全部 live clause；详情页区分风险、当前证据 stale、下游
+dependency stale 与潜在 impact，并展示从 clause mapping 的记录 HEAD 到当前工作树、
+仅与映射范围相交的真实 Blame Diff。无映射、无变化、diff 失败分别显示明确状态；
+workspace unmapped hunk 提供精确 map/ack 命令模板与刷新入口。

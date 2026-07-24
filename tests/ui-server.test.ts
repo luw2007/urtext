@@ -27,7 +27,10 @@ beforeEach(async () => {
   git('config', 'user.email', 'test@urtext.dev')
   git('config', 'user.name', 'test')
   mkdirSync(join(root, 'specs/x'), { recursive: true })
-  writeFileSync(join(root, 'specs/x/spec.md'), '## C001 guarded <!-- oracle:cmd:true risk:high -->')
+  writeFileSync(join(root, 'specs/x/spec.md'), [
+    '## C001 guarded <!-- oracle:cmd:true risk:high -->',
+    '## C002 dependent <!-- oracle:cmd:true refs:specs/x/spec.md#C001 -->',
+  ].join('\n'))
   writeFileSync(join(root, 'tracked.txt'), 'baseline')
   git('add', '-A')
   git('commit', '-q', '-m', 'baseline')
@@ -50,6 +53,16 @@ describe('ui server spec impact', () => {
     const html = await response.text()
     expect(html).toContain('data-banner="unmapped"')
     expect(html).toContain('tracked.txt:1-1')
+    expect(html).toContain('urtext map &lt;spec&gt;#&lt;clause&gt; tracked.txt:1-1')
+    expect(html).toContain('urtext ack tracked.txt:1-1 &lt;reason&gt;')
+  })
+
+  test('serves every live clause in the console spec browser', async () => {
+    const response = await fetch(server.url)
+    const html = await response.text()
+    expect(html).toContain('id="all-specs"')
+    expect(html).toContain('data-clause="specs/x/spec.md#C001"')
+    expect(html).toContain('/brief?spec=specs%2Fx%2Fspec.md&amp;clause=C001')
   })
 
   test('serves structured brief HTML and the additive JSON projection', async () => {
@@ -59,7 +72,10 @@ describe('ui server spec impact', () => {
     expect(page.headers.get('content-type')).toContain('text/html')
     const html = await page.text()
     expect(html).toContain('data-state="risk-high"')
-    expect(html).toContain('映射代码摘录（当前工作区内容，非 Diff）')
+    expect(html).toContain('映射状态')
+    expect(html).toContain('查看全部 Specs')
+    expect(html).toContain('刷新状态')
+    expect(html).toContain('rel="next"')
 
     const api = await fetch(`${server.url}/api/brief?${query}`)
     expect(api.status).toBe(200)
@@ -73,6 +89,7 @@ describe('ui server spec impact', () => {
   test('serves fail-closed HTML for unknown and not-ready clauses', async () => {
     const unknown = await fetch(`${server.url}/brief?spec=specs%2Fx%2Fspec.md&clause=C999`)
     expect(unknown.status).toBe(404)
+
     expect(unknown.headers.get('content-type')).toContain('text/html')
     const unknownHtml = await unknown.text()
     expect(unknownHtml).toContain('data-state="error"')

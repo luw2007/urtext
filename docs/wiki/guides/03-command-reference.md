@@ -168,11 +168,14 @@ Open the local operator console. Starts an **ephemeral** foreground server on
 it), and blocks until **Ctrl-C**. The console renders the same two-lane queue as
 `urtext status` and shows workspace-level unmapped hunks prominently; a detection
 failure is a visible error, never an empty all-clear. Every clause item links to
-its brief. The brief keeps the exact text printed by `urtext brief` and adds a
-structured summary of `low|high` risk, evidence freshness, mapped-code excerpts
-(current working-tree content, explicitly not a Git diff), and the potential
-impact closure. Impact and stale state are displayed separately.
-
+its brief. The homepage also lists every live clause, including clauses absent
+from both queues, so the UI is a complete Spec browser rather than only a work
+queue. The brief keeps the exact text printed by `urtext brief` and adds a
+structured summary of `low|high` risk, current evidence freshness, mapped-code
+state, downstream dependency freshness, and the potential impact closure. For
+each mapping it renders the real Git patch from the mapping's recorded HEAD to
+the current working tree, filtered to hunks intersecting that mapped range.
+No mapping, no mapped-range changes, and diff failures are distinct states.
 Pending manual clauses have pass/fail buttons. The browser fetches the current
 brief-hash and posts to the same guarded `recordDecision` path as `urtext decide`;
 passing additionally requires a one-sentence ledger note. A review-ready high-risk
