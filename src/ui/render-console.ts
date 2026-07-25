@@ -1,15 +1,38 @@
 /**
- * S2 console renderer (urtext-20260724-ui-redesign §3.1/§5/§6.2). Pure
- * string builder consuming `UiSnapshot` (review-ui.ts's model) — no reads,
- * no writes. Section order is fixed and load-bearing: skip link (pageShell)
- * → header → nav → summary → unmapped banner → Your queue → audit form →
- * Agent lane → All Specs → Decided.
+ * Server-rendered console-family pages. Domain truth stays in UiSnapshot;
+ * route selection and pagination are renderer-only projections.
  */
 import type { UiClause, UiSnapshot } from '../review-ui.js'
 import type { StatusItem } from '../status.js'
 
 import { CONSOLE_SCRIPT } from './console-script.js'
 import { briefHref, esc, pageShell, riskBadge, statusChip } from './html.js'
+import { DEFAULT_PAGE_SIZE, pageHref, pageWindow, paginationNav, type PageWindow } from './pagination.js'
+
+export type ConsoleRoute = 'queue' | 'agent' | 'specs' | 'decisions'
+
+export interface ConsolePageInput {
+  route: ConsoleRoute
+  snapshot: UiSnapshot
+  csrfToken: string
+  page: number
+  pageSize: number
+  auditResult?: string
+}
+
+const ROUTE_PATH: Record<ConsoleRoute, string> = {
+  queue: '/',
+  agent: '/agent',
+  specs: '/specs',
+  decisions: '/decisions',
+}
+
+const ROUTE_TITLE: Record<ConsoleRoute, string> = {
+  queue: 'Your queue',
+  agent: 'Agent lane',
+  specs: 'All Specs',
+  decisions: 'Decided manual clauses at HEAD',
+}
 
 const dirtyChip = (dirty: boolean): string => (dirty ? ` ${statusChip('warn', '⚠', 'worktree dirty')}` : '')
 
@@ -18,8 +41,14 @@ const header = (snapshot: UiSnapshot): string =>
     snapshot.dirty
   )} <small>Ctrl-C to quit</small></header>`
 
-const nav = (): string =>
-  `<nav aria-label="页面导航"><a href="#your-queue-title">Your queue</a> · <a href="#agent-lane-title">Agent lane</a> · <a href="#all-specs">All Specs</a> · <a href="/">刷新状态</a></nav>`
+const appNav = (route: ConsoleRoute, page: number): string => {
+  const link = (target: ConsoleRoute, label: string): string =>
+    `<a href="${ROUTE_PATH[target]}"${target === route ? ' aria-current="page"' : ''}>${label}</a>`
+  return `<nav aria-label="页面导航">${link('queue', 'Your queue')} · ${link('agent', 'Agent lane')} · ${link(
+    'specs',
+    'All Specs'
+  )} · ${link('decisions', 'Decided')} · <a href="${esc(pageHref(ROUTE_PATH[route], page))}">刷新状态</a></nav>`
+}
 
 const summary = (snapshot: UiSnapshot): string => {
   const wip = snapshot.status.wip.exceeded
@@ -28,25 +57,22 @@ const summary = (snapshot: UiSnapshot): string => {
   return `<p>${snapshot.status.counts.human} for you, ${snapshot.status.counts.agent} for the agent, ${snapshot.status.counts.autoPass} auto-pass · ${snapshot.decided}/${snapshot.totalManual} manual decided</p>${wip}`
 }
 
-const workspaceBanner = (snapshot: UiSnapshot): string => {
+const workspaceAlert = (snapshot: UiSnapshot, route: ConsoleRoute): string => {
   if (snapshot.unmappedError !== null) {
-    return `<section role="alert" aria-labelledby="workspace-alert-title" data-banner="unmapped-error"><h2 id="workspace-alert-title">unmapped 检测失败</h2><p><b>unmapped 检测失败：</b>${esc(
+    const action = route === 'queue' ? '' : ' — <a href="/">在 Your queue 查看</a>'
+    return `<p role="alert" data-banner="unmapped-error">⚠ unmapped 检测失败：${esc(
       snapshot.unmappedError
-    )} — 本页不能证明不存在未归属变更</p></section>`
+    )} — 本页不能证明不存在未归属变更${action}</p>`
   }
   if (snapshot.unmapped.length > 0) {
-    const items = snapshot.unmapped
-      .map((hunk) => {
-        const range = `${hunk.filePath}:${hunk.lineStart}-${hunk.lineEnd}`
-        return `<li><code>${esc(range)}</code><br><small>映射：<code>urtext map &lt;spec&gt;#&lt;clause&gt; ${esc(
-          range
-        )}</code><br>确认例外：<code>urtext ack ${esc(range)} &lt;reason&gt;</code><br>或先修改对应 spec，再刷新状态。</small></li>`
-      })
-      .join('')
-    return `<section role="alert" aria-labelledby="workspace-alert-title" data-banner="unmapped"><h2 id="workspace-alert-title">${snapshot.unmapped.length} 个未归属变更（工作区级，git diff HEAD，未跟踪文件不在检测范围）</h2><ul>${items}</ul></section>`
+    const action = route === 'queue' ? '— 详见下方 Your queue 行' : '— <a href="/">在 Your queue 处理</a>'
+    return `<p role="alert" data-banner="unmapped">⚠ ${snapshot.unmapped.length} 个未归属变更（工作区级，git diff HEAD，未跟踪文件不在检测范围）${action}</p>`
   }
   return ''
 }
+
+const caption = (route: ConsoleRoute, w: PageWindow): string =>
+  `${ROUTE_TITLE[route]} (共 ${w.total} 条 · 第 ${w.page}/${w.pageCount} 页)`
 
 const queueRow = (item: StatusItem, decideForm: boolean, index: number): string => {
   const risk = item.risk === 'high' ? ` ${riskBadge('high')}` : ''
@@ -54,7 +80,8 @@ const queueRow = (item: StatusItem, decideForm: boolean, index: number): string 
   const title = item.title ? ` ${esc(item.title)}` : ''
   let action: string
   if (item.kind === 'unmapped') {
-    action = '<small>map / ack / spec write-back via CLI</small>'
+    const range = esc(item.key)
+    action = `<small>映射：<code>urtext map &lt;spec&gt;#&lt;clause&gt; ${range}</code><br>确认例外：<code>urtext ack ${range} &lt;reason&gt;</code><br>或先修改对应 spec，再刷新状态。</small>`
   } else {
     const key = `${item.specPath}#${item.clauseId}`
     const brief = `<a href="${esc(briefHref(item.specPath!, item.clauseId!))}">brief</a>`
@@ -68,44 +95,44 @@ const queueRow = (item: StatusItem, decideForm: boolean, index: number): string 
       action = brief
     }
   }
-  return `<tr><td>${esc(item.key)}${title}${risk}</td><td>${esc(item.primary)}${secondary}</td><td>${action}</td></tr>`
+  return `<tr data-row="${esc(item.key)}"><td>${esc(item.key)}${title}${risk}</td><td>${esc(item.primary)}${secondary}</td><td>${action}</td></tr>`
 }
 
-const queueTable = (id: string, caption: string, rows: string, emptyText: string): string =>
-  `<table><caption>${esc(caption)}</caption><thead><tr><th scope="col">条款</th><th scope="col">阻塞原因</th><th scope="col">动作</th></tr></thead><tbody id="${esc(
+const queueTable = (id: string, tableCaption: string, rows: string, emptyText: string): string =>
+  `<table><caption>${esc(tableCaption)}</caption><thead><tr><th scope="col">条款</th><th scope="col">阻塞原因</th><th scope="col">动作</th></tr></thead><tbody id="${esc(
     id
   )}">${rows || `<tr><td colspan="3">${esc(emptyText)}</td></tr>`}</tbody></table>`
 
-const yourQueueSection = (human: StatusItem[]): string => {
-  const rows = human.map((item, index) => queueRow(item, true, index)).join('')
-  return `<section aria-labelledby="your-queue-title"><h2 id="your-queue-title">Your queue (${human.length})</h2>${queueTable(
+const queueSection = (items: readonly StatusItem[], w: PageWindow): string => {
+  const rows = items.map((item, index) => queueRow(item, true, index)).join('')
+  return `<section aria-labelledby="your-queue-title"><h2 id="your-queue-title">Your queue (${w.total})</h2>${queueTable(
     'your-queue-rows',
-    `Your queue (${human.length})`,
+    caption('queue', w),
     rows,
     'nothing — prerequisites pending or all clear'
   )}</section>`
 }
 
-const auditControls = (items: StatusItem[]): string => {
+const auditControls = (items: readonly StatusItem[]): string => {
   const auditable = items.filter((item) => item.reasons.includes('unaudited') || item.reasons.includes('audit_disagreement')).length
-  if (auditable === 0) return ''
+  const disabled = auditable === 0 ? ' disabled' : ''
+  const empty = auditable === 0 ? '<p>当前没有待审计的证据</p>' : ''
   return `<form id="audit-runner"><label>Audit ${auditable} evidence item(s) with
     <select name="auditor"><option value="claude">Claude Code</option><option value="codex">Codex</option><option value="traex">Traex</option><option value="omp">OMP</option></select></label>
     <input name="model" placeholder="model（可选）"><input name="profile" placeholder="profile（Codex/Traex/OMP）">
-    <button type="submit">Run audit</button> <output id="audit-progress" aria-live="polite"></output> <small>D3 preset separation remains your responsibility.</small></form>`
+    <button type="submit"${disabled}>Run audit</button> <output id="audit-progress" aria-live="polite"></output> ${empty}<small>D3 preset separation remains your responsibility.</small></form>`
 }
 
-const agentLaneSection = (human: StatusItem[], agent: StatusItem[]): string => {
-  const hints = [...new Set(agent.map((item) => item.next))]
+const agentSection = (pageItems: readonly StatusItem[], all: readonly StatusItem[], w: PageWindow): string => {
+  const hints = [...new Set(pageItems.map((item) => item.next))]
   const hintList = hints.length > 0 ? `<ul>${hints.map((hint) => `<li>${esc(hint)}</li>`).join('')}</ul>` : ''
-  const rows = agent.map((item, index) => queueRow(item, false, index)).join('')
-  const open = human.length === 0 ? ' open' : ''
-  return `<details data-section="agent-lane"${open}><summary id="agent-lane-title">Agent lane (${agent.length})</summary>${hintList}${queueTable(
+  const rows = pageItems.map((item, index) => queueRow(item, false, index)).join('')
+  return `${auditControls(all)}<section aria-labelledby="agent-lane-title"><h2 id="agent-lane-title">Agent lane (${w.total})</h2>${hintList}${queueTable(
     'agent-lane-rows',
-    `Agent lane (${agent.length})`,
+    caption('agent', w),
     rows,
     'empty'
-  )}</details>`
+  )}</section>`
 }
 
 const evidenceCell = (clause: UiClause): string => {
@@ -128,58 +155,90 @@ const clauseRow = (clause: UiClause): string => {
   )}</a> ${esc(clause.title)}</td><td>${riskBadge(clause.risk)}</td><td>${evidenceCell(clause)}</td></tr>`
 }
 
-const allSpecsSection = (clauses: UiClause[]): string => {
-  const groups = new Map<string, UiClause[]>()
-  for (const clause of clauses) {
-    const list = groups.get(clause.specPath) ?? []
-    list.push(clause)
-    groups.set(clause.specPath, list)
+const specsSection = (pageClauses: readonly UiClause[], w: PageWindow): string => {
+  if (w.total === 0) {
+    return '<section id="all-specs" aria-labelledby="all-specs-title"><h2 id="all-specs-title">All Specs (0)</h2><p>no live clauses</p></section>'
   }
-  const body =
-    groups.size === 0
-      ? '<p>no live clauses</p>'
-      : [...groups.entries()]
-          .map(([specPath, group], index) => {
-            const title = `<code>${esc(specPath)}</code> (${group.length})`
-            return `<section aria-labelledby="spec-group-${index}-title"><h3 id="spec-group-${index}-title">${title}</h3><table><caption>${title}</caption><thead><tr><th scope="col">Clause</th><th scope="col">Risk</th><th scope="col">Evidence</th></tr></thead><tbody>${group
-              .map(clauseRow)
-              .join('')}</tbody></table></section>`
-          })
-          .join('')
-  return `<section id="all-specs" aria-labelledby="all-specs-title"><h2 id="all-specs-title">All Specs (${clauses.length})</h2>${body}</section>`
+  const groups: { specPath: string; clauses: UiClause[] }[] = []
+  for (const clause of pageClauses) {
+    const current = groups.at(-1)
+    if (current?.specPath === clause.specPath) current.clauses.push(clause)
+    else groups.push({ specPath: clause.specPath, clauses: [clause] })
+  }
+  const bodies = groups
+    .map(
+      ({ specPath, clauses }) =>
+        `<tbody data-spec="${esc(specPath)}"><tr><th colspan="3" scope="rowgroup"><code>${esc(specPath)}</code> (本页 ${clauses.length})</th></tr>${clauses
+          .map(clauseRow)
+          .join('')}</tbody>`
+    )
+    .join('')
+  return `<section id="all-specs" aria-labelledby="all-specs-title"><h2 id="all-specs-title">All Specs (${w.total})</h2><table><caption>${esc(
+    caption('specs', w)
+  )}</caption><thead><tr><th scope="col">Clause</th><th scope="col">Risk</th><th scope="col">Evidence</th></tr></thead>${bodies}</table></section>`
 }
 
 const decidedRow = (clause: UiClause): string => {
+  const key = `${clause.specPath}#${clause.clauseId}`
   const state = clause.decisionVerdict === 'pass' ? statusChip('ok', '✓', 'pass') : statusChip('danger', '✗', 'fail')
-  return `<tr><td>${esc(`${clause.specPath}#${clause.clauseId}`)} ${esc(clause.title)}</td><td>${state}</td><td><a href="${esc(
+  return `<tr data-row="${esc(key)}"><td>${esc(key)} ${esc(clause.title)}</td><td>${state}</td><td><a href="${esc(
     briefHref(clause.specPath, clause.clauseId)
   )}">brief</a></td></tr>`
 }
 
-const decidedSection = (snapshot: UiSnapshot): string => {
-  const decided = snapshot.clauses.filter((c) => c.decisionVerdict === 'pass' || c.decisionVerdict === 'fail')
-  const rows = decided.map(decidedRow).join('')
-  return `<section aria-labelledby="decided-title"><h2 id="decided-title">Decided manual clauses at HEAD (${
-    decided.length
-  })</h2><table><caption>Decided manual clauses at HEAD (${decided.length})</caption><thead><tr><th scope="col">条款</th><th scope="col">Verdict</th><th scope="col">Brief</th></tr></thead><tbody>${
+const decidedSection = (pageClauses: readonly UiClause[], w: PageWindow): string => {
+  const rows = pageClauses.map(decidedRow).join('')
+  return `<section aria-labelledby="decided-title"><h2 id="decided-title">Decided manual clauses at HEAD (${w.total})</h2><table><caption>${esc(
+    caption('decisions', w)
+  )}</caption><thead><tr><th scope="col">条款</th><th scope="col">Verdict</th><th scope="col">Brief</th></tr></thead><tbody>${
     rows || '<tr><td colspan="3">none yet</td></tr>'
   }</tbody></table></section>`
 }
 
-/** Render the self-contained S2 console page. */
-export const renderConsolePage = (snapshot: UiSnapshot, csrfToken: string, auditResult?: string): string => {
-  const human = snapshot.status.items.filter((item) => item.lane === 'human')
-  const agent = snapshot.status.items.filter((item) => item.lane === 'agent')
-  const notice = auditResult !== undefined ? `<p id="audit-result">${esc(auditResult)}</p>` : ''
-  const main = `<main id="main">${summary(snapshot)}${workspaceBanner(snapshot)}${notice}${yourQueueSection(human)}${auditControls(
-    snapshot.status.items
-  )}${agentLaneSection(human, agent)}${allSpecsSection(snapshot.clauses)}${decidedSection(snapshot)}</main>`
+export const renderConsoleFamilyPage = (input: ConsolePageInput): string => {
+  const { route, snapshot } = input
+  const interactive = route === 'queue' || route === 'agent'
+  const win = (total: number): PageWindow => pageWindow(total, input.page, input.pageSize)
+  let w: PageWindow
+  let body: string
+  if (route === 'queue') {
+    const items = snapshot.status.items.filter((item) => item.lane === 'human')
+    w = win(items.length)
+    body = queueSection(items.slice(w.start, w.end), w)
+  } else if (route === 'agent') {
+    const items = snapshot.status.items.filter((item) => item.lane === 'agent')
+    w = win(items.length)
+    body = agentSection(items.slice(w.start, w.end), snapshot.status.items, w)
+  } else if (route === 'specs') {
+    w = win(snapshot.clauses.length)
+    body = specsSection(snapshot.clauses.slice(w.start, w.end), w)
+  } else {
+    const clauses = snapshot.clauses.filter((clause) => clause.decisionVerdict === 'pass' || clause.decisionVerdict === 'fail')
+    w = win(clauses.length)
+    body = decidedSection(clauses.slice(w.start, w.end), w)
+  }
+  const notice = input.auditResult !== undefined ? `<p id="audit-result">${esc(input.auditResult)}</p>` : ''
+  const main = `<main id="main">${route === 'queue' ? summary(snapshot) : ''}${workspaceAlert(
+    snapshot,
+    route
+  )}${notice}${body}${paginationNav(ROUTE_PATH[route], w)}</main>`
   return pageShell({
     title: 'urtext console',
-    csrfToken,
+    ...(interactive ? { csrfToken: input.csrfToken } : {}),
     header: header(snapshot),
-    nav: nav(),
+    nav: appNav(route, w.page),
     main,
-    script: CONSOLE_SCRIPT,
+    ...(interactive ? { script: CONSOLE_SCRIPT } : {}),
   })
 }
+
+/** Frozen public API: the root route at default page size. */
+export const renderConsolePage = (snapshot: UiSnapshot, csrfToken: string, auditResult?: string): string =>
+  renderConsoleFamilyPage({
+    route: 'queue',
+    snapshot,
+    csrfToken,
+    page: 1,
+    pageSize: DEFAULT_PAGE_SIZE,
+    ...(auditResult !== undefined ? { auditResult } : {}),
+  })

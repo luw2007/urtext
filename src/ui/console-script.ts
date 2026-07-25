@@ -55,7 +55,7 @@ document.getElementById('audit-runner')?.addEventListener('submit', async (e) =>
     const j = await r.json()
     if (j.error) { progress.textContent = j.error; button.disabled = false; return }
     progress.textContent = j.message + ' Refreshing queue…'
-    location.href = '/?audit=' + encodeURIComponent(j.message)
+    location.href = '/agent?audit=' + encodeURIComponent(j.message)
   } catch {
     progress.textContent = 'Audit request failed; no verdicts were imported.'
     button.disabled = false

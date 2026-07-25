@@ -36,6 +36,7 @@ th,td{border-bottom:1px solid var(--border);padding:var(--sp-2) var(--sp-3);text
 [data-tone="warn"],.diff-hunk{color:var(--warn);background:var(--warn-bg)}
 [data-tone="danger"],.diff-del,[role="alert"]{color:var(--danger);background:var(--danger-bg)}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button[disabled]{color:var(--muted);background:var(--bg);border:1px solid var(--border)}
 pre{overflow-x:auto;white-space:pre}
 @media (min-width:720px){nav{flex-wrap:nowrap}table{display:table}}
 @media (max-width:719px){nav{flex-wrap:wrap}table{display:block;overflow-x:auto}}

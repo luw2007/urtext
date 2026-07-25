@@ -1,3 +1,5 @@
+import { esc } from './html.js'
+
 import { parsePositiveInt } from './contracts.js'
 
 export const DEFAULT_PAGE_SIZE = 20
@@ -41,10 +43,10 @@ export const paginationNav = (basePath: string, w: PageWindow): string => {
   const previous =
     w.page === 1
       ? '<span data-tone="muted" aria-disabled="true">← 上一页</span>'
-      : `<a rel="prev" href="${pageHref(basePath, w.page - 1)}">← 上一页</a>`
+      : `<a rel="prev" href="${esc(pageHref(basePath, w.page - 1))}">← 上一页</a>`
   const next =
     w.page === w.pageCount
       ? '<span data-tone="muted" aria-disabled="true">下一页 →</span>'
-      : `<a rel="next" href="${pageHref(basePath, w.page + 1)}">下一页 →</a>`
+      : `<a rel="next" href="${esc(pageHref(basePath, w.page + 1))}">下一页 →</a>`
   return `<nav aria-label="分页">${previous} <span>第 ${w.page} / 共 ${w.pageCount} 页（共 ${w.total} 条）</span> ${next}</nav>`
 }

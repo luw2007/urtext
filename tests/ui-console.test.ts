@@ -62,20 +62,22 @@ afterEach(() => {
 })
 
 describe('console-family shell and route ownership', () => {
-  test.each<ConsoleRoute>(['queue', 'agent', 'specs', 'decisions'])('%s keeps the shared landmark order and one h1', (route) => {
+  test('all routes keep the shared landmark order and one h1', () => {
     const snapshot = buildUiSnapshot(db, setupRepo())
-    const html = render(route, snapshot)
-    const bodyStart = html.indexOf('<body>')
-    const skipIdx = html.indexOf('<a class="skip" href="#main">')
-    const headerIdx = html.indexOf('<header>')
-    const navIdx = html.indexOf('<nav aria-label="页面导航">')
-    const mainIdx = html.indexOf('<main id="main">')
-    expect(bodyStart).toBeLessThan(skipIdx)
-    expect(skipIdx).toBeLessThan(headerIdx)
-    expect(headerIdx).toBeLessThan(navIdx)
-    expect(navIdx).toBeLessThan(mainIdx)
-    expect((html.match(/<h1[ >]/g) ?? [])).toHaveLength(1)
-    expect(html).toContain('<html lang="zh-CN">')
+    for (const route of ['queue', 'agent', 'specs', 'decisions'] as const) {
+      const html = render(route, snapshot)
+      const bodyStart = html.indexOf('<body>')
+      const skipIdx = html.indexOf('<a class="skip" href="#main">')
+      const headerIdx = html.indexOf('<header>')
+      const navIdx = html.indexOf('<nav aria-label="页面导航">')
+      const mainIdx = html.indexOf('<main id="main">')
+      expect(bodyStart).toBeLessThan(skipIdx)
+      expect(skipIdx).toBeLessThan(headerIdx)
+      expect(headerIdx).toBeLessThan(navIdx)
+      expect(navIdx).toBeLessThan(mainIdx)
+      expect((html.match(/<h1[ >]/g) ?? [])).toHaveLength(1)
+      expect(html).toContain('<html lang="zh-CN">')
+    }
   })
 
   test('shared header renders short HEAD, dirty state, and no links', () => {
@@ -92,16 +94,21 @@ describe('console-family shell and route ownership', () => {
     expect(dirty).toContain('data-tone="warn"')
   })
 
-  test.each([
-    ['queue', ['/', '/agent', '/specs', '/decisions', '/']],
-    ['agent', ['/', '/agent', '/specs', '/decisions', '/agent']],
-    ['specs', ['/', '/agent', '/specs', '/decisions', '/specs']],
-    ['decisions', ['/', '/agent', '/specs', '/decisions', '/decisions']],
-  ] as const)('%s navigation uses fixed routes, one current page, and canonical refresh', (route, hrefs) => {
-    const html = render(route, buildUiSnapshot(db, setupRepo()))
-    const nav = html.slice(html.indexOf('<nav aria-label="页面导航">'), html.indexOf('</nav>') + 6)
-    expect([...nav.matchAll(/href="([^"]+)"/g)].map((match) => match[1])).toEqual(hrefs)
-    expect((html.match(/aria-current="page"/g) ?? [])).toHaveLength(1)
+  test('all route navigations use fixed links, one current page, and canonical refresh', () => {
+    const snapshot = buildUiSnapshot(db, setupRepo())
+    const cases = [
+      ['queue', ['/', '/agent', '/specs', '/decisions', '/']],
+      ['agent', ['/', '/agent', '/specs', '/decisions', '/agent']],
+      ['specs', ['/', '/agent', '/specs', '/decisions', '/specs']],
+      ['decisions', ['/', '/agent', '/specs', '/decisions', '/decisions']],
+    ] as const
+    for (const [route, hrefs] of cases) {
+      const html = render(route, snapshot)
+      const start = html.indexOf('<nav aria-label="页面导航">')
+      const nav = html.slice(start, html.indexOf('</nav>', start) + 6)
+      expect([...nav.matchAll(/href="([^"]+)"/g)].map((match) => match[1])).toEqual(hrefs)
+      expect((html.match(/aria-current="page"/g) ?? [])).toHaveLength(1)
+    }
   })
 
   test('page-two refresh preserves the canonical page without audit parameters', () => {
@@ -266,13 +273,13 @@ describe('queue projection and unmapped remediation', () => {
   test('compact alert appears once while remediation commands exist only in paginated unmapped rows', () => {
     const snapshot = buildUiSnapshot(db, setupRepo())
     const unmapped: StatusItem[] = Array.from({ length: 100 }, (_, index) => ({
-      key: `src/file.ts:${index + 1}-${index + 1}`,
+      key: index === 0 ? '<bad>.ts:1-1' : `src/file.ts:${index + 1}-${index + 1}`,
       kind: 'unmapped',
       lane: 'human',
       primary: 'unmapped',
       reasons: ['unmapped'],
       next: '`urtext map <spec>#<clause> <range>` | `urtext ack <range> <reason>` | write back to spec',
-      filePath: 'src/file.ts',
+      filePath: index === 0 ? '<bad>.ts' : 'src/file.ts',
       lineStart: index + 1,
       lineEnd: index + 1,
     }))
@@ -287,8 +294,9 @@ describe('queue projection and unmapped remediation', () => {
     expect((html.match(/urtext map/g) ?? [])).toHaveLength(2)
     expect((html.match(/urtext ack/g) ?? [])).toHaveLength(2)
     expect(html).not.toContain('workspace-alert-title')
-    expect(html).toContain('映射：<code>urtext map &lt;spec&gt;#&lt;clause&gt; src/file.ts:1-1</code>')
-    expect(html).toContain('确认例外：<code>urtext ack src/file.ts:1-1 &lt;reason&gt;</code>')
+    expect(html).toContain('映射：<code>urtext map &lt;spec&gt;#&lt;clause&gt; &lt;bad&gt;.ts:1-1</code>')
+    expect(html).toContain('确认例外：<code>urtext ack &lt;bad&gt;.ts:1-1 &lt;reason&gt;</code>')
+    expect(html).toContain('<br>或先修改对应 spec，再刷新状态。</small>')
     expect(html).not.toContain('data-banner="unmapped-error"')
   })
 
@@ -339,6 +347,7 @@ describe('agent projection and audit controls', () => {
     const items = [template!, { ...template!, key: `${template!.key}-same` }, { ...template!, key: `${template!.key}-other`, next: 'other hint' }]
     const html = render('agent', { ...snapshot, status: { ...snapshot.status, items } }, 1, 2)
     expect(html.split(esc(template!.next)).length - 1).toBe(1)
+    expect(html).toContain('Audit 3 evidence item(s)')
     expect(html).not.toContain('other hint')
     expect(html).not.toContain('data-section="agent-lane"')
     expect(html).toContain('<h2 id="agent-lane-title">')
