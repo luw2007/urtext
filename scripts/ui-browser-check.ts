@@ -193,6 +193,10 @@ export interface AxNode {
   role: string
   name: string
   interactive: boolean
+  nodeId?: string | undefined
+  parentId?: string | undefined
+  backendDOMNodeId?: number | undefined
+  nameSources?: string[] | undefined
 }
 
 const INTERACTIVE_ROLES = new Set(['button', 'link', 'textbox', 'checkbox'])
@@ -316,6 +320,7 @@ export const sanitizeRequestRecord = (record: unknown): unknown => {
 
 export interface CdpClient {
   send: (method: string, params?: Record<string, unknown>) => Promise<any>
+  on: (method: string, handler: (params: unknown) => void) => void
   close: () => void
 }
 
@@ -340,8 +345,19 @@ export const createCdpClient = async (port: number): Promise<CdpClient> => {
   await opened.promise
 
   let messageId = 0
-  const send = (method: string, params: Record<string, unknown> = {}): Promise<any> => {
-    const { promise, resolve, reject } = Promise.withResolvers<any>()
+  const eventHandlers = new Map<string, ((params: unknown) => void)[]>()
+  ws.addEventListener('message', (event: MessageEvent) => {
+    const msg = JSON.parse(String(event.data)) as { method?: string; params?: unknown }
+    if (msg.method === undefined) return
+    for (const handler of eventHandlers.get(msg.method) ?? []) handler(msg.params)
+  })
+  const on = (method: string, handler: (params: unknown) => void): void => {
+    const list = eventHandlers.get(method) ?? []
+    list.push(handler)
+    eventHandlers.set(method, list)
+  }
+  const send = (method: string, params: Record<string, unknown> = {}): Promise<unknown> => {
+    const { promise, resolve, reject } = Promise.withResolvers<unknown>()
     const id = (messageId += 1)
     const onMessage = (event: MessageEvent): void => {
       const msg = JSON.parse(String(event.data)) as { id?: number; result?: unknown; error?: { message: string } }
@@ -355,7 +371,7 @@ export const createCdpClient = async (port: number): Promise<CdpClient> => {
     return promise
   }
 
-  return { send, close: () => ws.close() }
+  return { send, on, close: () => ws.close() }
 }
 
 // ---------------------------------------------------------------------------
@@ -441,13 +457,208 @@ export const extractDiffIds = async (client: CdpClient): Promise<string[]> => {
 /** Real accessible-name AX nodes from `Accessibility.getFullAXTree`, filtered to non-ignored nodes. */
 export const extractAxNodes = async (client: CdpClient): Promise<AxNode[]> => {
   const res = await client.send('Accessibility.getFullAXTree', {})
-  const nodes = (res.nodes ?? []) as { role?: { value?: string }; name?: { value?: string }; ignored?: boolean }[]
+  const nodes = (res.nodes ?? []) as {
+    nodeId?: string
+    parentId?: string
+    backendDOMNodeId?: number
+    role?: { value?: string }
+    name?: { value?: string; sources?: { type?: string; attempted?: boolean }[] }
+    ignored?: boolean
+  }[]
   return nodes
     .filter((n) => n.ignored !== true)
     .map((n) => {
       const role = n.role?.value ?? ''
-      return { role, name: n.name?.value ?? '', interactive: INTERACTIVE_ROLES.has(role) }
+      const nameSources = n.name?.sources?.filter((s) => s.attempted !== false).map((s) => s.type ?? 'unknown')
+      return {
+        role,
+        name: n.name?.value ?? '',
+        interactive: INTERACTIVE_ROLES.has(role),
+        nodeId: n.nodeId,
+        parentId: n.parentId,
+        backendDOMNodeId: n.backendDOMNodeId,
+        nameSources: nameSources !== undefined && nameSources.length > 0 ? nameSources : undefined,
+      }
     })
+}
+
+// ---------------------------------------------------------------------------
+// DOM <-> AX linkage (§8.3.4): DOM.getDocument/querySelector/describeNode
+// resolve a selector to a backendDOMNodeId; that id must appear on exactly
+// one node in the AX tree, proving the two trees describe the same page.
+// ---------------------------------------------------------------------------
+
+/** Resolves a CSS `selector` to its `backendNodeId` via a real DOM.getDocument -> DOM.querySelector -> DOM.describeNode round trip. Throws if the selector matches nothing. */
+export const resolveSelectorBackendNodeId = async (client: CdpClient, selector: string): Promise<number> => {
+  const { root } = (await client.send('DOM.getDocument', { depth: -1, pierce: true })) as { root: { nodeId: number } }
+  const { nodeId } = (await client.send('DOM.querySelector', { nodeId: root.nodeId, selector })) as { nodeId: number }
+  if (!nodeId) throw new Error(`selector not found in DOM: ${selector}`)
+  const { node } = (await client.send('DOM.describeNode', { nodeId })) as { node: { backendNodeId: number } }
+  return node.backendNodeId
+}
+
+export interface AxLink {
+  selector: string
+  backendDOMNodeId: number
+  axNode: AxNode
+}
+
+/** Links a CSS `selector` to its AX node by resolving its `backendDOMNodeId` through the DOM and matching it against `axNodes`. Throws if no AX node carries that id — a real linkage failure, not a placeholder. */
+export const linkSelectorToAxNode = async (client: CdpClient, selector: string, axNodes: AxNode[]): Promise<AxLink> => {
+  const backendDOMNodeId = await resolveSelectorBackendNodeId(client, selector)
+  const axNode = axNodes.find((n) => n.backendDOMNodeId === backendDOMNodeId)
+  if (axNode === undefined) throw new Error(`no AX node carries backendDOMNodeId ${backendDOMNodeId} for selector ${JSON.stringify(selector)}`)
+  return { selector, backendDOMNodeId, axNode }
+}
+
+/** The first attempted accessible-name computation source (e.g. `contents`, `attribute`) for an AX node, or `'none'` if it has no name. */
+export const accessibleNameSource = (node: AxNode): string => (node.name.trim().length === 0 ? 'none' : (node.nameSources?.[0] ?? 'unknown'))
+
+/** Parent/child closure errors (§8.3.4): every non-root `parentId` must reference a node id present in the same tree. Empty = a fully closed tree. */
+export const validateAxTreeClosure = (nodes: AxNode[]): string[] => {
+  const ids = new Set(nodes.map((n) => n.nodeId).filter((id): id is string => id !== undefined))
+  const errors: string[] = []
+  for (const n of nodes) {
+    if (n.parentId !== undefined && !ids.has(n.parentId)) errors.push(`AX node ${n.nodeId ?? '?'} (${n.role}) has dangling parentId ${n.parentId}`)
+  }
+  return errors
+}
+
+// ---------------------------------------------------------------------------
+// Page-specific selector presence/absence/count (§8.3.4, frozen static IDs
+// in plan §6.4: `audit-runner` is console-only, `explain-btn` is brief-only).
+// ---------------------------------------------------------------------------
+
+export interface PageSpecificExpectation {
+  page: string
+  selector: string
+  expectedCount: number
+}
+
+export const PAGE_SPECIFIC_SELECTORS: PageSpecificExpectation[] = [
+  { page: 'console', selector: '#audit-runner', expectedCount: 1 },
+  { page: 'console', selector: '#explain-btn', expectedCount: 0 },
+  { page: 'brief', selector: '#explain-btn', expectedCount: 1 },
+  { page: 'brief', selector: '#audit-runner', expectedCount: 0 },
+  { page: 'error', selector: '#explain-btn', expectedCount: 0 },
+  { page: 'error', selector: '#audit-runner', expectedCount: 0 },
+]
+
+/** Real per-selector element counts via a single `querySelectorAll` batch, parsed from the injected client's response. */
+export const extractSelectorCounts = async (client: CdpClient, selectors: string[]): Promise<Record<string, number>> => {
+  const res = await client.send('Runtime.evaluate', {
+    expression: `JSON.stringify(Object.fromEntries(${JSON.stringify(selectors)}.map((s)=>[s,document.querySelectorAll(s).length])))`,
+    returnByValue: true,
+  })
+  return JSON.parse(res.result.value) as Record<string, number>
+}
+
+/** Mismatches between observed selector counts and the page-specific expectation matrix. Empty = pass. */
+export const validatePageSpecificSelectors = (page: string, counts: Record<string, number>, expectations = PAGE_SPECIFIC_SELECTORS): string[] =>
+  expectations
+    .filter((e) => e.page === page)
+    .filter((e) => (counts[e.selector] ?? 0) !== e.expectedCount)
+    .map((e) => `${page}:${e.selector}: expected count ${e.expectedCount}, got ${counts[e.selector] ?? 0}`)
+
+// ---------------------------------------------------------------------------
+// Network/Fetch domain guard (§8.3.2/§8.3.3): classify every request against
+// the page's own origin and actively fail external ones — never merely
+// observe them. Records are sanitized by construction: only origin class,
+// resource type, and (final) status are ever kept, never a raw URL.
+// ---------------------------------------------------------------------------
+
+export interface SanitizedNetworkRecord {
+  originClass: 'same-origin' | 'external'
+  resourceType: string
+  status: number | null
+}
+
+/** Same-origin requests continue; anything whose origin differs from `pageOrigin` fails closed. */
+export const decideFetchAction = (
+  requestUrl: string,
+  pageOrigin: string,
+): { action: 'continue' | 'fail'; originClass: 'same-origin' | 'external' } => {
+  const originClass = new URL(requestUrl).origin === pageOrigin ? 'same-origin' : 'external'
+  return { action: originClass === 'same-origin' ? 'continue' : 'fail', originClass }
+}
+
+/**
+ * Enables `Network`+`Fetch` on `client` (with a catch-all request pattern),
+ * subscribes to `Fetch.requestPaused`, and actively fails every
+ * external-origin request while continuing same-origin ones. Must be called
+ * before `Page.navigate` so no request escapes unclassified. Returns an
+ * accessor for the sanitized records collected so far.
+ */
+export const attachNetworkGuard = async (client: CdpClient, pageOrigin: string): Promise<{ getRecords: () => SanitizedNetworkRecord[] }> => {
+  const records: SanitizedNetworkRecord[] = []
+  await client.send('Network.enable')
+  await client.send('Fetch.enable', { patterns: [{ urlPattern: '*', requestStage: 'Request' }] })
+  client.on('Fetch.requestPaused', (raw) => {
+    const params = raw as { requestId: string; request: { url: string }; resourceType: string }
+    const { action, originClass } = decideFetchAction(params.request.url, pageOrigin)
+    void (action === 'fail'
+      ? client.send('Fetch.failRequest', { requestId: params.requestId, errorReason: 'BlockedByClient' })
+      : client.send('Fetch.continueRequest', { requestId: params.requestId }))
+    records.push({ originClass, resourceType: params.resourceType, status: null })
+  })
+  return { getRecords: () => records }
+}
+
+// ---------------------------------------------------------------------------
+// Real disabled-during-submit check (§8.3.5): drives an actual mouse click
+// and polls the DOM — never writes `.disabled` via `Runtime.evaluate` — to
+// prove a button disables itself for the duration of an in-flight request
+// (against the real 750ms delayed agent-stub path) and re-enables after.
+// ---------------------------------------------------------------------------
+
+export interface DisabledCheckResult {
+  selector: string
+  initialDisabled: boolean
+  disabledDuringRequest: boolean
+  reenabled: boolean
+  pass: boolean
+}
+
+const readDisabled = async (client: CdpClient, selector: string): Promise<boolean> => {
+  const res = await client.send('Runtime.evaluate', {
+    expression: `document.querySelector(${JSON.stringify(selector)})?.disabled === true`,
+    returnByValue: true,
+  })
+  return Boolean(res.result.value)
+}
+
+export const verifyButtonDisablesDuringSubmit = async (
+  client: CdpClient,
+  selector: string,
+  timeoutMs = 5000,
+  pollMs = 25,
+): Promise<DisabledCheckResult> => {
+  const initialDisabled = await readDisabled(client, selector)
+
+  const { root } = (await client.send('DOM.getDocument', { depth: -1, pierce: true })) as { root: { nodeId: number } }
+  const { nodeId } = (await client.send('DOM.querySelector', { nodeId: root.nodeId, selector })) as { nodeId: number }
+  if (!nodeId) throw new Error(`selector not found in DOM: ${selector}`)
+  const { model } = (await client.send('DOM.getBoxModel', { nodeId })) as { model: { content: number[] } }
+  const [x0, y0, , , x2, y2] = model.content
+  const x = (x0! + x2!) / 2
+  const y = (y0! + y2!) / 2
+  await client.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 })
+  await client.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 })
+
+  await sleep(pollMs)
+  const disabledDuringRequest = await readDisabled(client, selector)
+
+  const deadline = Date.now() + timeoutMs
+  let reenabled = false
+  while (Date.now() < deadline) {
+    if (!(await readDisabled(client, selector))) {
+      reenabled = true
+      break
+    }
+    await sleep(pollMs)
+  }
+
+  return { selector, initialDisabled, disabledDuringRequest, reenabled, pass: !initialDisabled && disabledDuringRequest && reenabled }
 }
 
 /** Drives real keyboard `Tab` presses via `Input.dispatchKeyEvent` and reads `document.activeElement` after each, mapping the skip-link anchor to `"skip-link"`. */
@@ -500,6 +711,10 @@ export interface CheckSummary {
   disclosureErrors: string[]
   realDiffCount: boolean
   guardResults: { name: string; pass: boolean }[]
+  axClosureErrors: string[]
+  pageSpecificErrors: string[]
+  externalRequestCount: number
+  disabledCheck: DisabledCheckResult | null
 }
 
 export interface RunCheckConfig {
@@ -507,6 +722,8 @@ export interface RunCheckConfig {
   expectedDiffCount: number
   disclosureExpectations: DisclosureExpectation[]
   guardCases: HttpGuardCase[]
+  pageSpecificExpectations?: PageSpecificExpectation[] | undefined
+  disabledButtonSelector?: string | undefined
 }
 
 /**
@@ -523,6 +740,7 @@ export const runCheckAtViewport = async (
   viewport: number,
   colorScheme: ColorScheme,
   config: RunCheckConfig,
+  networkRecords: SanitizedNetworkRecord[] = [],
 ): Promise<CheckSummary> => {
   const [landmarks, headings, axNodes, overflow, motion, disclosure, diffIds, contrastPairs, focusOrder] = await Promise.all([
     extractLandmarks(client),
@@ -538,6 +756,14 @@ export const runCheckAtViewport = async (
 
   const guardResults = await Promise.all(config.guardCases.map((c) => runHttpGuardCase(baseUrl, c)))
 
+  const pageSpecificExpectations = config.pageSpecificExpectations
+  const relevantSelectors =
+    pageSpecificExpectations !== undefined ? [...new Set(pageSpecificExpectations.filter((e) => e.page === page).map((e) => e.selector))] : []
+  const selectorCounts = relevantSelectors.length > 0 ? await extractSelectorCounts(client, relevantSelectors) : {}
+
+  const disabledCheck =
+    config.disabledButtonSelector !== undefined ? await verifyButtonDisablesDuringSubmit(client, config.disabledButtonSelector) : null
+
   return {
     page,
     viewport,
@@ -552,6 +778,10 @@ export const runCheckAtViewport = async (
     disclosureErrors: validateDisclosure(disclosure, config.disclosureExpectations),
     realDiffCount: validateRealDiffCount(diffIds, config.expectedDiffCount),
     guardResults: guardResults.map(({ name, pass }) => ({ name, pass })),
+    axClosureErrors: validateAxTreeClosure(axNodes),
+    pageSpecificErrors: pageSpecificExpectations !== undefined ? validatePageSpecificSelectors(page, selectorCounts, pageSpecificExpectations) : [],
+    externalRequestCount: networkRecords.filter((r) => r.originClass === 'external').length,
+    disabledCheck,
   }
 }
 
@@ -574,8 +804,14 @@ export const buildAssertions = (summary: CheckSummary): Assertion[] => {
     { name: `${prefix}:reduced-motion`, expected: true, actual: summary.reducedMotionOk, pass: summary.reducedMotionOk },
     { name: `${prefix}:disclosure`, expected: [], actual: summary.disclosureErrors, pass: summary.disclosureErrors.length === 0 },
     { name: `${prefix}:real-diff-count`, expected: true, actual: summary.realDiffCount, pass: summary.realDiffCount },
+    { name: `${prefix}:ax-closure`, expected: [], actual: summary.axClosureErrors, pass: summary.axClosureErrors.length === 0 },
+    { name: `${prefix}:page-specific-selectors`, expected: [], actual: summary.pageSpecificErrors, pass: summary.pageSpecificErrors.length === 0 },
+    { name: `${prefix}:no-external-requests`, expected: 0, actual: summary.externalRequestCount, pass: summary.externalRequestCount === 0 },
     ...summary.contrast.map((c) => ({ name: `${prefix}:contrast:${c.label}`, expected: true, actual: c.pass, pass: c.pass })),
     ...summary.guardResults.map((g) => ({ name: `${prefix}:guard:${g.name}`, expected: true, actual: g.pass, pass: g.pass })),
+    ...(summary.disabledCheck !== null
+      ? [{ name: `${prefix}:disabled-during-submit:${summary.disabledCheck.selector}`, expected: true, actual: summary.disabledCheck.pass, pass: summary.disabledCheck.pass }]
+      : []),
   ]
 }
 
@@ -659,7 +895,18 @@ if (isMain()) {
   const pageNameErrors = validatePageNames(pages)
   if (pageNameErrors.length > 0) throw new Error(pageNameErrors.join('; '))
 
-  const config: RunCheckConfig = { focusSteps, expectedDiffCount, disclosureExpectations, guardCases: HTTP_GUARD_CASES }
+  const DISABLED_BUTTON_SELECTORS: Record<string, string> = {
+    brief: '#explain-btn',
+    console: '#audit-runner button[type="submit"]',
+  }
+
+  const config: RunCheckConfig = {
+    focusSteps,
+    expectedDiffCount,
+    disclosureExpectations,
+    guardCases: HTTP_GUARD_CASES,
+    pageSpecificExpectations: PAGE_SPECIFIC_SELECTORS,
+  }
 
   const summaries: CheckSummary[] = []
   for (const { name: pageName, url } of pages) {
@@ -671,6 +918,8 @@ if (isMain()) {
           await client.send('DOM.enable')
           await client.send('Runtime.enable')
           await client.send('Accessibility.enable')
+          const pageOrigin = new URL(url).origin
+          const networkGuard = await attachNetworkGuard(client, pageOrigin)
           await client.send('Emulation.setDeviceMetricsOverride', { width: viewport, height: 900, deviceScaleFactor: 1, mobile: viewport <= 390 })
           await client.send('Emulation.setEmulatedMedia', {
             features: [
@@ -680,16 +929,30 @@ if (isMain()) {
           })
           await client.send('Page.navigate', { url })
           await waitForPageLoad(client)
-          const summary = await runCheckAtViewport(client, url, pageName, viewport, colorScheme, {
-            ...config,
-            expectedDiffCount: pageName === 'brief' ? expectedDiffCount : 0,
-          })
+          const summary = await runCheckAtViewport(
+            client,
+            url,
+            pageName,
+            viewport,
+            colorScheme,
+            {
+              ...config,
+              expectedDiffCount: pageName === 'brief' ? expectedDiffCount : 0,
+              disabledButtonSelector: viewport === 1440 ? DISABLED_BUTTON_SELECTORS[pageName] : undefined,
+            },
+            networkGuard.getRecords(),
+          )
           summaries.push(summary)
           if (outputDir !== undefined) {
             const shot = (await client.send('Page.captureScreenshot', { format: 'png' })) as { data: string }
             mkdirSync(outputDir, { recursive: true })
             const base = `${pageName}-${viewport}-${colorScheme}`
             writeFileSync(join(outputDir, `${base}.png`), Buffer.from(shot.data, 'base64'))
+            const rawAx = await client.send('Accessibility.getFullAXTree', {})
+            writeFileSync(join(outputDir, `${base}-ax-raw.json`), JSON.stringify(sanitizeRequestRecord(rawAx), null, 2))
+            const normalizedAx = await extractAxNodes(client)
+            writeFileSync(join(outputDir, `${base}-ax-normalized.json`), JSON.stringify(normalizedAx, null, 2))
+            writeFileSync(join(outputDir, `${base}-network.json`), JSON.stringify(networkGuard.getRecords(), null, 2))
           }
         } finally {
           client.close()
