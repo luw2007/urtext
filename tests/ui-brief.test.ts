@@ -215,6 +215,21 @@ describe('renderBriefPage: escaped mapping diffs, ASCII line classes, +/- counts
     expect(html).toContain('&lt;binary&gt; diff is not supported')
   })
 
+  test('empty and error mapping states keep the brief heading hierarchy contiguous', () => {
+    const html = renderBriefPage(
+      baseInput({
+        view: baseView({
+          mappings: [mapping({ diff: null }), mapping({ diffError: 'binary diff is not supported' })],
+        }),
+      })
+    )
+    const levels = [...html.matchAll(/<h([1-6])\b/g)].map((match) => Number(match[1]))
+    expect(levels[0]).toBe(1)
+    for (let index = 1; index < levels.length; index += 1) {
+      expect(levels[index]! - levels[index - 1]!).toBeLessThanOrEqual(1)
+    }
+  })
+
   test('high-risk mapping opens regardless of line count; low-risk opens only under the threshold', () => {
     const bigDiff = ['@@ -1,50 +1,50 @@', ...Array.from({ length: 3 }, (_, i) => `+line${i}`)].join('\n')
     const config = { diffOpenMaxLines: 2, diffDisplayMaxLines: 2000 }

@@ -15,9 +15,16 @@
  * and the CLI entry point are the only pieces that require a real Chrome and
  * are exercised by the trusted final gate, not this slice's Vitest run.
  */
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { request } from 'node:http'
+import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
+
+import type { UiSnapshot } from '../src/review-ui.js'
+import type { BriefPageInput } from '../src/ui/contracts.js'
+import { renderBriefErrorPage, renderBriefPage } from '../src/ui/render-brief.js'
+import { renderConsolePage } from '../src/ui/render-console.js'
 
 export const VIEWPORTS = [1440, 1024, 390] as const
 export type Viewport = (typeof VIEWPORTS)[number]
@@ -82,6 +89,76 @@ export const checkContrastPairs = (pairs: ContrastPair[], threshold = CONTRAST_T
     const ratio = contrastRatio(fg, bg)
     return { label, ratio, pass: ratio >= threshold }
   })
+
+type ContrastFixture =
+  | { id: string; page: 'console'; snapshot: UiSnapshot; csrfToken: string; auditResult?: string }
+  | { id: string; page: 'brief'; input: BriefPageInput }
+  | { id: string; page: 'error'; message: string }
+
+interface ContrastManifest {
+  schema: string
+  sourceContractSha256: string
+  renderContractSha256: string
+  fixtureMatrix: ContrastFixture[]
+}
+
+export interface ManifestVerification {
+  path: string
+  fileSha256: string
+  schema: string
+  assertions: Assertion[]
+}
+
+const CONTRAST_SOURCE_FILES = [
+  'src/ui/theme.ts',
+  'src/ui/html.ts',
+  'src/ui/render-console.ts',
+  'src/ui/render-brief.ts',
+  'src/ui/console-script.ts',
+  'src/ui/brief-script.ts',
+] as const
+
+const hashFrame = (label: string, bytes: Buffer): Buffer =>
+  Buffer.concat([Buffer.from(`${label}\0${bytes.byteLength}\0`, 'utf8'), bytes, Buffer.from('\0', 'utf8')])
+
+const renderContrastFixture = (fixture: ContrastFixture): string => {
+  if (fixture.page === 'console') {
+    return fixture.auditResult === undefined
+      ? renderConsolePage(fixture.snapshot, fixture.csrfToken)
+      : renderConsolePage(fixture.snapshot, fixture.csrfToken, fixture.auditResult)
+  }
+  if (fixture.page === 'brief') return renderBriefPage(fixture.input)
+  return renderBriefErrorPage(fixture.message)
+}
+
+export const verifyContrastManifest = (manifestPath: string, sourceRoot: string): ManifestVerification => {
+  const manifestBytes = readFileSync(manifestPath)
+  const manifest = JSON.parse(manifestBytes.toString('utf8')) as ContrastManifest
+  if (manifest.schema !== 'urtext.ui-contrast-consumers/2' || !Array.isArray(manifest.fixtureMatrix)) {
+    throw new Error(`invalid contrast manifest schema at ${manifestPath}`)
+  }
+
+  const sourceHash = createHash('sha256')
+  for (const path of CONTRAST_SOURCE_FILES) sourceHash.update(hashFrame(path, readFileSync(join(sourceRoot, path))))
+  sourceHash.update(hashFrame('fixtureMatrix', Buffer.from(JSON.stringify(manifest.fixtureMatrix), 'utf8')))
+  const actualSource = sourceHash.digest('hex')
+
+  const renderHash = createHash('sha256')
+  for (const fixture of manifest.fixtureMatrix) {
+    renderHash.update(hashFrame(fixture.id, Buffer.from(renderContrastFixture(fixture), 'utf8')))
+  }
+  const actualRender = renderHash.digest('hex')
+
+  return {
+    path: manifestPath,
+    fileSha256: createHash('sha256').update(manifestBytes).digest('hex'),
+    schema: manifest.schema,
+    assertions: [
+      { name: 'contrast-manifest:source-contract-sha256', expected: manifest.sourceContractSha256, actual: actualSource, pass: actualSource === manifest.sourceContractSha256 },
+      { name: 'contrast-manifest:render-contract-sha256', expected: manifest.renderContractSha256, actual: actualRender, pass: actualRender === manifest.renderContractSha256 },
+    ],
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Landmarks / headings / AX labels / keyboard focus / overflow / motion
@@ -189,22 +266,39 @@ export interface HttpGuardCase {
   expectedStatus: number
 }
 
-/** The route-guard matrix I1 closed and I3 must observe live over CDP `fetch`: bad Host, wrong media type, oversized body, missing CSRF/Origin on writes. */
+/** The route-guard matrix I1 closed and I3 observes live: bad Host, wrong media type, missing CSRF, and hostile Origin. */
 export const HTTP_GUARD_CASES: HttpGuardCase[] = [
-  { name: 'bad-host-get', method: 'GET', path: '/', headers: { Host: 'evil.example' }, expectedStatus: 400 },
-  { name: 'wrong-media-type-post', method: 'POST', path: '/decide', headers: { 'Content-Type': 'text/plain' }, expectedStatus: 415 },
-  { name: 'missing-csrf-post', method: 'POST', path: '/decide', headers: { 'Content-Type': 'application/json' }, expectedStatus: 403 },
-  { name: 'missing-origin-post', method: 'POST', path: '/decide', headers: { 'Content-Type': 'application/json', 'X-Csrf-Token': 'x' }, expectedStatus: 403 },
+  { name: 'bad-host-get', method: 'GET', path: '/', headers: { Host: 'evil.example' }, expectedStatus: 403 },
+  { name: 'wrong-media-type-post', method: 'POST', path: '/api/decide', headers: { 'Content-Type': 'text/plain' }, expectedStatus: 415 },
+  { name: 'missing-csrf-post', method: 'POST', path: '/api/decide', headers: { 'Content-Type': 'application/json' }, expectedStatus: 403 },
+  { name: 'hostile-origin-post', method: 'POST', path: '/api/decide', headers: { 'Content-Type': 'application/json', Origin: 'https://evil.example' }, expectedStatus: 403 },
 ]
 
 /** A guard case passes iff the observed status matches the case's expectation exactly. */
 export const evaluateHttpGuardCase = (guardCase: HttpGuardCase, observedStatus: number): boolean =>
   observedStatus === guardCase.expectedStatus
 
-/** Sends one guard case against `baseUrl`'s origin+port and evaluates the observed status (§5.1 Host/media/CSRF/Origin route guards, observed live not simulated). */
+/** Sends one guard case against `baseUrl`'s origin+port and evaluates the observed status. */
 export const runHttpGuardCase = async (baseUrl: string, guardCase: HttpGuardCase): Promise<{ name: string; pass: boolean; status: number }> => {
-  const res = await fetch(new URL(guardCase.path, baseUrl).href, { method: guardCase.method, headers: guardCase.headers })
-  return { name: guardCase.name, status: res.status, pass: evaluateHttpGuardCase(guardCase, res.status) }
+  const base = new URL(baseUrl)
+  let headers = guardCase.headers
+  if (guardCase.name === 'wrong-media-type-post' || guardCase.name === 'hostile-origin-post') {
+    const page = await fetch(base.origin)
+    const html = await page.text()
+    const csrf = /<meta name="csrf-token" content="([^"]+)">/.exec(html)?.[1]
+    if (csrf === undefined) throw new Error('live console did not expose a CSRF token')
+    headers = { ...headers, 'x-csrf': csrf }
+    if (guardCase.name === 'wrong-media-type-post') headers = { ...headers, Origin: base.origin }
+  }
+  const status = await new Promise<number>((resolve, reject) => {
+    const req = request(new URL(guardCase.path, base), { method: guardCase.method, headers }, (res) => {
+      res.resume()
+      res.on('end', () => resolve(res.statusCode ?? 0))
+    })
+    req.on('error', reject)
+    req.end()
+  })
+  return { name: guardCase.name, status, pass: evaluateHttpGuardCase(guardCase, status) }
 }
 
 // ---------------------------------------------------------------------------
@@ -498,15 +592,32 @@ export const buildAssertions = (summary: CheckSummary): Assertion[] => {
   ]
 }
 
-/** 0 iff every assertion across every summary passed; 1 otherwise (§8.3: no fixed pass placeholders, real failures must fail the run). */
-export const computeExitCode = (summaries: CheckSummary[]): number =>
-  summaries.every((s) => buildAssertions(s).every((a) => a.pass)) ? 0 : 1
+export const validatePageNames = (pages: { name: string }[]): string[] => {
+  const expected = ['console', 'brief', 'error']
+  const counts = new Map<string, number>()
+  for (const page of pages) counts.set(page.name, (counts.get(page.name) ?? 0) + 1)
+  const errors: string[] = []
+  for (const name of expected) {
+    if (counts.get(name) !== 1) errors.push(`expected exactly one ${name} page`)
+  }
+  for (const name of counts.keys()) {
+    if (!expected.includes(name)) errors.push(`unknown page name ${JSON.stringify(name)}`)
+  }
+  return errors
+}
+
+/** 0 iff every live and preflight assertion passed. */
+export const computeExitCode = (summaries: CheckSummary[], additionalAssertions: Assertion[] = []): number =>
+  additionalAssertions.every((assertion) => assertion.pass) && summaries.every((summary) => buildAssertions(summary).every((assertion) => assertion.pass)) ? 0 : 1
 
 // ---------------------------------------------------------------------------
 // CLI entry point — real Chrome only, excluded from Vitest
 // ---------------------------------------------------------------------------
 
-const isMain = (): boolean => process.argv[1] !== undefined && pathToFileURL(process.argv[1]).href === import.meta.url
+const isMain = (): boolean => {
+  const entry = process.argv[1]
+  return entry !== undefined && realpathSync(entry) === realpathSync(fileURLToPath(import.meta.url))
+}
 
 if (isMain()) {
   const args = process.argv.slice(2)
@@ -531,6 +642,8 @@ if (isMain()) {
   const profileDir = readArg('--profile')
   const pageArgs = readAllArgs('--page')
   const outputDir = readArg('--output-dir')
+  const manifestPath = readArg('--contrast-manifest')
+  const sourceRoot = readArg('--source-root')
   const focusSteps = Number(readArg('--focus-steps') ?? '8')
   const expectedDiffCount = Number(readArg('--diff-count') ?? '5')
   const disclosureExpectations: DisclosureExpectation[] = readAllArgs('--disclosure').map((raw) => {
@@ -538,17 +651,27 @@ if (isMain()) {
     return { id, expectedOpen: expectedOpen as boolean }
   })
 
-  if (portRaw === undefined || profileDir === undefined || pageArgs.length === 0) {
-    process.stderr.write('usage: ui-browser-check.js --port <n> --profile <dir> --page <name>=<url> [--page <name>=<url> ...] [--output-dir <dir>] [--focus-steps <n>] [--diff-count <n>] [--disclosure <id>=<true|false>]\n')
+  if (portRaw === undefined || profileDir === undefined || pageArgs.length === 0 || manifestPath === undefined || sourceRoot === undefined) {
+    process.stderr.write('usage: ui-browser-check.js --port <n> --profile <dir> --page <name>=<url> [--page <name>=<url> ...] --contrast-manifest <path> --source-root <repo> [--output-dir <dir>] [--focus-steps <n>] [--diff-count <n>] [--disclosure <id>=<true|false>]\n')
     process.exit(2)
+  }
+
+  const port = Number(portRaw)
+  if (!Number.isInteger(port) || port <= 0) throw new Error(`invalid CDP port ${JSON.stringify(portRaw)}`)
+
+  const manifestVerification = verifyContrastManifest(manifestPath, sourceRoot)
+  if (manifestVerification.assertions.some((assertion) => !assertion.pass)) {
+    process.stderr.write(`${JSON.stringify(manifestVerification)}\n`)
+    process.exit(1)
   }
 
   const pages = pageArgs.map((raw) => {
     const [name, url] = splitKv(raw)
     return { name, url: url as string }
   })
+  const pageNameErrors = validatePageNames(pages)
+  if (pageNameErrors.length > 0) throw new Error(pageNameErrors.join('; '))
 
-  const port = Number(portRaw)
   const config: RunCheckConfig = { focusSteps, expectedDiffCount, disclosureExpectations, guardCases: HTTP_GUARD_CASES }
 
   const summaries: CheckSummary[] = []
@@ -570,7 +693,10 @@ if (isMain()) {
           })
           await client.send('Page.navigate', { url })
           await waitForPageLoad(client)
-          const summary = await runCheckAtViewport(client, url, pageName, viewport, colorScheme, config)
+          const summary = await runCheckAtViewport(client, url, pageName, viewport, colorScheme, {
+            ...config,
+            expectedDiffCount: pageName === 'brief' ? expectedDiffCount : 0,
+          })
           summaries.push(summary)
           if (outputDir !== undefined) {
             const shot = (await client.send('Page.captureScreenshot', { format: 'png' })) as { data: string }
@@ -586,8 +712,9 @@ if (isMain()) {
   }
 
   const report = {
+    manifest: manifestVerification,
     summaries,
-    assertions: summaries.flatMap(buildAssertions),
+    assertions: [...manifestVerification.assertions, ...summaries.flatMap(buildAssertions)],
   }
   const sanitized = sanitizeRequestRecord(report)
   process.stdout.write(`${JSON.stringify(sanitized)}\n`)
@@ -595,5 +722,5 @@ if (isMain()) {
     mkdirSync(outputDir, { recursive: true })
     writeFileSync(join(outputDir, 'ui-browser-check-report.json'), JSON.stringify(sanitized, null, 2))
   }
-  process.exit(computeExitCode(summaries))
+  process.exit(computeExitCode(summaries, manifestVerification.assertions))
 }

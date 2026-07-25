@@ -205,6 +205,7 @@ const REGISTERED_PAIRS: Record<string, { fg: string; bg: string }> = {
   'body,main': { fg: 'fg', bg: 'bg' },
   table: { fg: 'fg', bg: 'surface' },
   a: { fg: 'accent', bg: 'bg' },
+  '.skip': { fg: 'skip-fg', bg: 'skip-bg' },
   'table a': { fg: 'accent', bg: 'surface' },
   '[data-tone="muted"]': { fg: 'muted', bg: 'bg' },
   '[data-tone="ok"]': { fg: 'ok', bg: 'ok-bg' },
@@ -226,6 +227,7 @@ const withinTables = (html: string): string[] => [...bodyOnly(html).matchAll(/<t
 const SELECTOR_DETECTORS: Record<string, (html: string) => boolean> = {
   'body,main': (html) => /<body>/.test(html) && /<main id="main">/.test(html),
   a: (html) => /<a\s/.test(bodyOnly(html)),
+  '.skip': (html) => /<a class="skip"\s/.test(bodyOnly(html)),
   table: (html) => /<table>/.test(bodyOnly(html)),
   'table a': (html) => withinTables(html).some((t) => /<a\s/.test(t)),
   '[data-tone="muted"]': (html) => /data-tone="muted"/.test(bodyOnly(html)),
@@ -241,7 +243,7 @@ const SELECTOR_DETECTORS: Record<string, (html: string) => boolean> = {
 /** Elements that are inherently keyboard-focusable — the only selectors for
  * which a `focus-visible` consumer row is legitimate (§5.1 focus-visible
  * rule applies to any focusable element, not to non-interactive spans). */
-const FOCUSABLE_SELECTORS = new Set(['a'])
+const FOCUSABLE_SELECTORS = new Set(['a', '.skip'])
 
 describe('ui contrast manifest — authored §5.2 token pairs', () => {
   test('every consumer selector is registered and its tokens match the authored pair exactly', () => {

@@ -7,7 +7,7 @@
 export const THEME_CSS = `:root{
   --bg:#fff; --fg:#1a1a1a; --muted:#6b6b6b; --border:#e3e3e3; --surface:#f7f7f7;
   --accent:#0550ae; --ok:#116329; --warn:#966400; --danger:#a40e26;
-  --ok-bg:#eaf5ec; --warn-bg:#fff3d6; --danger-bg:#fbe9ec; --accent-bg:#eef4fb;
+  --ok-bg:#eaf5ec; --warn-bg:#fff3d6; --danger-bg:#fbe9ec; --accent-bg:#eef4fb; --skip-bg:#0550ae; --skip-fg:#fff;
   --fs-s:13px; --fs-m:14px; --fs-l:16px; --fs-xl:20px; --lh:1.5;
   --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:24px; --sp-6:32px;
   --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
@@ -23,7 +23,7 @@ html{font-size:var(--fs-m)}
 body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--sans);line-height:var(--lh)}
 main,header,nav,footer{display:block}
 main{max-width:var(--maxw);margin:0 auto;padding:var(--sp-4)}
-.skip{position:absolute;left:-9999px;top:0;padding:var(--sp-2) var(--sp-3);background:var(--accent);color:#fff;z-index:1}
+.skip{position:absolute;left:-9999px;top:0;padding:var(--sp-2) var(--sp-3);background:var(--skip-bg);color:var(--skip-fg);z-index:1}
 .skip:focus{left:var(--sp-3);top:var(--sp-3)}
 a{color:var(--accent)}
 .surface a,table a{color:var(--accent)}

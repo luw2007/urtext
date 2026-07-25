@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -44,6 +45,16 @@ describe('parseDevToolsActivePort', () => {
     expect(() => parseDevToolsActivePort('not-a-port\n/x\n')).toThrow(/malformed DevToolsActivePort/)
     expect(() => parseDevToolsActivePort('0\n/x\n')).toThrow(/malformed DevToolsActivePort/)
     expect(() => parseDevToolsActivePort('-1\n/x\n')).toThrow(/malformed DevToolsActivePort/)
+  })
+})
+
+describe('wrapper usage contract', () => {
+  test('documents the checker mandatory contrast manifest and source root flags', () => {
+    const path = join(__dirname, '..', 'scripts', 'ui-browser-check-wrapper.mjs')
+    const result = spawnSync(process.execPath, [path], { encoding: 'utf8' })
+    expect(result.status).toBe(2)
+    expect(result.stderr).toContain('--contrast-manifest <path>')
+    expect(result.stderr).toContain('--source-root <repo>')
   })
 })
 

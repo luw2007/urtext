@@ -1,7 +1,7 @@
 {
   "schema": "urtext.ui-contrast-consumers/2",
-  "sourceContractSha256": "92e28b84d277902a3ea29553d09320141f818bc904a3b2ded21112edb56e9b33",
-  "renderContractSha256": "3c29dccbb2a5262942b24dff5c5ec0a41f5f1c19bda121660a6d42c07eff96d4",
+  "sourceContractSha256": "10ed1b746c85ce1a54a101725b5e6537b5b9023324ac58309409cb8b74e6b44d",
+  "renderContractSha256": "aa43ca9283bb2f7badfc5b260d7c41c0173257130ae4d05fecbb7e729c10a193",
   "fixtureMatrix": [
     {
       "id": "console-quiet",
@@ -367,6 +367,8 @@
     { "id": "c-body-main-default", "page": "console", "fixture": "console-quiet", "selector": "body,main", "state": "default", "foregroundToken": "fg", "backgroundToken": "bg" },
     { "id": "c-a-default", "page": "console", "fixture": "console-quiet", "selector": "a", "state": "default", "foregroundToken": "accent", "backgroundToken": "bg" },
     { "id": "c-a-focus", "page": "console", "fixture": "console-quiet", "selector": "a", "state": "focus-visible", "foregroundToken": "accent", "backgroundToken": "bg" },
+    { "id": "c-skip-default", "page": "console", "fixture": "console-quiet", "selector": ".skip", "state": "default", "foregroundToken": "skip-fg", "backgroundToken": "skip-bg" },
+    { "id": "c-skip-focus", "page": "console", "fixture": "console-quiet", "selector": ".skip", "state": "focus-visible", "foregroundToken": "skip-fg", "backgroundToken": "skip-bg" },
     { "id": "c-table-default", "page": "console", "fixture": "console-quiet", "selector": "table", "state": "default", "foregroundToken": "fg", "backgroundToken": "surface" },
     { "id": "c-table-a-default", "page": "console", "fixture": "console-busy", "selector": "table a", "state": "default", "foregroundToken": "accent", "backgroundToken": "surface" },
     { "id": "c-muted-default", "page": "console", "fixture": "console-busy", "selector": "[data-tone=\"muted\"]", "state": "default", "foregroundToken": "muted", "backgroundToken": "bg" },
@@ -377,6 +379,8 @@
     { "id": "b-body-main-default", "page": "brief", "fixture": "brief-full", "selector": "body,main", "state": "default", "foregroundToken": "fg", "backgroundToken": "bg" },
     { "id": "b-a-default", "page": "brief", "fixture": "brief-full", "selector": "a", "state": "default", "foregroundToken": "accent", "backgroundToken": "bg" },
     { "id": "b-a-focus", "page": "brief", "fixture": "brief-full", "selector": "a", "state": "focus-visible", "foregroundToken": "accent", "backgroundToken": "bg" },
+    { "id": "b-skip-default", "page": "brief", "fixture": "brief-full", "selector": ".skip", "state": "default", "foregroundToken": "skip-fg", "backgroundToken": "skip-bg" },
+    { "id": "b-skip-focus", "page": "brief", "fixture": "brief-full", "selector": ".skip", "state": "focus-visible", "foregroundToken": "skip-fg", "backgroundToken": "skip-bg" },
     { "id": "b-muted-default", "page": "brief", "fixture": "brief-quiet", "selector": "[data-tone=\"muted\"]", "state": "default", "foregroundToken": "muted", "backgroundToken": "bg" },
     { "id": "b-ok-default", "page": "brief", "fixture": "brief-full", "selector": "[data-tone=\"ok\"]", "state": "default", "foregroundToken": "ok", "backgroundToken": "ok-bg" },
     { "id": "b-warn-default", "page": "brief", "fixture": "brief-stale", "selector": "[data-tone=\"warn\"]", "state": "default", "foregroundToken": "warn", "backgroundToken": "warn-bg" },
@@ -387,6 +391,8 @@
     { "id": "e-body-main-default", "page": "error", "fixture": "error-page", "selector": "body,main", "state": "default", "foregroundToken": "fg", "backgroundToken": "bg" },
     { "id": "e-a-default", "page": "error", "fixture": "error-page", "selector": "a", "state": "default", "foregroundToken": "accent", "backgroundToken": "bg" },
     { "id": "e-a-focus", "page": "error", "fixture": "error-page", "selector": "a", "state": "focus-visible", "foregroundToken": "accent", "backgroundToken": "bg" },
+    { "id": "e-skip-default", "page": "error", "fixture": "error-page", "selector": ".skip", "state": "default", "foregroundToken": "skip-fg", "backgroundToken": "skip-bg" },
+    { "id": "e-skip-focus", "page": "error", "fixture": "error-page", "selector": ".skip", "state": "focus-visible", "foregroundToken": "skip-fg", "backgroundToken": "skip-bg" },
     { "id": "e-alert-default", "page": "error", "fixture": "error-page", "selector": "[role=\"alert\"]", "state": "default", "foregroundToken": "danger", "backgroundToken": "danger-bg" }
   ]
 }

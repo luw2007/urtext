@@ -48,10 +48,8 @@ deviations; it is not a retroactive record of I1/I2 internals.
    校验、light/dark/reduced-motion 样式——不描述本 slice 尚未执行的真实
    browser/AX 矩阵结果，避免文档先于证据。
 
-7. **未交付项（有意，非疏漏）**：§8.3 描述的完整 cmux replay + Chrome CDP/AX
-   12 场景矩阵、`tests/ui-component-contrast.test.ts` + committed
-   `tests/ui-contrast-manifest.json`（计划 §5.2 J2 owner）、
-   `scripts/ui-acceptance-server.ts`（§6.3 item 8）在本仓库历史里尚未出现
-   （`git log`只有 I1/I2 两次集成提交），且不在本次「Change」清单范围内；
-   I3 的边界任务只新增本文件列出的三个 browser/evidence 脚本、双语命令
-   参考、静态/单元测试与本注记，不冒充执行了 §8.3 的真实浏览器矩阵。
+7. **Trusted final gate 结果**：cmux 使用 fresh refs 验证 skip-link 键盘激活、console 四导航、All Specs 五条 clause、C004 五个真实 mapping Diff、previous/next/refresh、review/explain controls 与 unknown-clause error page。Chrome 143 使用隔离 profile 和显式 CDP port，执行 console/brief/error × 1440/1024/390 × light/dark 共 18 个 summary；schema-v2 contrast manifest 的 source/render SHA 均重新计算一致，最终 998/998 assertions 通过并生成 18 张外置 screenshot。
+
+8. **真实 gate 暴露并修复的缺陷**：external ACC build 缺少本地 dependency closure；macOS `/var` 与 `/private/var` 使 compiled entry guard 静默 no-op；初版 Chrome runner 对 heading/AX/focus/motion/diff 使用固定 pass；brief 从 h1 跳到 h3；dark skip-link 白字对 accent 仅 2.85:1；HTTP probes 使用旧 route/header；Chrome profile cleanup 与进程退出竞态。每项均先由真实失败或 regression test 复现，再修到 targeted tests 与真实 Chrome gate 通过。
+
+9. **证据边界**：raw report、screenshots、fixture、ACC build 与 Chrome profile 全部位于 repo 外；fixture/build/server/profile 已清理。仓库只提交可重放 scripts、schema-v2 manifest、tests、双语文档和本注记，不提交机器相关 raw evidence。

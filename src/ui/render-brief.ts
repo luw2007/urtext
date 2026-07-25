@@ -74,10 +74,10 @@ const renderMappingDiff = (mapping: BriefMapping, index: number, risk: 'low' | '
   const range = `${mapping.filePath}:${mapping.lineStart}-${mapping.lineEnd}`
   const titleId = `blame-diff-${index}-title`
   if (mapping.diffError !== null) {
-    return `<section data-section="blame-diff-error"><h4 id="${titleId}">${esc(range)}</h4><p>${esc(mapping.diffError)}</p></section>`
+    return `<section data-section="blame-diff-error"><h3 id="${titleId}">${esc(range)}</h3><p>${esc(mapping.diffError)}</p></section>`
   }
   if (mapping.diff === null) {
-    return `<section data-section="blame-diff-empty"><h4 id="${titleId}">${esc(range)}</h4><p>映射范围自记录基线以来无代码变化</p></section>`
+    return `<section data-section="blame-diff-empty"><h3 id="${titleId}">${esc(range)}</h3><p>映射范围自记录基线以来无代码变化</p></section>`
   }
   const { added, removed } = diffLineCounts(mapping.diff)
   const { html, truncated, total } = renderDiffBody(mapping.diff, config)
@@ -142,9 +142,9 @@ ${oracleMeta(view)}
   const main = `<main id="main">
 <section id="spec-impact" aria-label="Spec impact">
 <p>${evidenceChip(view)}</p>
-<section data-section="mappings" aria-labelledby="mappings-title"><h3 id="mappings-title">映射状态</h3><p>${mappedStatus(view)}</p></section>
-<section data-section="stale-dependencies" aria-labelledby="stale-dependencies-title"><h3 id="stale-dependencies-title">Stale Dependencies / 下游依赖</h3>${dependentsHtml(view)}<p>${view.impact.affectedTasks.length} 个关联任务</p></section>
-${view.mappings.length > 0 ? '<h3>Code Blame Diff</h3>' : ''}
+<section data-section="mappings" aria-labelledby="mappings-title"><h2 id="mappings-title">映射状态</h2><p>${mappedStatus(view)}</p></section>
+<section data-section="stale-dependencies" aria-labelledby="stale-dependencies-title"><h2 id="stale-dependencies-title">Stale Dependencies / 下游依赖</h2>${dependentsHtml(view)}<p>${view.impact.affectedTasks.length} 个关联任务</p></section>
+${view.mappings.length > 0 ? '<h2>Code Blame Diff</h2>' : ''}
 ${view.mappings.map((mapping, index) => renderMappingDiff(mapping, index, view.risk, input.config)).join('')}
 </section>
 <details aria-labelledby="raw-brief-title"><summary id="raw-brief-title">原始裁决简报</summary><pre>${esc(input.text)}</pre></details>

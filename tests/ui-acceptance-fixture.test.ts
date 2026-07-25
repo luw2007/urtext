@@ -149,6 +149,16 @@ describe('S4 acceptance — external ACC_BUILD TypeScript check', () => {
     expect(existsSync(join(fixtureRoot, '.urtext/registry.sqlite'))).toBe(true)
   })
 
+  test('compiled browser checker executes its CLI guard from an external build', () => {
+    const outDir = scratch('urtext-browser-build-')
+    compileAccBuild(outDir)
+    const entry = join(outDir, 'scripts/ui-browser-check.js')
+    const result = spawnSync(process.execPath, [entry], { cwd: tmpdir(), encoding: 'utf8' })
+
+    expect(result.status).toBe(2)
+    expect(result.stderr).toContain('usage: ui-browser-check.js')
+  })
+
   test('compiles fixture + stub entries to an external outDir with zero repo/dist artifacts', () => {
     const outDir = scratch('urtext-acc-build-')
     const paths = compileAccBuild(outDir)

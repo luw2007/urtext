@@ -11,7 +11,7 @@
  * layout to run the wrapper itself.
  *
  * Usage:
- *   node scripts/ui-browser-check-wrapper.mjs --chrome <path> --check <path-to-compiled-ui-browser-check.js> --page <name>=<url> [--page <name>=<url> ...]
+ *   node scripts/ui-browser-check-wrapper.mjs --chrome <path> --check <compiled-check.js> --contrast-manifest <path> --source-root <repo> --page <name>=<url> [--page <name>=<url> ...]
  */
 import { spawn } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
@@ -65,6 +65,32 @@ export const waitForDevToolsActivePort = async (profileDir, timeoutMs = 10_000) 
   }
 }
 
+const waitForExit = (child, timeoutMs) => {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve()
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      child.removeListener('exit', onExit)
+      reject(new Error(`Chrome did not exit after ${timeoutMs}ms`))
+    }, timeoutMs)
+    const onExit = () => {
+      clearTimeout(timer)
+      resolve()
+    }
+    child.once('exit', onExit)
+  })
+}
+
+export const stopChromeAndRemoveProfile = async (chrome, profileDir) => {
+  if (chrome.exitCode === null && chrome.signalCode === null) chrome.kill('SIGTERM')
+  try {
+    await waitForExit(chrome, 5_000)
+  } catch {
+    chrome.kill('SIGKILL')
+    await waitForExit(chrome, 5_000)
+  }
+  rmSync(profileDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+}
+
 const isMain = () => {
   const arg1 = process.argv[1]
   return arg1 !== undefined && import.meta.url.endsWith(arg1.split('/').pop() ?? '\0')
@@ -76,7 +102,7 @@ if (isMain()) {
   const checkPath = readArg(args, '--check')
   if (chromePath === undefined || checkPath === undefined) {
     process.stderr.write(
-      'usage: ui-browser-check-wrapper.mjs --chrome <path> --check <compiled-ui-browser-check.js> --page <name>=<url> [--page <name>=<url> ...] [--output-dir <dir>] [--focus-steps <n>] [--diff-count <n>] [--disclosure <id>=<true|false>]\n',
+      'usage: ui-browser-check-wrapper.mjs --chrome <path> --check <compiled-ui-browser-check.js> --contrast-manifest <path> --source-root <repo> --page <name>=<url> [--page <name>=<url> ...] [--output-dir <dir>] [--focus-steps <n>] [--diff-count <n>] [--disclosure <id>=<true|false>]\n',
     )
     process.exit(2)
   }
@@ -104,8 +130,7 @@ if (isMain()) {
     check.on('exit', (code) => exited.resolve(code ?? 1))
     exitCode = await exited.promise
   } finally {
-    chrome.kill('SIGTERM')
-    rmSync(profileDir, { recursive: true, force: true })
+    await stopChromeAndRemoveProfile(chrome, profileDir)
   }
   process.exit(exitCode)
 }

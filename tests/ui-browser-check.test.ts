@@ -1,3 +1,6 @@
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, test, vi } from 'vitest'
 
 import type { CdpClient, RunCheckConfig } from '../scripts/ui-browser-check.js'
@@ -31,7 +34,49 @@ import {
   validateRealDiffCount,
   VIEWPORTS,
   waitForPageLoad,
+  verifyContrastManifest,
+  validatePageNames,
 } from '../scripts/ui-browser-check.js'
+
+describe('verifyContrastManifest', () => {
+  const root = join(__dirname, '..')
+  const manifestPath = join(__dirname, 'ui-contrast-manifest.json')
+
+  test('recomputes both current source and render contracts', () => {
+    const result = verifyContrastManifest(manifestPath, root)
+    expect(result.schema).toBe('urtext.ui-contrast-consumers/2')
+    expect(result.fileSha256).toMatch(/^[0-9a-f]{64}$/)
+    expect(result.assertions).toHaveLength(2)
+    expect(result.assertions.every((assertion) => assertion.pass)).toBe(true)
+  })
+
+  test('fails closed when the recorded source hash is stale', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'urtext-stale-contrast-'))
+    try {
+      const stale = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, unknown>
+      stale.sourceContractSha256 = '0'.repeat(64)
+      const path = join(dir, 'manifest.json')
+      writeFileSync(path, JSON.stringify(stale))
+      const result = verifyContrastManifest(path, root)
+      expect(result.assertions.find((assertion) => assertion.name.includes('source-contract'))?.pass).toBe(false)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('validatePageNames', () => {
+  test('requires exactly one console, brief, and error page with no aliases', () => {
+    expect(validatePageNames([{ name: 'console' }, { name: 'brief' }, { name: 'error' }])).toEqual([])
+    expect(validatePageNames([{ name: 'console' }, { name: 'detail' }, { name: 'error' }])).toEqual([
+      'expected exactly one brief page',
+      'unknown page name "detail"',
+    ])
+    expect(validatePageNames([{ name: 'console' }, { name: 'brief' }, { name: 'brief' }, { name: 'error' }])).toEqual([
+      'expected exactly one brief page',
+    ])
+  })
+})
 
 describe('VIEWPORTS', () => {
   test('is exactly the three required breakpoints', () => {
@@ -168,16 +213,23 @@ describe('validateRealDiffCount', () => {
     expect(validateRealDiffCount(['d1', 'd2', 'd3', 'd4', 'd5'])).toBe(true)
     expect(validateRealDiffCount(['d1', 'd2'])).toBe(false)
   })
+
+  test('non-brief pages pass only when they contain no mapping diffs', () => {
+    expect(validateRealDiffCount([], 0)).toBe(true)
+    expect(validateRealDiffCount(['unexpected'], 0)).toBe(false)
+  })
 })
 
 describe('HTTP_GUARD_CASES / evaluateHttpGuardCase', () => {
-  test('covers bad Host, wrong media type, and missing CSRF/Origin on writes', () => {
+  test('covers bad Host, wrong media type, missing CSRF, and hostile Origin on the real write route', () => {
     expect(HTTP_GUARD_CASES.map((c) => c.name)).toEqual([
       'bad-host-get',
       'wrong-media-type-post',
       'missing-csrf-post',
-      'missing-origin-post',
+      'hostile-origin-post',
     ])
+    expect(HTTP_GUARD_CASES.slice(1).every((c) => c.path === '/api/decide')).toBe(true)
+    expect(HTTP_GUARD_CASES[0]?.expectedStatus).toBe(403)
   })
 
   test('passes only when the observed status matches the expected status exactly', () => {
