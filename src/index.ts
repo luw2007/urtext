@@ -135,3 +135,27 @@ export {
   type BriefHistoryLine,
   type ClauseTarget,
 } from './brief.js'
+export {
+  baseline,
+  baselineValidation,
+  cluster,
+  coverage as distillCoverage,
+  discover,
+  l2IntentReview,
+  l2IntentReviewValidation,
+  runBaseline,
+  validate as validateDistill,
+  type BaselineEvidence,
+  type BaselineValidationReport,
+  type CoverageReport as DistillCoverageReport,
+  type DistillFacts,
+  type DomainCluster,
+  type DomainManifest,
+  type FeatureDeclaration,
+  type L2IntentReviewDomain,
+  type L2IntentReviewManifest,
+  type ObservedBaseline,
+  type ObservedBaselineGroup,
+  type ValidationReport as DistillValidationReport,
+} from './distill.js'
+export { promote, type PromotionReport } from './distill.js'

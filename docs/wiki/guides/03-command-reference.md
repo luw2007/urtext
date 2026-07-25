@@ -181,6 +181,56 @@ auto-start), the same category as the editor `git rebase -i` spawns (VISION P8).
 Hardening: loopback-only, per-session CSRF token, same-origin and
 JSON-content-type checks, request-body cap. Exit 0 on Ctrl-C.
 
+## Codebase fact distillation
+
+### `urtext distill discover`
+Scan the workspace and write a deterministic observed-facts manifest to
+`.urtext/distill/facts.json`. It records source files, tests, CLI entry points,
+the current Git HEAD, and separately declared `Implementation Evidence` and test
+oracle targets. It **does not modify canonical `specs/`** or infer product intent.
+
+### `urtext distill coverage`
+Report declared implementation-evidence paths that do not exist and observed
+source/test files that are not declared by any feature. Unowned observations are
+discovery work, not a failed claim of incomplete behavior; this command exits 0.
+
+### `urtext distill validate`
+Rebuild the facts manifest, then validate declared implementation evidence and
+`oracle:test:` targets. **Exit 1** for missing paths. It verifies references, not
+semantic equivalence between prose and code.
+
+### `urtext distill cluster`
+Write `.urtext/distill/domains.json`, an L0 inventory that assigns every observed
+source, test, and machine-contract file to exactly one deterministic structural
+domain bucket. Buckets reflect path structure, not product intent; fallback
+`platform/<top-level>` buckets are explicit ownership rather than an inferred domain.
+The command does not create or modify canonical specs.
+
+### `urtext distill baseline [validate|run]`
+Write `.urtext/distill/baseline.json`, grouping every observed test into a direct
+executable command within its structural domain. The baseline only asserts that
+existing tests are evidence at the recorded HEAD; it does not infer their product
+meaning. `validate` checks exact-once test assignment, HEAD consistency, and command
+presence. `run` executes those groups and writes `baseline-evidence.json`; source and
+contract files in domains without tests remain explicit gaps.
+
+### `urtext distill l2 [validate]`
+Write one non-normative L2 intent-review draft per structural domain under
+`.urtext/distill/l2-generated-intent-drafts/`. It records observed files, L1 test
+groups, and deferred gaps for human review; it does not assert product behavior or
+modify canonical specs. `validate` checks exact-once domain assignment, baseline
+HEAD consistency, and that each generated draft is present.
+
+### `urtext distill promote <draft> --target <feature> --confirm`
+Promote a current staged draft after one feature-level acceptance. The command
+requires a draft beneath `.urtext/distill/spec-drafts/`, a matching facts-manifest
+HEAD, and valid declared evidence. It appends only `observed` candidates carrying
+a low-risk runnable `test` or `cmd` oracle and no pending human-decision marker to
+`<feature>/clauses.md`; inferred, manual, high-risk, unresolved-oracle, and
+decision-required candidates remain in staging. It validates oracle references but
+does not execute staged commands; canonical `urtext verify` executes promoted oracles.
+It does not overwrite `spec.md`, create mappings, or record reviews, decisions, or audit verdicts.
+
 ## Exit-code summary
 
 This table is a working guide, not an exhaustive spec (the CLI in `src/cli.ts` is
@@ -198,5 +248,9 @@ authoritative):
 | `ack` | bad arguments, git failure, or a range that does not overlap the current `git diff` |
 | `review` | unknown or non-high-risk clause, bad arguments, git failure; `--approve` also: dirty worktree, missing/stale brief-hash |
 | `decide` | unknown or non-manual clause, bad arguments, git failure; high-risk `--pass` also: dirty worktree, missing/stale brief-hash |
+| `distill promote` | missing `--confirm`/target, invalid or stale draft, invalid distill declaration, duplicate target clause ID, or invalid path |
+| `distill cluster` | filesystem write failure |
+| `distill baseline validate` | stale/mismatched inventory, test assignment, or missing command |
+| `distill baseline run` | any generated test group fails |
 
 All other commands exit 0 on success.

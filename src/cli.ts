@@ -33,11 +33,12 @@ import { join } from 'node:path'
 
 import DatabaseConstructor from 'better-sqlite3'
 
-import { coverage, exportRequest, importVerdicts, type AuditVerdictInput } from './audit.js'
+import { coverage as auditCoverage, exportRequest, importVerdicts, type AuditVerdictInput } from './audit.js'
 import { buildBrief, renderBriefText } from './brief.js'
 import { runAuditAgent, type AuditorId } from './audit-runner.js'
-import { blame, detectUnmapped, recordAck, recordMapping } from './dwarf.js'
 import { listDecisions, recordDecision } from './decision.js'
+import { baseline, baselineValidation, cluster, coverage as distillCoverage, discover, distillUsage, l2IntentReview, l2IntentReviewValidation, promote, runBaseline, validate } from './distill.js'
+import { blame, detectUnmapped, recordAck, recordMapping } from './dwarf.js'
 import { adjudicate } from './gate.js'
 import { impact } from './linker.js'
 import { openRegistry } from './registry.js'
@@ -93,6 +94,8 @@ const USAGE = [
   '  urtext ui [--port <n>] [--no-open]',
   '                   Open a local review panel to adjudicate manual clauses by',
   '                   click; writes the Decision ledger. Ctrl-C to quit.',
+  '  urtext decisions List the Decision ledger, newest first.',
+  distillUsage(),
   '',
   'The registry lives at .urtext/registry.sqlite under the current directory.',
 ].join('\n')
@@ -183,6 +186,7 @@ const run = (argv: string[]): number => {
     review: true,
     decide: true,
     decisions: true,
+    distill: true,
   }
   if (COMMANDS[command] !== true) {
     console.error(`Unknown command: ${command}\n\n${USAGE}`)
@@ -192,6 +196,94 @@ const run = (argv: string[]): number => {
   const workspaceRoot = process.cwd()
   const db = openWorkspaceRegistry(workspaceRoot)
   try {
+    if (command === 'distill') {
+      const mode = argv[1]
+      const facts = discover(workspaceRoot)
+      if (mode === 'discover') {
+        console.log(JSON.stringify(facts, null, 2))
+        return 0
+      }
+      if (mode === 'cluster') {
+        console.log(JSON.stringify(cluster(facts, workspaceRoot), null, 2))
+        return 0
+      }
+      if (mode === 'baseline') {
+        const domains = cluster(facts, workspaceRoot)
+        const manifest = baseline(facts, domains, workspaceRoot)
+        if (argv[2] === 'validate') {
+          const report = baselineValidation(facts, domains, manifest)
+          for (const error of report.errors) console.error(`  ✗ ${error}`)
+          if (report.errors.length > 0) return 1
+          console.log(`Baseline is valid: ${manifest.groups.length} executable groups, ${manifest.gaps.length} gaps.`)
+          return 0
+        }
+        if (argv[2] === 'run') {
+          const evidence = runBaseline(manifest, workspaceRoot)
+          const failures = evidence.groups.filter((group) => group.verdict === 'fail')
+          console.log(`${evidence.groups.length - failures.length} pass, ${failures.length} fail`)
+          return failures.length === 0 ? 0 : 1
+        }
+        console.log(JSON.stringify(manifest, null, 2))
+        return 0
+      }
+      if (mode === 'l2') {
+        const domains = cluster(facts, workspaceRoot)
+        const observedBaseline = baseline(facts, domains, workspaceRoot)
+        const review = l2IntentReview(facts, domains, observedBaseline, workspaceRoot)
+        if (argv[2] === 'validate') {
+          const report = l2IntentReviewValidation(facts, domains, observedBaseline, review, workspaceRoot)
+          for (const error of report.errors) console.error(`  ✗ ${error}`)
+          if (report.errors.length > 0) return 1
+          console.log(`L2 review inventory is valid: ${review.domains.length} structural domains.`)
+          return 0
+        }
+        console.log(JSON.stringify(review, null, 2))
+        return 0
+      }
+      if (mode === 'coverage') {
+        const report = distillCoverage(facts, workspaceRoot)
+        for (const gap of report.missingEvidence) {
+          console.log(`  ✗ ${gap.feature}: missing declared evidence ${gap.path}`)
+        }
+        for (const path of report.unownedObservedFiles) {
+          console.log(`  ? unowned observed file ${path}`)
+        }
+        console.log(`\n${report.missingEvidence.length} missing declaration(s), ${report.unownedObservedFiles.length} unowned observed file(s)`)
+        return 0
+      }
+      if (mode === 'validate') {
+        const report = validate(facts, workspaceRoot)
+        for (const error of report.errors) {
+          console.log(`  ✗ ${error.feature}: [${error.kind}] ${error.path}`)
+        }
+        if (report.errors.length > 0) {
+          console.error(`\n${report.errors.length} distill validation failure(s).`)
+          return 1
+        }
+        console.log('Distill declarations are valid.')
+        return 0
+      }
+      if (mode === 'promote') {
+        const draft = argv[2]
+        const targetFlag = argv.indexOf('--target')
+        const target = targetFlag >= 0 ? argv[targetFlag + 1] : undefined
+        if (!draft || !target || !argv.includes('--confirm')) {
+          console.error('Usage: urtext distill promote <draft> --target <feature> --confirm')
+          return 1
+        }
+        try {
+          const report = promote(workspaceRoot, draft, target, true)
+          console.log(`promoted: ${report.promoted.join(', ') || '(none)'}`)
+          console.log(`retained: ${report.retained.join(', ') || '(none)'}`)
+          return 0
+        } catch (error) {
+          console.error(error instanceof Error ? error.message : String(error))
+          return 1
+        }
+      }
+      console.error('Usage: urtext distill <discover|coverage|validate|cluster|baseline [validate|run]|l2 [validate]|promote>')
+      return 1
+    }
     if (command === 'audit') {
       const mode = argv[1]
       scanWorkspace(db, workspaceRoot)
@@ -216,7 +308,7 @@ const run = (argv: string[]): number => {
           console.error(`[${outcome.code}] ${outcome.message}`)
           return 1
         }
-        const report = coverage(db)
+        const report = auditCoverage(db)
         const cov = report.coverage === null ? 'n/a' : `${Math.round(report.coverage * 100)}%`
         console.log(
           `imported ${outcome.count} verdict(s) — coverage ${cov} (${report.counts.agree} agree, ${report.counts.disagree} disagree, ${report.counts.unaudited} unaudited)`
@@ -247,7 +339,7 @@ const run = (argv: string[]): number => {
           console.error(`[${outcome.code}] ${outcome.message}`)
           return 2
         }
-        const report = coverage(db)
+        const report = auditCoverage(db)
         const cov = report.coverage === null ? 'n/a' : `${Math.round(report.coverage * 100)}%`
         console.log(`imported ${outcome.count} verdict(s) — coverage ${cov} (${report.counts.agree} agree, ${report.counts.disagree} disagree, ${report.counts.unaudited} unaudited)`)
         console.error(`D3 remains operator responsibility: selected auditor ${id}${model ? `:${model}` : ''}${profile ? `@${profile}` : ''}; ensure it differs from the implementation preset.`)
