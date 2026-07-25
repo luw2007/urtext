@@ -5,11 +5,14 @@ import { describe, expect, test, vi } from 'vitest'
 
 import type { CdpClient, RunCheckConfig } from '../scripts/ui-browser-check.js'
 import {
+  accessibleNameSource,
+  attachNetworkGuard,
   buildAssertions,
   captureFocusOrder,
   checkContrastPairs,
   computeExitCode,
   contrastRatio,
+  decideFetchAction,
   evaluateHttpGuardCase,
   extractAxNodes,
   extractContrastPairs,
@@ -19,18 +22,25 @@ import {
   extractLandmarks,
   extractOverflow,
   extractReducedMotion,
+  extractSelectorCounts,
   HTTP_GUARD_CASES,
   hasHorizontalOverflow,
+  linkSelectorToAxNode,
   missingAxLabels,
   missingLandmarks,
+  PAGE_SPECIFIC_SELECTORS,
   reducedMotionHonored,
+  resolveSelectorBackendNodeId,
   rgbStringToHex,
   runCheckAtViewport,
   sanitizeRequestRecord,
+  validateAxTreeClosure,
   validateDisclosure,
   validateFocusOrder,
   validateHeadingOrder,
+  validatePageSpecificSelectors,
   validateRealDiffCount,
+  verifyButtonDisablesDuringSubmit,
   VIEWPORTS,
   waitForPageLoad,
   verifyContrastManifest,
@@ -325,6 +335,33 @@ describe('extractAxNodes', () => {
       { role: 'link', name: 'Home', interactive: true },
     ])
   })
+
+  test('carries nodeId/parentId/backendDOMNodeId/nameSources through for DOM<->AX linkage', async () => {
+    const client = fakeClient({
+      'Accessibility.getFullAXTree': {
+        nodes: [
+          {
+            nodeId: '5',
+            parentId: '1',
+            backendDOMNodeId: 42,
+            role: { value: 'button' },
+            name: { value: 'Run audit', sources: [{ type: 'contents', attempted: true }] },
+            ignored: false,
+          },
+        ],
+      },
+    })
+    const [node] = await extractAxNodes(client)
+    expect(node).toEqual({
+      role: 'button',
+      name: 'Run audit',
+      interactive: true,
+      nodeId: '5',
+      parentId: '1',
+      backendDOMNodeId: 42,
+      nameSources: ['contents'],
+    })
+  })
 })
 
 describe('extractContrastPairs', () => {
@@ -514,5 +551,233 @@ describe('runCheckAtViewport / buildAssertions / computeExitCode — full wiring
     const bad = await runCheckAtViewport(buildDispatcher({ landmarks: [] }), 'http://127.0.0.1:9', 'error', 1440, 'light', config)
     expect(computeExitCode([ok, bad])).toBe(1)
     expect(computeExitCode([ok])).toBe(0)
+  })
+})
+
+describe('accessibleNameSource', () => {
+  test('reports the first attempted name source', () => {
+    expect(accessibleNameSource({ role: 'button', name: 'Run audit', interactive: true, nameSources: ['contents', 'attribute'] })).toBe('contents')
+  })
+
+  test('reports "unknown" when a name exists but no source was recorded', () => {
+    expect(accessibleNameSource({ role: 'button', name: 'Run audit', interactive: true })).toBe('unknown')
+  })
+
+  test('reports "none" for an unnamed node', () => {
+    expect(accessibleNameSource({ role: 'generic', name: '  ', interactive: false })).toBe('none')
+  })
+})
+
+describe('validateAxTreeClosure', () => {
+  test('a fully-closed tree (every parentId resolves) has no errors', () => {
+    const nodes = [
+      { role: 'RootWebArea', name: '', interactive: false, nodeId: '1' },
+      { role: 'button', name: 'Run audit', interactive: true, nodeId: '2', parentId: '1' },
+    ]
+    expect(validateAxTreeClosure(nodes)).toEqual([])
+  })
+
+  test('an injected dangling parentId is reported as a closure error', () => {
+    const nodes = [{ role: 'button', name: 'Run audit', interactive: true, nodeId: '2', parentId: '999' }]
+    expect(validateAxTreeClosure(nodes)).toEqual(['AX node 2 (button) has dangling parentId 999'])
+  })
+})
+
+describe('resolveSelectorBackendNodeId', () => {
+  test('resolves a selector through DOM.getDocument -> DOM.querySelector -> DOM.describeNode', async () => {
+    const client = fakeClient({
+      'DOM.getDocument': { root: { nodeId: 1 } },
+      'DOM.querySelector': { nodeId: 5 },
+      'DOM.describeNode': { node: { backendNodeId: 42 } },
+    })
+    await expect(resolveSelectorBackendNodeId(client, '#explain-btn')).resolves.toBe(42)
+  })
+
+  test('an injected missing selector (nodeId 0) throws instead of resolving a fake id', async () => {
+    const client = fakeClient({
+      'DOM.getDocument': { root: { nodeId: 1 } },
+      'DOM.querySelector': { nodeId: 0 },
+    })
+    await expect(resolveSelectorBackendNodeId(client, '#missing')).rejects.toThrow(/selector not found in DOM/)
+  })
+})
+
+describe('linkSelectorToAxNode', () => {
+  test('links a selector to the AX node that carries the matching backendDOMNodeId', async () => {
+    const client = fakeClient({
+      'DOM.getDocument': { root: { nodeId: 1 } },
+      'DOM.querySelector': { nodeId: 5 },
+      'DOM.describeNode': { node: { backendNodeId: 42 } },
+    })
+    const axNodes = [{ role: 'button', name: 'Run audit', interactive: true, backendDOMNodeId: 42 }]
+    await expect(linkSelectorToAxNode(client, '#audit-runner', axNodes)).resolves.toEqual({
+      selector: '#audit-runner',
+      backendDOMNodeId: 42,
+      axNode: axNodes[0],
+    })
+  })
+
+  test('an injected AX tree missing the resolved backendDOMNodeId fails linkage instead of silently passing', async () => {
+    const client = fakeClient({
+      'DOM.getDocument': { root: { nodeId: 1 } },
+      'DOM.querySelector': { nodeId: 5 },
+      'DOM.describeNode': { node: { backendNodeId: 42 } },
+    })
+    const axNodes = [{ role: 'button', name: 'Run audit', interactive: true, backendDOMNodeId: 7 }]
+    await expect(linkSelectorToAxNode(client, '#audit-runner', axNodes)).rejects.toThrow(/no AX node carries backendDOMNodeId 42/)
+  })
+})
+
+describe('extractSelectorCounts / validatePageSpecificSelectors', () => {
+  test('parses real per-selector counts from the injected client', async () => {
+    const client = fakeClient({ 'Runtime.evaluate': evalValue({ '#audit-runner': 1, '#explain-btn': 0 }) })
+    await expect(extractSelectorCounts(client, ['#audit-runner', '#explain-btn'])).resolves.toEqual({ '#audit-runner': 1, '#explain-btn': 0 })
+  })
+
+  test('console page with the expected counts passes', () => {
+    expect(validatePageSpecificSelectors('console', { '#audit-runner': 1, '#explain-btn': 0 }, PAGE_SPECIFIC_SELECTORS)).toEqual([])
+  })
+
+  test('an injected leaked explain button on the console page fails page-specific presence', () => {
+    expect(validatePageSpecificSelectors('console', { '#audit-runner': 1, '#explain-btn': 1 }, PAGE_SPECIFIC_SELECTORS)).toEqual([
+      'console:#explain-btn: expected count 0, got 1',
+    ])
+  })
+
+  test('an injected missing audit-runner on the console page fails page-specific presence', () => {
+    expect(validatePageSpecificSelectors('console', { '#audit-runner': 0, '#explain-btn': 0 }, PAGE_SPECIFIC_SELECTORS)).toEqual([
+      'console:#audit-runner: expected count 1, got 0',
+    ])
+  })
+
+  test('the error page has neither explain nor audit-runner', () => {
+    expect(validatePageSpecificSelectors('error', { '#audit-runner': 0, '#explain-btn': 0 }, PAGE_SPECIFIC_SELECTORS)).toEqual([])
+  })
+})
+
+describe('decideFetchAction', () => {
+  test('continues a same-origin request', () => {
+    expect(decideFetchAction('http://127.0.0.1:4173/api/decide', 'http://127.0.0.1:4173')).toEqual({ action: 'continue', originClass: 'same-origin' })
+  })
+
+  test('an injected external-origin request is failed, not silently allowed', () => {
+    expect(decideFetchAction('https://evil.example/track', 'http://127.0.0.1:4173')).toEqual({ action: 'fail', originClass: 'external' })
+  })
+})
+
+describe('attachNetworkGuard', () => {
+  const fakeClientWithEvents = (): CdpClient & { emit: (method: string, params: unknown) => void } => {
+    const handlers = new Map<string, ((params: unknown) => void)[]>()
+    return {
+      send: vi.fn(async () => ({})),
+      on: vi.fn((method: string, handler: (params: unknown) => void) => {
+        const list = handlers.get(method) ?? []
+        list.push(handler)
+        handlers.set(method, list)
+      }),
+      close: vi.fn(),
+      emit: (method: string, params: unknown) => {
+        for (const handler of handlers.get(method) ?? []) handler(params)
+      },
+    }
+  }
+
+  test('enables Network and Fetch with a catch-all request pattern before any request can be classified', async () => {
+    const client = fakeClientWithEvents()
+    await attachNetworkGuard(client, 'http://127.0.0.1:4173')
+    expect(client.send).toHaveBeenCalledWith('Network.enable')
+    expect(client.send).toHaveBeenCalledWith('Fetch.enable', { patterns: [{ urlPattern: '*', requestStage: 'Request' }] })
+  })
+
+  test('actively fails an external-origin request instead of merely observing it', async () => {
+    const client = fakeClientWithEvents()
+    const guard = await attachNetworkGuard(client, 'http://127.0.0.1:4173')
+    client.emit('Fetch.requestPaused', { requestId: 'req-1', request: { url: 'https://evil.example/track' }, resourceType: 'Image' })
+    expect(client.send).toHaveBeenCalledWith('Fetch.failRequest', { requestId: 'req-1', errorReason: 'BlockedByClient' })
+    expect(client.send).not.toHaveBeenCalledWith('Fetch.continueRequest', expect.anything())
+    expect(guard.getRecords()).toEqual([{ originClass: 'external', resourceType: 'Image', status: null }])
+  })
+
+  test('continues a same-origin request', async () => {
+    const client = fakeClientWithEvents()
+    const guard = await attachNetworkGuard(client, 'http://127.0.0.1:4173')
+    client.emit('Fetch.requestPaused', { requestId: 'req-2', request: { url: 'http://127.0.0.1:4173/style.css' }, resourceType: 'Stylesheet' })
+    expect(client.send).toHaveBeenCalledWith('Fetch.continueRequest', { requestId: 'req-2' })
+    expect(guard.getRecords()).toEqual([{ originClass: 'same-origin', resourceType: 'Stylesheet', status: null }])
+  })
+
+  test('sanitized records never carry the raw request URL', async () => {
+    const client = fakeClientWithEvents()
+    const guard = await attachNetworkGuard(client, 'http://127.0.0.1:4173')
+    client.emit('Fetch.requestPaused', { requestId: 'req-3', request: { url: 'https://evil.example/track?token=secret' }, resourceType: 'XHR' })
+    const record = guard.getRecords()[0] as unknown as Record<string, unknown>
+    expect(Object.keys(record).sort()).toEqual(['originClass', 'resourceType', 'status'])
+    expect(JSON.stringify(record)).not.toContain('evil.example')
+  })
+})
+
+describe('verifyButtonDisablesDuringSubmit', () => {
+  /** A stateful fake CdpClient: `.disabled` is `false`, then flips `true` right after the real click dispatch, then `false` again after `reenableAfterPolls` reads. */
+  const buildDisableFlow = (opts: { startsDisabled?: boolean; reenableAfterPolls?: number | null }): CdpClient => {
+    const startsDisabled = opts.startsDisabled ?? false
+    const reenableAfterPolls = opts.reenableAfterPolls === undefined ? 1 : opts.reenableAfterPolls
+    let clicked = false
+    let pollsSinceClick = 0
+    return {
+      send: vi.fn(async (method: string) => {
+        if (method === 'DOM.getDocument') return { root: { nodeId: 1 } }
+        if (method === 'DOM.querySelector') return { nodeId: 9 }
+        if (method === 'DOM.getBoxModel') return { model: { content: [0, 0, 10, 0, 10, 10, 0, 10] } }
+        if (method === 'Input.dispatchMouseEvent') {
+          clicked = true
+          return {}
+        }
+        if (method === 'Runtime.evaluate') {
+          if (startsDisabled) return { result: { value: true } }
+          if (!clicked) return { result: { value: false } }
+          pollsSinceClick += 1
+          if (reenableAfterPolls === null) return { result: { value: true } }
+          return { result: { value: pollsSinceClick <= reenableAfterPolls } }
+        }
+        throw new Error(`unexpected ${method}`)
+      }),
+      close: vi.fn(),
+    }
+  }
+
+  test('a real click disables the button during the request and re-enables it once settled', async () => {
+    const client = buildDisableFlow({ reenableAfterPolls: 1 })
+    const result = await verifyButtonDisablesDuringSubmit(client, '#explain-btn', 500, 1)
+    expect(result).toEqual({ selector: '#explain-btn', initialDisabled: false, disabledDuringRequest: true, reenabled: true, pass: true })
+    expect(client.send).toHaveBeenCalledWith('Input.dispatchMouseEvent', expect.objectContaining({ type: 'mousePressed' }))
+    expect(client.send).not.toHaveBeenCalledWith('Runtime.evaluate', expect.objectContaining({ expression: expect.stringContaining('.disabled=') }))
+  })
+
+  test('an injected already-disabled button fails the check instead of a false pass', async () => {
+    const client = buildDisableFlow({ startsDisabled: true })
+    const result = await verifyButtonDisablesDuringSubmit(client, '#explain-btn', 200, 1)
+    expect(result.pass).toBe(false)
+    expect(result.initialDisabled).toBe(true)
+  })
+
+  test('an injected button that never re-enables times out and fails the check', async () => {
+    const client = buildDisableFlow({ reenableAfterPolls: null })
+    const result = await verifyButtonDisablesDuringSubmit(client, '#explain-btn', 60, 10)
+    expect(result.disabledDuringRequest).toBe(true)
+    expect(result.reenabled).toBe(false)
+    expect(result.pass).toBe(false)
+  })
+
+  test('an injected selector that matches nothing in the DOM throws rather than faking a result', async () => {
+    const client: CdpClient = {
+      send: vi.fn(async (method: string) => {
+        if (method === 'Runtime.evaluate') return { result: { value: false } }
+        if (method === 'DOM.getDocument') return { root: { nodeId: 1 } }
+        if (method === 'DOM.querySelector') return { nodeId: 0 }
+        throw new Error(`unexpected ${method}`)
+      }),
+      close: vi.fn(),
+    }
+    await expect(verifyButtonDisablesDuringSubmit(client, '#missing')).rejects.toThrow(/selector not found in DOM/)
   })
 })
