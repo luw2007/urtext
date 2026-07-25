@@ -54,7 +54,7 @@ describe('verifyContrastManifest', () => {
 
   test('recomputes both current source and render contracts', () => {
     const result = verifyContrastManifest(manifestPath, root)
-    expect(result.schema).toBe('urtext.ui-contrast-consumers/2')
+    expect(result.schema).toBe('urtext.ui-contrast-consumers/3')
     expect(result.fileSha256).toMatch(/^[0-9a-f]{64}$/)
     expect(result.assertions).toHaveLength(2)
     expect(result.assertions.every((assertion) => assertion.pass)).toBe(true)
@@ -76,13 +76,23 @@ describe('verifyContrastManifest', () => {
 })
 
 describe('validatePageNames', () => {
-  test('requires exactly one console, brief, and error page with no aliases', () => {
-    expect(validatePageNames([{ name: 'console' }, { name: 'brief' }, { name: 'error' }])).toEqual([])
-    expect(validatePageNames([{ name: 'console' }, { name: 'detail' }, { name: 'error' }])).toEqual([
-      'expected exactly one brief page',
+  const SEVEN_PAGES = [
+    { name: 'console' },
+    { name: 'agent' },
+    { name: 'specs' },
+    { name: 'specs-page-2' },
+    { name: 'decisions' },
+    { name: 'brief' },
+    { name: 'error' },
+  ]
+
+  test('requires exactly one of each of the seven approved pages with no aliases', () => {
+    expect(validatePageNames(SEVEN_PAGES)).toEqual([])
+    expect(validatePageNames([...SEVEN_PAGES.filter((p) => p.name !== 'agent'), { name: 'detail' }])).toEqual([
+      'expected exactly one agent page',
       'unknown page name "detail"',
     ])
-    expect(validatePageNames([{ name: 'console' }, { name: 'brief' }, { name: 'brief' }, { name: 'error' }])).toEqual([
+    expect(validatePageNames([...SEVEN_PAGES, { name: 'brief' }])).toEqual([
       'expected exactly one brief page',
     ])
   })
@@ -193,13 +203,13 @@ describe('reducedMotionHonored', () => {
 describe('validateDisclosure', () => {
   test('flags a mismatch between observed and expected open state', () => {
     const errors = validateDisclosure(
-      { 'agent-lane': true, 'raw-brief': false },
+      { 'blame-diff': true, 'raw-brief': false },
       [
-        { id: 'agent-lane', expectedOpen: false },
+        { id: 'blame-diff', expectedOpen: false },
         { id: 'raw-brief', expectedOpen: false },
       ],
     )
-    expect(errors).toEqual(['agent-lane: expected open=false, got open=true'])
+    expect(errors).toEqual(['blame-diff: expected open=false, got open=true'])
   })
 })
 
@@ -308,8 +318,8 @@ describe('extractReducedMotion', () => {
 
 describe('extractDisclosureState', () => {
   test('parses real data-section keyed open state from the injected client', async () => {
-    const client = fakeClient({ 'Runtime.evaluate': evalValue({ 'agent-lane': true }) })
-    await expect(extractDisclosureState(client)).resolves.toEqual({ 'agent-lane': true })
+    const client = fakeClient({ 'Runtime.evaluate': evalValue({ 'blame-diff': true }) })
+    await expect(extractDisclosureState(client)).resolves.toEqual({ 'blame-diff': true })
   })
 })
 
@@ -430,7 +440,7 @@ describe('runCheckAtViewport / buildAssertions / computeExitCode — full wiring
     const headings = overrides.headings ?? [{ level: 1, text: 'h' }]
     const overflow = overrides.overflow ?? { scrollWidth: 1440, clientWidth: 1440 }
     const motion = overrides.motion ?? { transition: 'none', animation: 'none' }
-    const disclosure = overrides.disclosure ?? { 'agent-lane': false }
+    const disclosure = overrides.disclosure ?? { 'blame-diff': false }
     const diffIds = overrides.diffIds ?? ['d1', 'd2', 'd3', 'd4', 'd5']
     const contrast = overrides.contrast ?? [{ label: 'p-0', fg: 'rgb(26, 26, 26)', bg: 'rgb(255, 255, 255)' }]
     const focusIds = overrides.focusIds ?? ['skip-link']
@@ -462,7 +472,7 @@ describe('runCheckAtViewport / buildAssertions / computeExitCode — full wiring
   const config: RunCheckConfig = {
     focusSteps: 1,
     expectedDiffCount: 5,
-    disclosureExpectations: [{ id: 'agent-lane', expectedOpen: false }],
+    disclosureExpectations: [{ id: 'blame-diff', expectedOpen: false }],
     guardCases: [],
   }
 
@@ -525,7 +535,7 @@ describe('runCheckAtViewport / buildAssertions / computeExitCode — full wiring
   })
 
   test('an injected disclosure state mismatch fails its assertion', async () => {
-    const client = buildDispatcher({ disclosure: { 'agent-lane': true } })
+    const client = buildDispatcher({ disclosure: { 'blame-diff': true } })
     const summary = await runCheckAtViewport(client, 'http://127.0.0.1:9', 'console', 1440, 'light', config)
     expect(summary.disclosureErrors).toHaveLength(1)
     expect(computeExitCode([summary])).toBe(1)
@@ -694,18 +704,18 @@ describe('extractSelectorCounts / validatePageSpecificSelectors', () => {
   })
 
   test('console page with the expected counts passes', () => {
-    expect(validatePageSpecificSelectors('console', { '#audit-runner': 1, '#explain-btn': 0 }, PAGE_SPECIFIC_SELECTORS)).toEqual([])
+    expect(validatePageSpecificSelectors('console', { '#audit-runner': 0, '#explain-btn': 0 }, PAGE_SPECIFIC_SELECTORS)).toEqual([])
   })
 
   test('an injected leaked explain button on the console page fails page-specific presence', () => {
-    expect(validatePageSpecificSelectors('console', { '#audit-runner': 1, '#explain-btn': 1 }, PAGE_SPECIFIC_SELECTORS)).toEqual([
+    expect(validatePageSpecificSelectors('console', { '#audit-runner': 0, '#explain-btn': 1 }, PAGE_SPECIFIC_SELECTORS)).toEqual([
       'console:#explain-btn: expected count 0, got 1',
     ])
   })
 
-  test('an injected missing audit-runner on the console page fails page-specific presence', () => {
-    expect(validatePageSpecificSelectors('console', { '#audit-runner': 0, '#explain-btn': 0 }, PAGE_SPECIFIC_SELECTORS)).toEqual([
-      'console:#audit-runner: expected count 1, got 0',
+  test('an injected missing audit-runner on the agent page fails page-specific presence', () => {
+    expect(validatePageSpecificSelectors('agent', { '#audit-runner': 0, '#explain-btn': 0 }, PAGE_SPECIFIC_SELECTORS)).toEqual([
+      'agent:#audit-runner: expected count 1, got 0',
     ])
   })
 

@@ -1,19 +1,15 @@
 {
-  "schema": "urtext.ui-contrast-consumers/2",
-  "sourceContractSha256": "2910935fa0071666ae7a4c6f8659b77a03ffcf404da88830a67582f29c70d75c",
-  "renderContractSha256": "1d086368aaca3f3360c77533505a964c649e030851c5277d8bae14e3789bf73b",
+  "schema": "urtext.ui-contrast-consumers/3",
+  "sourceContractSha256": "c5d5bf34ddc099af39f3a13408822aceabe530d335bf94f9630ac67870a75970",
+  "renderContractSha256": "7e158728e5c0349f0c0d4506aa702b8f6da412b59f8c190b7bbc27793f0eafe7",
   "fixtureMatrix": [
     {
       "id": "console-quiet",
       "page": "console",
-      "branches": [
-        "console.human.empty",
-        "console.agentLane.open",
-        "console.unmapped.clean",
-        "console.wip.normal",
-        "console.audit.absent",
-        "console.decided.empty"
-      ],
+      "route": "queue",
+      "pageNumber": 1,
+      "pageSize": 20,
+      "branches": ["console.route.queue", "console.pagination.single", "console.human.empty", "console.unmapped.clean", "console.wip.normal"],
       "csrfToken": "csrf-token-1",
       "snapshot": {
         "head": "1111111111111111111111111111111111111111",
@@ -35,16 +31,11 @@
     {
       "id": "console-busy",
       "page": "console",
-      "branches": [
-        "console.human.nonEmpty",
-        "console.agentLane.closed",
-        "console.unmapped.clean",
-        "console.wip.exceeded",
-        "console.audit.present",
-        "console.decided.nonEmpty"
-      ],
+      "route": "queue",
+      "pageNumber": 1,
+      "pageSize": 20,
+      "branches": ["console.route.queue", "console.pagination.single", "console.human.nonEmpty", "console.unmapped.hunks", "console.wip.exceeded"],
       "csrfToken": "csrf-token-2",
-      "auditResult": "Imported 3 verdict(s) from Claude Code.",
       "snapshot": {
         "head": "2222222222222222222222222222222222222222",
         "dirty": true,
@@ -58,7 +49,7 @@
               "lane": "human",
               "primary": "manual_undecided",
               "reasons": ["manual_undecided"],
-              "next": "decide pass/fail",
+              "next": "urtext brief <key>, then urtext decide <key> --pass|--fail",
               "specPath": "specs/a/spec.md",
               "clauseId": "C001",
               "title": "Widget contrast",
@@ -80,58 +71,20 @@
           "counts": { "agent": 1, "human": 1, "autoPass": 2 },
           "wip": { "limit": 1, "exceeded": true }
         },
-        "clauses": [
-          {
-            "specPath": "specs/a/spec.md",
-            "clauseId": "C001",
-            "title": "Widget contrast",
-            "risk": "high",
-            "decisionVerdict": "pass",
-            "evidenceVerdict": "pass",
-            "stale": false,
-            "actionable": false
-          },
-          {
-            "specPath": "specs/a/spec.md",
-            "clauseId": "C002",
-            "title": "Widget audit",
-            "risk": "low",
-            "decisionVerdict": "fail",
-            "evidenceVerdict": "fail",
-            "stale": false,
-            "actionable": false
-          },
-          {
-            "specPath": "specs/a/spec.md",
-            "clauseId": "C003",
-            "title": "Widget pending",
-            "risk": "low",
-            "decisionVerdict": "none",
-            "evidenceVerdict": "pending",
-            "stale": false,
-            "actionable": false
-          },
-          {
-            "specPath": "specs/a/spec.md",
-            "clauseId": "C004",
-            "title": "Widget unaudited",
-            "risk": "low",
-            "decisionVerdict": "none",
-            "evidenceVerdict": "missing",
-            "stale": false,
-            "actionable": false
-          }
-        ],
+        "clauses": [],
         "decided": 2,
         "totalManual": 4,
-        "unmapped": [],
+        "unmapped": [{ "filePath": "src/foo.ts", "lineStart": 10, "lineEnd": 20 }],
         "unmappedError": null
       }
     },
     {
-      "id": "console-unmapped-hunks",
+      "id": "console-unmapped-error",
       "page": "console",
-      "branches": ["console.unmapped.hunks"],
+      "route": "queue",
+      "pageNumber": 1,
+      "pageSize": 20,
+      "branches": ["console.route.queue", "console.pagination.single", "console.unmapped.error"],
       "csrfToken": "csrf-token-3",
       "snapshot": {
         "head": "3333333333333333333333333333333333333333",
@@ -146,21 +99,87 @@
         "clauses": [],
         "decided": 0,
         "totalManual": 0,
-        "unmapped": [{ "filePath": "src/foo.ts", "lineStart": 10, "lineEnd": 20 }],
-        "unmappedError": null
+        "unmapped": [],
+        "unmappedError": "git diff failed: fatal: ambiguous argument 'HEAD'"
       }
     },
     {
-      "id": "console-unmapped-error",
+      "id": "agent-busy",
       "page": "console",
-      "branches": ["console.unmapped.error"],
+      "route": "agent",
+      "pageNumber": 1,
+      "pageSize": 2,
+      "branches": ["console.route.agent", "console.pagination.first", "console.auditRunner.enabled", "console.audit.present"],
       "csrfToken": "csrf-token-4",
+      "auditResult": "Imported 3 verdict(s) from Claude Code.",
       "snapshot": {
         "head": "4444444444444444444444444444444444444444",
         "dirty": false,
         "status": {
           "schema": "urtext.status/1",
           "head": "4444444444444444444444444444444444444444",
+          "items": [
+            {
+              "key": "specs/a/spec.md#C002",
+              "kind": "clause",
+              "lane": "agent",
+              "primary": "unaudited",
+              "reasons": ["unaudited"],
+              "next": "run audit",
+              "specPath": "specs/a/spec.md",
+              "clauseId": "C002",
+              "title": "Widget audit",
+              "risk": "low"
+            },
+            {
+              "key": "specs/a/spec.md#C003",
+              "kind": "clause",
+              "lane": "agent",
+              "primary": "missing_evidence",
+              "reasons": ["missing_evidence"],
+              "next": "run `urtext verify`",
+              "specPath": "specs/a/spec.md",
+              "clauseId": "C003",
+              "title": "Widget pending",
+              "risk": "high"
+            },
+            {
+              "key": "specs/a/spec.md#C004",
+              "kind": "clause",
+              "lane": "agent",
+              "primary": "stale",
+              "reasons": ["stale"],
+              "next": "upstream changed — re-run `urtext verify`",
+              "specPath": "specs/a/spec.md",
+              "clauseId": "C004",
+              "title": "Widget stale",
+              "risk": "low"
+            }
+          ],
+          "counts": { "agent": 3, "human": 0, "autoPass": 0 },
+          "wip": { "limit": 10, "exceeded": false }
+        },
+        "clauses": [],
+        "decided": 0,
+        "totalManual": 0,
+        "unmapped": [],
+        "unmappedError": null
+      }
+    },
+    {
+      "id": "agent-zero",
+      "page": "console",
+      "route": "agent",
+      "pageNumber": 1,
+      "pageSize": 20,
+      "branches": ["console.route.agent", "console.pagination.single", "console.auditRunner.disabled", "console.audit.absent"],
+      "csrfToken": "csrf-token-5",
+      "snapshot": {
+        "head": "5555555555555555555555555555555555555555",
+        "dirty": false,
+        "status": {
+          "schema": "urtext.status/1",
+          "head": "5555555555555555555555555555555555555555",
           "items": [],
           "counts": { "agent": 0, "human": 0, "autoPass": 0 },
           "wip": { "limit": 10, "exceeded": false }
@@ -169,7 +188,117 @@
         "decided": 0,
         "totalManual": 0,
         "unmapped": [],
-        "unmappedError": "git diff failed: fatal: ambiguous argument 'HEAD'"
+        "unmappedError": null
+      }
+    },
+    {
+      "id": "specs-groups",
+      "page": "console",
+      "route": "specs",
+      "pageNumber": 2,
+      "pageSize": 2,
+      "branches": ["console.route.specs", "console.pagination.middle", "console.specs.groups"],
+      "csrfToken": "csrf-token-6",
+      "snapshot": {
+        "head": "6666666666666666666666666666666666666666",
+        "dirty": false,
+        "status": {
+          "schema": "urtext.status/1",
+          "head": "6666666666666666666666666666666666666666",
+          "items": [],
+          "counts": { "agent": 0, "human": 0, "autoPass": 0 },
+          "wip": { "limit": 10, "exceeded": false }
+        },
+        "clauses": [
+          { "specPath": "specs/a/spec.md", "clauseId": "C001", "title": "Widget alpha", "risk": "high", "decisionVerdict": "pass", "evidenceVerdict": "pass", "stale": false, "actionable": false },
+          { "specPath": "specs/a/spec.md", "clauseId": "C002", "title": "Widget beta", "risk": "low", "decisionVerdict": "none", "evidenceVerdict": "pending", "stale": false, "actionable": true },
+          { "specPath": "specs/a/spec.md", "clauseId": "C003", "title": "Widget gamma", "risk": "low", "decisionVerdict": "none", "evidenceVerdict": "pass", "stale": false, "actionable": false },
+          { "specPath": "specs/b/spec.md", "clauseId": "C001", "title": "Widget delta", "risk": "high", "decisionVerdict": "none", "evidenceVerdict": "pending", "stale": false, "actionable": true },
+          { "specPath": "specs/b/spec.md", "clauseId": "C002", "title": "Widget epsilon", "risk": "low", "decisionVerdict": "fail", "evidenceVerdict": "fail", "stale": true, "actionable": false }
+        ],
+        "decided": 0,
+        "totalManual": 5,
+        "unmapped": [],
+        "unmappedError": null
+      }
+    },
+    {
+      "id": "specs-empty",
+      "page": "console",
+      "route": "specs",
+      "pageNumber": 1,
+      "pageSize": 20,
+      "branches": ["console.route.specs", "console.pagination.single", "console.specs.empty"],
+      "csrfToken": "csrf-token-7",
+      "snapshot": {
+        "head": "7777777777777777777777777777777777777777",
+        "dirty": false,
+        "status": {
+          "schema": "urtext.status/1",
+          "head": "7777777777777777777777777777777777777777",
+          "items": [],
+          "counts": { "agent": 0, "human": 0, "autoPass": 0 },
+          "wip": { "limit": 10, "exceeded": false }
+        },
+        "clauses": [],
+        "decided": 0,
+        "totalManual": 0,
+        "unmapped": [],
+        "unmappedError": null
+      }
+    },
+    {
+      "id": "decisions-rows",
+      "page": "console",
+      "route": "decisions",
+      "pageNumber": 2,
+      "pageSize": 1,
+      "branches": ["console.route.decisions", "console.pagination.last", "console.decided.nonEmpty"],
+      "csrfToken": "csrf-token-8",
+      "snapshot": {
+        "head": "8888888888888888888888888888888888888888",
+        "dirty": false,
+        "status": {
+          "schema": "urtext.status/1",
+          "head": "8888888888888888888888888888888888888888",
+          "items": [],
+          "counts": { "agent": 0, "human": 0, "autoPass": 0 },
+          "wip": { "limit": 10, "exceeded": false }
+        },
+        "clauses": [
+          { "specPath": "specs/a/spec.md", "clauseId": "C005", "title": "Widget decided pass", "risk": "low", "decisionVerdict": "pass", "evidenceVerdict": "pass", "stale": false, "actionable": false },
+          { "specPath": "specs/a/spec.md", "clauseId": "C006", "title": "Widget decided fail", "risk": "high", "decisionVerdict": "fail", "evidenceVerdict": "fail", "stale": false, "actionable": false },
+          { "specPath": "specs/a/spec.md", "clauseId": "C007", "title": "Widget undecided", "risk": "low", "decisionVerdict": "none", "evidenceVerdict": "pending", "stale": false, "actionable": true }
+        ],
+        "decided": 2,
+        "totalManual": 3,
+        "unmapped": [],
+        "unmappedError": null
+      }
+    },
+    {
+      "id": "decisions-empty",
+      "page": "console",
+      "route": "decisions",
+      "pageNumber": 1,
+      "pageSize": 20,
+      "branches": ["console.route.decisions", "console.pagination.single", "console.decided.empty"],
+      "csrfToken": "csrf-token-9",
+      "snapshot": {
+        "head": "9999999999999999999999999999999999999999",
+        "dirty": false,
+        "status": {
+          "schema": "urtext.status/1",
+          "head": "9999999999999999999999999999999999999999",
+          "items": [],
+          "counts": { "agent": 0, "human": 0, "autoPass": 0 },
+          "wip": { "limit": 10, "exceeded": false }
+        },
+        "clauses": [],
+        "decided": 0,
+        "totalManual": 0,
+        "unmapped": [],
+        "unmappedError": null
       }
     },
     {
@@ -371,11 +500,12 @@
     { "id": "c-skip-focus", "page": "console", "fixture": "console-quiet", "selector": ".skip", "state": "focus-visible", "foregroundToken": "skip-fg", "backgroundToken": "skip-bg" },
     { "id": "c-table-default", "page": "console", "fixture": "console-quiet", "selector": "table", "state": "default", "foregroundToken": "fg", "backgroundToken": "surface" },
     { "id": "c-table-a-default", "page": "console", "fixture": "console-busy", "selector": "table a", "state": "default", "foregroundToken": "accent", "backgroundToken": "surface" },
-    { "id": "c-muted-default", "page": "console", "fixture": "console-busy", "selector": "[data-tone=\"muted\"]", "state": "default", "foregroundToken": "muted", "backgroundToken": "bg" },
-    { "id": "c-ok-default", "page": "console", "fixture": "console-busy", "selector": "[data-tone=\"ok\"]", "state": "default", "foregroundToken": "ok", "backgroundToken": "ok-bg" },
+    { "id": "c-muted-default", "page": "console", "fixture": "specs-groups", "selector": "[data-tone=\"muted\"]", "state": "default", "foregroundToken": "muted", "backgroundToken": "bg" },
+    { "id": "c-ok-default", "page": "console", "fixture": "specs-groups", "selector": "[data-tone=\"ok\"]", "state": "default", "foregroundToken": "ok", "backgroundToken": "ok-bg" },
     { "id": "c-warn-default", "page": "console", "fixture": "console-busy", "selector": "[data-tone=\"warn\"]", "state": "default", "foregroundToken": "warn", "backgroundToken": "warn-bg" },
     { "id": "c-danger-default", "page": "console", "fixture": "console-busy", "selector": "[data-tone=\"danger\"]", "state": "default", "foregroundToken": "danger", "backgroundToken": "danger-bg" },
-    { "id": "c-alert-default", "page": "console", "fixture": "console-unmapped-hunks", "selector": "[role=\"alert\"]", "state": "default", "foregroundToken": "danger", "backgroundToken": "danger-bg" },
+    { "id": "c-alert-default", "page": "console", "fixture": "console-busy", "selector": "[role=\"alert\"]", "state": "default", "foregroundToken": "danger", "backgroundToken": "danger-bg" },
+    { "id": "c-button-disabled-default", "page": "console", "fixture": "agent-zero", "selector": "button[disabled]", "state": "default", "foregroundToken": "muted", "backgroundToken": "bg" },
     { "id": "b-body-main-default", "page": "brief", "fixture": "brief-full", "selector": "body,main", "state": "default", "foregroundToken": "fg", "backgroundToken": "bg" },
     { "id": "b-a-default", "page": "brief", "fixture": "brief-full", "selector": "a", "state": "default", "foregroundToken": "accent", "backgroundToken": "bg" },
     { "id": "b-a-focus", "page": "brief", "fixture": "brief-full", "selector": "a", "state": "focus-visible", "foregroundToken": "accent", "backgroundToken": "bg" },

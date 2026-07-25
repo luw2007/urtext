@@ -15,7 +15,7 @@ import { describe, expect, test } from 'vitest'
 
 import type { UiSnapshot } from '../src/review-ui.js'
 import { renderBriefErrorPage, renderBriefPage } from '../src/ui/render-brief.js'
-import { renderConsolePage } from '../src/ui/render-console.js'
+import { renderConsoleFamilyPage, type ConsoleRoute } from '../src/ui/render-console.js'
 import type { BriefPageInput } from '../src/ui/contracts.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -32,6 +32,9 @@ type ConsumerState = 'default' | 'disabled' | 'focus-visible'
 interface ConsoleFixture {
   id: string
   page: 'console'
+  route: ConsoleRoute
+  pageNumber: number
+  pageSize: number
   branches: string[]
   snapshot: UiSnapshot
   csrfToken: string
@@ -62,7 +65,7 @@ interface ContrastConsumer {
 }
 
 interface ContrastManifest {
-  schema: 'urtext.ui-contrast-consumers/2'
+  schema: 'urtext.ui-contrast-consumers/3'
   sourceContractSha256: string
   renderContractSha256: string
   fixtureMatrix: Fixture[]
@@ -79,6 +82,7 @@ const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as ContrastManif
 const SOURCE_FILES = [
   'src/ui/theme.ts',
   'src/ui/html.ts',
+  'src/ui/pagination.ts',
   'src/ui/render-console.ts',
   'src/ui/render-brief.ts',
   'src/ui/console-script.ts',
@@ -89,13 +93,21 @@ const frame = (path: string, bytes: Buffer): Buffer =>
   Buffer.concat([Buffer.from(`${path}\0${bytes.byteLength}\0`, 'utf8'), bytes, Buffer.from('\0', 'utf8')])
 
 const renderFixture = (fixture: Fixture): string => {
-  if (fixture.page === 'console') return renderConsolePage(fixture.snapshot, fixture.csrfToken, fixture.auditResult)
+  if (fixture.page === 'console')
+    return renderConsoleFamilyPage({
+      route: fixture.route,
+      snapshot: fixture.snapshot,
+      csrfToken: fixture.csrfToken,
+      page: fixture.pageNumber,
+      pageSize: fixture.pageSize,
+      ...(fixture.auditResult !== undefined ? { auditResult: fixture.auditResult } : {}),
+    })
   if (fixture.page === 'brief') return renderBriefPage(fixture.input)
   return renderBriefErrorPage(fixture.message)
 }
 
 describe('ui contrast manifest — freshness', () => {
-  test('sourceContractSha256 matches the six source files + fixtureMatrix bytes, re-read now', () => {
+  test('sourceContractSha256 matches the seven source files + fixtureMatrix bytes, re-read now', () => {
     const hash = createHash('sha256')
     for (const path of SOURCE_FILES) hash.update(frame(path, readFileSync(join(ROOT, path))))
     hash.update(frame('fixtureMatrix', Buffer.from(JSON.stringify(manifest.fixtureMatrix), 'utf8')))
@@ -111,7 +123,7 @@ describe('ui contrast manifest — freshness', () => {
 
 describe('ui contrast manifest — schema', () => {
   test('top-level schema tag and structural shape', () => {
-    expect(manifest.schema).toBe('urtext.ui-contrast-consumers/2')
+    expect(manifest.schema).toBe('urtext.ui-contrast-consumers/3')
     expect(manifest.sourceContractSha256).toMatch(/^[0-9a-f]{64}$/)
     expect(manifest.renderContractSha256).toMatch(/^[0-9a-f]{64}$/)
     expect(Array.isArray(manifest.fixtureMatrix)).toBe(true)
@@ -147,10 +159,16 @@ describe('ui contrast manifest — schema', () => {
 // ---------------------------------------------------------------------------
 
 const CANONICAL_BRANCHES = [
+  'console.route.queue',
+  'console.route.agent',
+  'console.route.specs',
+  'console.route.decisions',
+  'console.pagination.single',
+  'console.pagination.first',
+  'console.pagination.middle',
+  'console.pagination.last',
   'console.human.empty',
   'console.human.nonEmpty',
-  'console.agentLane.open',
-  'console.agentLane.closed',
   'console.unmapped.clean',
   'console.unmapped.hunks',
   'console.unmapped.error',
@@ -158,6 +176,10 @@ const CANONICAL_BRANCHES = [
   'console.wip.exceeded',
   'console.audit.absent',
   'console.audit.present',
+  'console.auditRunner.enabled',
+  'console.auditRunner.disabled',
+  'console.specs.groups',
+  'console.specs.empty',
   'console.decided.empty',
   'console.decided.nonEmpty',
   'brief.risk.low',
@@ -215,6 +237,7 @@ const REGISTERED_PAIRS: Record<string, { fg: string; bg: string }> = {
   '[data-tone="danger"]': { fg: 'danger', bg: 'danger-bg' },
   '.diff-del': { fg: 'danger', bg: 'danger-bg' },
   '[role="alert"]': { fg: 'danger', bg: 'danger-bg' },
+  'button[disabled]': { fg: 'muted', bg: 'bg' },
 }
 
 /** Detection must ignore the embedded `<style>` block: THEME_CSS's own
@@ -238,6 +261,7 @@ const SELECTOR_DETECTORS: Record<string, (html: string) => boolean> = {
   '.diff-add': (html) => /class="diff-add"/.test(bodyOnly(html)),
   '.diff-hunk': (html) => /class="diff-hunk"/.test(bodyOnly(html)),
   '.diff-del': (html) => /class="diff-del"/.test(bodyOnly(html)),
+  'button[disabled]': (html) => /<button[^>]*\sdisabled/.test(bodyOnly(html)),
 }
 
 /** Elements that are inherently keyboard-focusable — the only selectors for

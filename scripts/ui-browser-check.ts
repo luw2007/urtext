@@ -24,7 +24,7 @@ import { fileURLToPath } from 'node:url'
 import type { UiSnapshot } from '../src/review-ui.js'
 import type { BriefPageInput } from '../src/ui/contracts.js'
 import { renderBriefErrorPage, renderBriefPage } from '../src/ui/render-brief.js'
-import { renderConsolePage } from '../src/ui/render-console.js'
+import { renderConsoleFamilyPage, type ConsoleRoute } from '../src/ui/render-console.js'
 
 export const VIEWPORTS = [1440, 1024, 390] as const
 export type Viewport = (typeof VIEWPORTS)[number]
@@ -91,7 +91,7 @@ export const checkContrastPairs = (pairs: ContrastPair[], threshold = CONTRAST_T
   })
 
 type ContrastFixture =
-  | { id: string; page: 'console'; snapshot: UiSnapshot; csrfToken: string; auditResult?: string }
+  | { id: string; page: 'console'; route: ConsoleRoute; pageNumber: number; pageSize: number; snapshot: UiSnapshot; csrfToken: string; auditResult?: string }
   | { id: string; page: 'brief'; input: BriefPageInput }
   | { id: string; page: 'error'; message: string }
 
@@ -112,6 +112,7 @@ export interface ManifestVerification {
 const CONTRAST_SOURCE_FILES = [
   'src/ui/theme.ts',
   'src/ui/html.ts',
+  'src/ui/pagination.ts',
   'src/ui/render-console.ts',
   'src/ui/render-brief.ts',
   'src/ui/console-script.ts',
@@ -123,9 +124,14 @@ const hashFrame = (label: string, bytes: Buffer): Buffer =>
 
 const renderContrastFixture = (fixture: ContrastFixture): string => {
   if (fixture.page === 'console') {
-    return fixture.auditResult === undefined
-      ? renderConsolePage(fixture.snapshot, fixture.csrfToken)
-      : renderConsolePage(fixture.snapshot, fixture.csrfToken, fixture.auditResult)
+    return renderConsoleFamilyPage({
+      route: fixture.route,
+      snapshot: fixture.snapshot,
+      csrfToken: fixture.csrfToken,
+      page: fixture.pageNumber,
+      pageSize: fixture.pageSize,
+      ...(fixture.auditResult !== undefined ? { auditResult: fixture.auditResult } : {}),
+    })
   }
   if (fixture.page === 'brief') return renderBriefPage(fixture.input)
   return renderBriefErrorPage(fixture.message)
@@ -134,7 +140,7 @@ const renderContrastFixture = (fixture: ContrastFixture): string => {
 export const verifyContrastManifest = (manifestPath: string, sourceRoot: string): ManifestVerification => {
   const manifestBytes = readFileSync(manifestPath)
   const manifest = JSON.parse(manifestBytes.toString('utf8')) as ContrastManifest
-  if (manifest.schema !== 'urtext.ui-contrast-consumers/2' || !Array.isArray(manifest.fixtureMatrix)) {
+  if (manifest.schema !== 'urtext.ui-contrast-consumers/3' || !Array.isArray(manifest.fixtureMatrix)) {
     throw new Error(`invalid contrast manifest schema at ${manifestPath}`)
   }
 
@@ -544,7 +550,11 @@ export const accessibleNameSource = (node: AxNode): string => (node.name.trim().
 
 
 export const PAGE_AX_LINK_SELECTORS: Record<string, string[]> = {
-  console: ['.skip', 'header', 'nav[aria-label="页面导航"]', 'main', 'h1', '#audit-runner', 'table', 'th[scope="col"]'],
+  console: ['.skip', 'header', 'nav[aria-label="页面导航"]', 'main', 'h1', 'table', 'th[scope="col"]'],
+  agent: ['.skip', 'header', 'nav[aria-label="页面导航"]', 'main', 'h1', '#audit-runner', 'table', 'th[scope="col"]'],
+  specs: ['.skip', 'header', 'nav[aria-label="页面导航"]', 'main', 'h1', 'table', 'th[scope="col"]', 'nav[aria-label="分页"]'],
+  'specs-page-2': ['.skip', 'header', 'nav[aria-label="页面导航"]', 'main', 'h1', 'table', 'th[scope="col"]', 'nav[aria-label="分页"]'],
+  decisions: ['.skip', 'header', 'nav[aria-label="页面导航"]', 'main', 'h1', 'table', 'th[scope="col"]'],
   brief: ['.skip', 'header', 'nav[aria-label="页面导航"]', 'main', 'h1', 'details[data-section="blame-diff"]', '#raw-brief-title', '#review-form', '#explain-btn'],
   error: ['.skip', 'header', 'nav[aria-label="页面导航"]', 'main', 'h1', '[role="alert"]'],
 }
@@ -578,7 +588,7 @@ export const validateAxTreeClosure = (nodes: AxNode[]): string[] => {
 
 // ---------------------------------------------------------------------------
 // Page-specific selector presence/absence/count (§8.3.4, frozen static IDs
-// in plan §6.4: `audit-runner` is console-only, `explain-btn` is brief-only).
+// in plan §6.4: `audit-runner` is agent-only, `explain-btn` is brief-only).
 // ---------------------------------------------------------------------------
 
 export interface PageSpecificExpectation {
@@ -588,8 +598,18 @@ export interface PageSpecificExpectation {
 }
 
 export const PAGE_SPECIFIC_SELECTORS: PageSpecificExpectation[] = [
-  { page: 'console', selector: '#audit-runner', expectedCount: 1 },
+  { page: 'console', selector: '#audit-runner', expectedCount: 0 },
   { page: 'console', selector: '#explain-btn', expectedCount: 0 },
+  { page: 'agent', selector: '#audit-runner', expectedCount: 1 },
+  { page: 'agent', selector: '#explain-btn', expectedCount: 0 },
+  { page: 'specs', selector: 'nav[aria-label="分页"]', expectedCount: 1 },
+  { page: 'specs', selector: 'a[rel="prev"]', expectedCount: 0 },
+  { page: 'specs', selector: 'a[rel="next"]', expectedCount: 1 },
+  { page: 'specs', selector: '#audit-runner', expectedCount: 0 },
+  { page: 'specs-page-2', selector: 'nav[aria-label="分页"]', expectedCount: 1 },
+  { page: 'specs-page-2', selector: 'a[rel="prev"]', expectedCount: 1 },
+  { page: 'specs-page-2', selector: 'a[rel="next"]', expectedCount: 1 },
+  { page: 'decisions', selector: '#audit-runner', expectedCount: 0 },
   { page: 'brief', selector: '#explain-btn', expectedCount: 1 },
   { page: 'brief', selector: '#audit-runner', expectedCount: 0 },
   { page: 'error', selector: '#explain-btn', expectedCount: 0 },
@@ -878,7 +898,7 @@ export const buildAssertions = (summary: CheckSummary): Assertion[] => {
 }
 
 export const validatePageNames = (pages: { name: string }[]): string[] => {
-  const expected = ['console', 'brief', 'error']
+  const expected = ['console', 'agent', 'specs', 'specs-page-2', 'decisions', 'brief', 'error']
   const counts = new Map<string, number>()
   for (const page of pages) counts.set(page.name, (counts.get(page.name) ?? 0) + 1)
   const errors: string[] = []
@@ -959,7 +979,7 @@ if (isMain()) {
 
   const DISABLED_BUTTON_SELECTORS: Record<string, string> = {
     brief: '#explain-btn',
-    console: '#audit-runner button[type="submit"]',
+    agent: '#audit-runner button[type="submit"]',
   }
 
   const config: RunCheckConfig = {
@@ -1000,6 +1020,7 @@ if (isMain()) {
             colorScheme,
             {
               ...config,
+              disclosureExpectations: pageName === 'brief' ? disclosureExpectations : [],
               expectedDiffCount: pageName === 'brief' ? expectedDiffCount : 0,
               disabledButtonSelector: viewport === 1440 ? DISABLED_BUTTON_SELECTORS[pageName] : undefined,
             },
