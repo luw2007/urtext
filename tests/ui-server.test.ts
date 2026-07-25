@@ -9,7 +9,9 @@ import { join } from 'node:path'
 import DatabaseConstructor, { type Database } from 'better-sqlite3'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 
+import { recordDecision } from '../src/decision.js'
 import { openRegistry } from '../src/registry.js'
+import { buildUiSnapshot } from '../src/review-ui.js'
 import { scanWorkspace } from '../src/scanner.js'
 import { verifyWorkspace } from '../src/verifier.js'
 import { startUiServer, startUiServerWithDeps, type AcceptanceRequestRecord, type UiServerHandle } from '../src/ui-server.js'
@@ -171,12 +173,36 @@ describe('ui server spec impact', () => {
     expect(html).toContain('urtext ack tracked.txt:1-1 &lt;reason&gt;')
   })
 
-  test('serves every live clause in the console spec browser', async () => {
-    const response = await fetch(server.url)
+  test('serves all four console-family routes over real HTTP', async () => {
+    const cases = [
+      ['/', 'id="your-queue-title"'],
+      ['/agent', 'id="agent-lane-title"'],
+      ['/specs', 'id="all-specs"'],
+      ['/decisions', 'id="decided-title"'],
+    ] as const
+    for (const [path, marker] of cases) {
+      const response = await fetch(`${server.url}${path}`)
+      expect(response.status).toBe(200)
+      expect(response.headers.get('content-type')).toContain('text/html')
+      expect(await response.text()).toContain(marker)
+    }
+  })
+
+  test('serves every live clause from /specs', async () => {
+    const response = await fetch(`${server.url}/specs`)
     const html = await response.text()
     expect(html).toContain('id="all-specs"')
     expect(html).toContain('data-clause="specs/x/spec.md#C001"')
     expect(html).toContain('/brief?spec=specs%2Fx%2Fspec.md&amp;clause=C001')
+  })
+
+  test('ignores unknown queries and never replays audit results on the queue route', async () => {
+    const plain = await fetch(server.url).then((response) => response.text())
+    const unknown = await fetch(`${server.url}/?unknown=value`).then((response) => response.text())
+    const audit = await fetch(`${server.url}/?audit=stale`).then((response) => response.text())
+    expect(unknown).toBe(plain)
+    expect(audit).toBe(plain)
+    expect(audit).not.toContain('id="audit-result"')
   })
 
   test('serves structured brief HTML and the additive JSON projection', async () => {
@@ -239,6 +265,9 @@ describe('§9.2 all-route Host enforcement', () => {
     const routes: { method: string; path: string }[] = [
       { method: 'GET', path: '/' },
       { method: 'GET', path: '/brief?spec=specs%2Fx%2Fspec.md&clause=C001' },
+      { method: 'GET', path: '/agent' },
+      { method: 'GET', path: '/specs' },
+      { method: 'GET', path: '/decisions' },
       { method: 'GET', path: '/api/brief?spec=specs%2Fx%2Fspec.md&clause=C001' },
       { method: 'POST', path: '/api/decide' },
       { method: 'POST', path: '/api/review' },
@@ -266,6 +295,85 @@ describe('§9.2 all-route Host enforcement', () => {
   test('an unmatched route still validates Host first (404 only for a loopback Host)', async () => {
     const missing = await fetch(`${server.url}/does-not-exist`)
     expect(missing.status).toBe(404)
+  })
+})
+
+describe('console-family pagination over HTTP', () => {
+  test('page query values stay 200 and resolve to first, decoded, or final pages', async () => {
+    const records: AcceptanceRequestRecord[] = []
+    const localServer = await startUiServerWithDeps(db, root, {
+      port: 0,
+      open: false,
+      decider: 'test',
+      pageSize: 1,
+      onRequest: (record) => records.push(record),
+    })
+    try {
+      const body = async (query: string): Promise<string> => {
+        const response = await fetch(`${localServer.url}/specs${query}`)
+        expect(response.status).toBe(200)
+        return response.text()
+      }
+      const first = await body('')
+      for (const query of ['?page=', '?page=0', '?page=-1', '?page=01', '?page=1.5', '?page=%2B1', '?page=abc', '?page=1e3', '?page=1&page=2']) {
+        expect(await body(query)).toBe(first)
+      }
+      expect(await body('?page=%32')).toBe(await body('?page=2'))
+      expect(await body(`?page=${'9'.repeat(400)}`)).toBe(await body('?page=3'))
+      expect(records.every((record) => record.pathClass === 'specs' && record.status === 200 && record.stage === 'handler')).toBe(true)
+    } finally {
+      localServer.close()
+    }
+  })
+
+  test('pageSize=1 traverses every route in snapshot order with no duplicates', async () => {
+    recordDecision(db, { specPath: 'specs/x/spec.md', clauseId: 'C003', verdict: 'fail', decider: 'test' }, root, 1)
+    const snapshot = buildUiSnapshot(db, root)
+    const localServer = await startUiServerWithDeps(db, root, { port: 0, open: false, decider: 'test', pageSize: 1 })
+    try {
+      const cases = [
+        ['/', 'data-row', snapshot.status.items.filter((item) => item.lane === 'human').map((item) => item.key)],
+        ['/agent', 'data-row', snapshot.status.items.filter((item) => item.lane === 'agent').map((item) => item.key)],
+        ['/specs', 'data-clause', snapshot.clauses.map((clause) => `${clause.specPath}#${clause.clauseId}`)],
+        ['/decisions', 'data-row', snapshot.clauses.filter((clause) => clause.decisionVerdict === 'pass' || clause.decisionVerdict === 'fail').map((clause) => `${clause.specPath}#${clause.clauseId}`)],
+      ] as const
+      for (const [path, attribute, expected] of cases) {
+        const first = await fetch(`${localServer.url}${path}`).then((response) => response.text())
+        const pageCount = Number(first.match(/第 1 \/ 共 (\d+) 页/)?.[1] ?? 1)
+        const pages = [first]
+        for (let page = 2; page <= pageCount; page += 1) {
+          pages.push(await fetch(`${localServer.url}${path}?page=${page}`).then((response) => response.text()))
+        }
+        const rows = pages.flatMap((html) => [...html.matchAll(new RegExp(`${attribute}="([^"]+)"`, 'g'))].map((match) => match[1]!))
+        expect(rows).toEqual(expected)
+        expect(new Set(rows).size).toBe(rows.length)
+      }
+    } finally {
+      localServer.close()
+    }
+  })
+
+  test('new GET routes emit exact path classes and hostile Host remains pre-dispatch', async () => {
+    const records: AcceptanceRequestRecord[] = []
+    const localServer = await startUiServerWithDeps(db, root, {
+      port: 0,
+      open: false,
+      decider: 'test',
+      onRequest: (record) => records.push(record),
+    })
+    try {
+      for (const path of ['/agent', '/specs', '/decisions']) expect((await fetch(`${localServer.url}${path}`)).status).toBe(200)
+      const hostile = await rawFetch(`${localServer.url}/specs`, { headers: { host: 'evil.example' } })
+      expect(hostile.status).toBe(403)
+      expect(records).toEqual([
+        expect.objectContaining({ pathClass: 'agent', status: 200, stage: 'handler' }),
+        expect.objectContaining({ pathClass: 'specs', status: 200, stage: 'handler' }),
+        expect.objectContaining({ pathClass: 'decisions', status: 200, stage: 'handler' }),
+        expect.objectContaining({ pathClass: 'specs', status: 403, stage: 'host' }),
+      ])
+    } finally {
+      localServer.close()
+    }
   })
 })
 
