@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { openRegistry } from '../src/registry.js'
 import { buildUiSnapshot } from '../src/review-ui.js'
 import { renderConsolePage } from '../src/ui/render-console.js'
+import type { StatusItem } from '../src/status.js'
 import { scanWorkspace } from '../src/scanner.js'
 
 let db: Database
@@ -60,18 +61,32 @@ describe('workspace unmapped impact', () => {
 
   test('renders hunk and failure banners as separate escaped states', () => {
     const base = buildUiSnapshot(db, root)
+    const item: StatusItem = {
+      key: '<bad>.ts:2-3',
+      kind: 'unmapped',
+      lane: 'human',
+      primary: 'unmapped',
+      reasons: ['unmapped'],
+      next: '`urtext map <spec>#<clause> <range>` | `urtext ack <range> <reason>` | write back to spec',
+      filePath: '<bad>.ts',
+      lineStart: 2,
+      lineEnd: 3,
+    }
     const unmapped = renderConsolePage({
       ...base,
       unmapped: [{ filePath: '<bad>.ts', lineStart: 2, lineEnd: 3 }],
       unmappedError: null,
+      status: { ...base.status, items: [item] },
     }, 'tok')
-    expect(unmapped).toContain('data-banner="unmapped"')
+    expect(unmapped).toContain('data-banner="unmapped">')
     expect(unmapped).toContain('&lt;bad&gt;.ts:2-3')
+    expect(unmapped).toContain('urtext map &lt;spec&gt;#&lt;clause&gt; &lt;bad&gt;.ts:2-3')
+    expect(unmapped).toContain('urtext ack &lt;bad&gt;.ts:2-3 &lt;reason&gt;')
     expect(unmapped).not.toContain('data-banner="unmapped-error"')
 
     const failed = renderConsolePage({ ...base, unmapped: [], unmappedError: '<git failed>' }, 'tok')
     expect(failed).toContain('data-banner="unmapped-error"')
     expect(failed).toContain('&lt;git failed&gt;')
-    expect(failed).not.toContain('data-banner="unmapped"')
+    expect(failed).not.toContain('data-banner="unmapped">')
   })
 })

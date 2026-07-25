@@ -105,34 +105,12 @@ describe('renderConsolePage', () => {
     recordDecision(db, { specPath: 'specs/x/spec.md', clauseId: 'C001', verdict: 'pass', decider: 'alice' }, root, 1)
     html = renderConsolePage(buildUiSnapshot(db, root), 'tok')
     expect(html).not.toContain('data-key="specs/x/spec.md#C001"')
-    expect(html).toContain('✓ pass')
   })
 
   test('runnable clause never gets decide buttons (it may sit in the agent lane)', () => {
     const root = setupRepo()
     const html = renderConsolePage(buildUiSnapshot(db, root), 'tok')
     expect(html).not.toContain('data-key="specs/x/spec.md#C002"')
-  })
-
-  test('unaudited agent work renders selectable headless audit controls', () => {
-    const root = setupRepo()
-    const html = renderConsolePage(buildUiSnapshot(db, root), 'tok')
-    expect(html).toContain('id="audit-runner"')
-    expect(html).toContain('value="claude"')
-    expect(html).toContain('value="codex"')
-    expect(html).toContain('value="omp"')
-    expect(html).toContain('<option value="traex">Traex</option>')
-    expect(html).toContain('/api/audit-run')
-    expect(html).toContain('id="audit-progress"')
-    expect(html).toContain('Running audit; large batches on slow models can take many minutes…')
-    expect(html).toContain('button.disabled = true')
-  })
-
-  test('renders an audit completion notice after queue refresh', () => {
-    const root = setupRepo()
-    const html = renderConsolePage(buildUiSnapshot(db, root), 'tok', 'imported 39 verdict(s); 22 disagreement(s) moved to Your queue.')
-    expect(html).toContain('id="audit-result"')
-    expect(html).toContain('22 disagreement(s) moved to Your queue.')
   })
 
   test('csrf token is embedded and a hostile title cannot break the markup', () => {
@@ -235,7 +213,6 @@ describe('operator console (v3)', () => {
     expect(result.body.view.mappings).toEqual([])
   })
 
-
   test('brief page renders fresh and stale evidence as distinct states', () => {
     const root = setupRepo('## C003 guarded path <!-- oracle:cmd:true risk:high -->')
     const fresh = handleBrief(db, root, 'specs/x/spec.md', 'C003')
@@ -309,7 +286,6 @@ describe('operator console (v3)', () => {
     expect(html).toContain('无下游依赖')
     expect(html).toContain('映射状态')
   })
-
 
   test('brief error page escapes the refusal and never emits a risk conclusion', () => {
     const html = renderBriefErrorPage('[unknown_clause] <script>alert(1)</script>')

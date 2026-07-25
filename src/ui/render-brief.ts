@@ -122,7 +122,7 @@ const briefNav = (view: SpecImpactView): string => {
   const navNext = next
     ? `<a rel="next" href="${esc(briefHref(next.specPath, next.clauseId))}">下一条 →</a>`
     : `<span aria-disabled="true">下一条 →</span>`
-  return `<nav aria-label="页面导航"><a href="/">← console</a> · <a href="/#all-specs">查看全部 Specs</a> · <a href="${esc(
+  return `<nav aria-label="页面导航"><a href="/">← console</a> · <a href="/specs">查看全部 Specs</a> · <a href="${esc(
     briefHref(view.target.specPath, view.target.clauseId)
   )}">刷新状态</a> · ${navPrev} · ${navNext}</nav>`
 }
@@ -166,6 +166,6 @@ export const renderBriefErrorPage = (message: string): string =>
   pageShell({
     title: 'urtext brief error',
     header: `<header><h1 id="error-title">无法生成裁决简报</h1></header>`,
-    nav: `<nav aria-label="页面导航"><a href="/">← console</a> · <a href="/#all-specs">查看全部 Specs</a> · <a href="/">刷新状态</a></nav>`,
+    nav: `<nav aria-label="页面导航"><a href="/">← console</a> · <a href="/specs">查看全部 Specs</a> · <a href="/">刷新状态</a></nav>`,
     main: `<main id="main"><p role="alert" data-state="error">${esc(message)}</p></main>`,
   })

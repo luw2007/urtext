@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 
 import { openRegistry } from '../src/registry.js'
 import { buildUiSnapshot, handleBrief } from '../src/review-ui.js'
-import { renderConsolePage } from '../src/ui/render-console.js'
+import { renderConsoleFamilyPage } from '../src/ui/render-console.js'
 import { renderBriefPage } from '../src/ui/render-brief.js'
 import { DEFAULT_UI_RENDER_CONFIG } from '../src/ui/contracts.js'
 import { scanWorkspace } from '../src/scanner.js'
@@ -49,12 +49,21 @@ describe('complete spec impact interactions', () => {
   test('console browses every live clause even when it is absent from queues', () => {
     const snapshot = buildUiSnapshot(db, root)
     snapshot.status.items = []
-    const html = renderConsolePage(snapshot, 'tok')
-    expect(html).toContain('id="all-specs"')
-    expect(html).toContain('data-clause="specs/x/spec.md#C001"')
-    expect(html).toContain('data-clause="specs/x/spec.md#C002"')
-    expect(html).toContain('/brief?spec=specs%2Fx%2Fspec.md&amp;clause=C001')
-    expect(html).toContain('刷新状态')
+    const renderPage = (page: number): string => renderConsoleFamilyPage({
+      route: 'specs',
+      snapshot,
+      csrfToken: 'tok',
+      page,
+      pageSize: 1,
+    })
+    const first = renderPage(1)
+    expect(first).toContain('id="all-specs"')
+    expect(first).toContain('data-clause="specs/x/spec.md#C001"')
+    expect(first).toContain('/brief?spec=specs%2Fx%2Fspec.md&amp;clause=C001')
+    expect(first).toContain('刷新状态')
+    const rows = [first, renderPage(2)].flatMap((html) => [...html.matchAll(/data-clause="([^"]+)"/g)].map((match) => match[1]!))
+    expect(rows).toEqual(snapshot.clauses.map((clause) => `${clause.specPath}#${clause.clauseId}`))
+    expect(new Set(rows).size).toBe(rows.length)
   })
 
   test('detail exposes stale dependents, refresh, and all-spec navigation', () => {
