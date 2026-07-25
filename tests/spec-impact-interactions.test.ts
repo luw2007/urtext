@@ -7,7 +7,10 @@ import DatabaseConstructor, { type Database } from 'better-sqlite3'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 
 import { openRegistry } from '../src/registry.js'
-import { buildUiSnapshot, handleBrief, renderBriefPage, renderPage } from '../src/review-ui.js'
+import { buildUiSnapshot, handleBrief } from '../src/review-ui.js'
+import { renderConsolePage } from '../src/ui/render-console.js'
+import { renderBriefPage } from '../src/ui/render-brief.js'
+import { DEFAULT_UI_RENDER_CONFIG } from '../src/ui/contracts.js'
 import { scanWorkspace } from '../src/scanner.js'
 import { verifyWorkspace } from '../src/verifier.js'
 
@@ -46,7 +49,7 @@ describe('complete spec impact interactions', () => {
   test('console browses every live clause even when it is absent from queues', () => {
     const snapshot = buildUiSnapshot(db, root)
     snapshot.status.items = []
-    const html = renderPage(snapshot, 'tok')
+    const html = renderConsolePage(snapshot, 'tok')
     expect(html).toContain('id="all-specs"')
     expect(html).toContain('data-clause="specs/x/spec.md#C001"')
     expect(html).toContain('data-clause="specs/x/spec.md#C002"')
@@ -58,7 +61,16 @@ describe('complete spec impact interactions', () => {
     db.prepare('UPDATE evidence SET invalidated_at = 1 WHERE spec_path = ? AND clause_id = ?').run('specs/x/spec.md', 'C002')
     const result = handleBrief(db, root, 'specs/x/spec.md', 'C001')
     if (!('ok' in result.body)) throw new Error('expected a brief')
-    const html = renderBriefPage(result.body.text, 'tok', 'specs/x/spec.md#C001', result.body.briefHash, false, undefined, result.body.view)
+    const html = renderBriefPage({
+      text: result.body.text,
+      csrfToken: 'tok',
+      key: 'specs/x/spec.md#C001',
+      briefHash: result.body.briefHash,
+      reviewable: false,
+      facts: result.body.facts,
+      view: result.body.view,
+      config: DEFAULT_UI_RENDER_CONFIG,
+    })
     expect(result.body.view.dependents).toContainEqual(expect.objectContaining({ clauseId: 'C002', stale: true }))
     expect(html).toContain('data-state="dependent-stale"')
     expect(html).toContain('查看全部 Specs')
@@ -78,7 +90,16 @@ describe('complete spec impact interactions', () => {
       diff: '@@ -2 +2 @@\n-const old = "<unsafe>"\n+const next = 1',
       diffError: null,
     })
-    const html = renderBriefPage(result.body.text, 'tok', 'specs/x/spec.md#C001', result.body.briefHash, false, undefined, result.body.view)
+    const html = renderBriefPage({
+      text: result.body.text,
+      csrfToken: 'tok',
+      key: 'specs/x/spec.md#C001',
+      briefHash: result.body.briefHash,
+      reviewable: false,
+      facts: result.body.facts,
+      view: result.body.view,
+      config: DEFAULT_UI_RENDER_CONFIG,
+    })
     expect(html).toContain('data-section="blame-diff"')
     expect(html).toContain('src/&lt;impl&gt;.ts:2-2')
     expect(html).toContain('-const old = &quot;&lt;unsafe&gt;&quot;')

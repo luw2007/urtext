@@ -10,7 +10,10 @@ import { recordDecision } from '../src/decision.js'
 import { openRegistry } from '../src/registry.js'
 import { scanWorkspace } from '../src/scanner.js'
 import { verifyWorkspace } from '../src/verifier.js'
-import { buildUiSnapshot, renderPage, handleDecide, handleReview, handleExplain, handleBrief, handleAuditRun, renderBriefPage, renderBriefErrorPage } from '../src/review-ui.js'
+import { buildUiSnapshot, handleDecide, handleReview, handleExplain, handleBrief, handleAuditRun } from '../src/review-ui.js'
+import { renderConsolePage } from '../src/ui/render-console.js'
+import { renderBriefPage, renderBriefErrorPage } from '../src/ui/render-brief.js'
+import { DEFAULT_UI_RENDER_CONFIG } from '../src/ui/contracts.js'
 import { importVerdicts, latestEvidence } from '../src/audit.js'
 
 let db: Database
@@ -93,26 +96,27 @@ describe('buildUiSnapshot', () => {
 
 })
 
-describe('renderPage', () => {
+describe('renderConsolePage', () => {
   test('actionable row renders decide buttons; decided row does not', () => {
     const root = setupRepo()
-    let html = renderPage(buildUiSnapshot(db, root), 'tok')
-    expect(html).toContain('data-key="specs/x/spec.md#C001" data-v="pass"')
+    let html = renderConsolePage(buildUiSnapshot(db, root), 'tok')
+    expect(html).toContain('data-key="specs/x/spec.md#C001"')
+    expect(html).toContain('data-v="pass"')
     recordDecision(db, { specPath: 'specs/x/spec.md', clauseId: 'C001', verdict: 'pass', decider: 'alice' }, root, 1)
-    html = renderPage(buildUiSnapshot(db, root), 'tok')
+    html = renderConsolePage(buildUiSnapshot(db, root), 'tok')
     expect(html).not.toContain('data-key="specs/x/spec.md#C001"')
     expect(html).toContain('✓ pass')
   })
 
   test('runnable clause never gets decide buttons (it may sit in the agent lane)', () => {
     const root = setupRepo()
-    const html = renderPage(buildUiSnapshot(db, root), 'tok')
+    const html = renderConsolePage(buildUiSnapshot(db, root), 'tok')
     expect(html).not.toContain('data-key="specs/x/spec.md#C002"')
   })
 
   test('unaudited agent work renders selectable headless audit controls', () => {
     const root = setupRepo()
-    const html = renderPage(buildUiSnapshot(db, root), 'tok')
+    const html = renderConsolePage(buildUiSnapshot(db, root), 'tok')
     expect(html).toContain('id="audit-runner"')
     expect(html).toContain('value="claude"')
     expect(html).toContain('value="codex"')
@@ -126,15 +130,15 @@ describe('renderPage', () => {
 
   test('renders an audit completion notice after queue refresh', () => {
     const root = setupRepo()
-    const html = renderPage(buildUiSnapshot(db, root), 'tok', 'imported 39 verdict(s); 22 disagreement(s) moved to Your queue.')
+    const html = renderConsolePage(buildUiSnapshot(db, root), 'tok', 'imported 39 verdict(s); 22 disagreement(s) moved to Your queue.')
     expect(html).toContain('id="audit-result"')
     expect(html).toContain('22 disagreement(s) moved to Your queue.')
   })
 
   test('csrf token is embedded and a hostile title cannot break the markup', () => {
     const root = setupRepo(`## C003 <script>'"&x <!-- oracle:manual -->`)
-    const html = renderPage(buildUiSnapshot(db, root), 'my-token')
-    expect(html).toContain('<meta name="csrf" content="my-token">')
+    const html = renderConsolePage(buildUiSnapshot(db, root), 'my-token')
+    expect(html).toContain('<meta name="csrf-token" content="my-token">')
     expect(html).not.toContain('<script>\'"&x')
     expect(html).toContain('&lt;script&gt;')
   })
@@ -236,12 +240,30 @@ describe('operator console (v3)', () => {
     const root = setupRepo('## C003 guarded path <!-- oracle:cmd:true risk:high -->')
     const fresh = handleBrief(db, root, 'specs/x/spec.md', 'C003')
     if (!('ok' in fresh.body)) throw new Error('expected a brief')
-    const freshHtml = renderBriefPage(fresh.body.text, 'tok', 'specs/x/spec.md#C003', fresh.body.briefHash, false, undefined, fresh.body.view)
+    const freshHtml = renderBriefPage({
+      text: fresh.body.text,
+      csrfToken: 'tok',
+      key: 'specs/x/spec.md#C003',
+      briefHash: fresh.body.briefHash,
+      reviewable: false,
+      facts: fresh.body.facts,
+      view: fresh.body.view,
+      config: DEFAULT_UI_RENDER_CONFIG,
+    })
     expect(freshHtml).toContain('data-state="fresh"')
     db.prepare('UPDATE evidence SET invalidated_at = 1 WHERE spec_path = ? AND clause_id = ?').run('specs/x/spec.md', 'C003')
     const stale = handleBrief(db, root, 'specs/x/spec.md', 'C003')
     if (!('ok' in stale.body)) throw new Error('expected a brief')
-    const staleHtml = renderBriefPage(stale.body.text, 'tok', 'specs/x/spec.md#C003', stale.body.briefHash, false, undefined, stale.body.view)
+    const staleHtml = renderBriefPage({
+      text: stale.body.text,
+      csrfToken: 'tok',
+      key: 'specs/x/spec.md#C003',
+      briefHash: stale.body.briefHash,
+      reviewable: false,
+      facts: stale.body.facts,
+      view: stale.body.view,
+      config: DEFAULT_UI_RENDER_CONFIG,
+    })
     expect(staleHtml).toContain('data-state="stale"')
     expect(staleHtml).not.toContain('data-state="fresh"')
   })
@@ -250,7 +272,16 @@ describe('operator console (v3)', () => {
     const root = setupRepo('## C003 dependent <!-- oracle:cmd:true refs:specs/x/spec.md#C002 -->')
     const result = handleBrief(db, root, 'specs/x/spec.md', 'C002')
     if (!('ok' in result.body)) throw new Error('expected a brief')
-    const html = renderBriefPage(result.body.text, 'tok', 'specs/x/spec.md#C002', result.body.briefHash, false, undefined, result.body.view)
+    const html = renderBriefPage({
+      text: result.body.text,
+      csrfToken: 'tok',
+      key: 'specs/x/spec.md#C002',
+      briefHash: result.body.briefHash,
+      reviewable: false,
+      facts: result.body.facts,
+      view: result.body.view,
+      config: DEFAULT_UI_RENDER_CONFIG,
+    })
     expect(result.body.view.impact.affectedClauses).toEqual([{ specPath: 'specs/x/spec.md', clauseId: 'C003' }])
     expect(html).toContain('Stale Dependencies / 下游依赖')
     expect(html).toContain('/brief?spec=specs%2Fx%2Fspec.md&amp;clause=C003')
@@ -261,15 +292,16 @@ describe('operator console (v3)', () => {
     db.prepare('DELETE FROM evidence WHERE spec_path = ? AND clause_id = ?').run('specs/x/spec.md', 'C003')
     const result = handleBrief(db, root, 'specs/x/spec.md', 'C003')
     if (!('ok' in result.body)) throw new Error('expected a brief')
-    const html = renderBriefPage(
-      result.body.text,
-      'tok',
-      'specs/x/spec.md#C003',
-      result.body.briefHash,
-      false,
-      undefined,
-      result.body.view
-    )
+    const html = renderBriefPage({
+      text: result.body.text,
+      csrfToken: 'tok',
+      key: 'specs/x/spec.md#C003',
+      briefHash: result.body.briefHash,
+      reviewable: false,
+      facts: result.body.facts,
+      view: result.body.view,
+      config: DEFAULT_UI_RENDER_CONFIG,
+    })
     expect(html).toContain('data-state="risk-high"')
     expect(html).toContain('data-state="no-evidence"')
 
@@ -328,7 +360,16 @@ describe('browser high-risk review', () => {
     if (!('ok' in brief.body)) throw new Error('expected a brief')
     expect(brief.body.risk).toBe('high')
     expect(brief.body.reviewable).toBe(true)
-    const html = renderBriefPage(brief.body.text, 'tok', 'specs/x/spec.md#C001', brief.body.briefHash, true, brief.body.facts)
+    const html = renderBriefPage({
+      text: brief.body.text,
+      csrfToken: 'tok',
+      key: 'specs/x/spec.md#C001',
+      briefHash: brief.body.briefHash,
+      reviewable: true,
+      facts: brief.body.facts,
+      view: brief.body.view,
+      config: DEFAULT_UI_RENDER_CONFIG,
+    })
     expect(html).toContain('高风险代码审查：specs/x/spec.md#C001 pay guard')
     expect(html).toContain('id="explain-btn"')
     expect(html).toContain('/api/explain')
@@ -337,13 +378,24 @@ describe('browser high-risk review', () => {
     expect(html).toContain("claude: 'sonnet'")
     expect(html).toContain("codex: 'gpt-5.6-terra'")
     expect(html).toContain('explainModel.value = defaultModel[explainAuditor.value]')
-    expect(html).toContain('data-d="approve"')
+    expect(html).toContain('data-v="approve"')
     expect(html).toContain('<option value="traex">Traex</option>')
     expect(html).toContain("traex: 'kimi-k2.6'")
     expect(html).toContain('/api/review')
     // No hard-coded consequence template — the examples come from the AI, not the page.
     expect(html).not.toContain('gate 对它 auto-pass（证据+审计+审查三者皆绿）')
-    expect(renderBriefPage(brief.body.text, 'tok', 'k', 'h', false)).not.toContain('id="review-form"')
+    expect(
+      renderBriefPage({
+        text: brief.body.text,
+        csrfToken: 'tok',
+        key: 'specs/x/spec.md#C001',
+        briefHash: brief.body.briefHash,
+        reviewable: false,
+        facts: brief.body.facts,
+        view: brief.body.view,
+        config: DEFAULT_UI_RENDER_CONFIG,
+      })
+    ).not.toContain('id="review-form"')
   })
 
   test('handleExplain rejects malformed input before invoking any client', async () => {

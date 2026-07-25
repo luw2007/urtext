@@ -7,7 +7,8 @@ import DatabaseConstructor, { type Database } from 'better-sqlite3'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 
 import { openRegistry } from '../src/registry.js'
-import { buildUiSnapshot, renderPage } from '../src/review-ui.js'
+import { buildUiSnapshot } from '../src/review-ui.js'
+import { renderConsolePage } from '../src/ui/render-console.js'
 import { scanWorkspace } from '../src/scanner.js'
 
 let db: Database
@@ -59,7 +60,7 @@ describe('workspace unmapped impact', () => {
 
   test('renders hunk and failure banners as separate escaped states', () => {
     const base = buildUiSnapshot(db, root)
-    const unmapped = renderPage({
+    const unmapped = renderConsolePage({
       ...base,
       unmapped: [{ filePath: '<bad>.ts', lineStart: 2, lineEnd: 3 }],
       unmappedError: null,
@@ -68,7 +69,7 @@ describe('workspace unmapped impact', () => {
     expect(unmapped).toContain('&lt;bad&gt;.ts:2-3')
     expect(unmapped).not.toContain('data-banner="unmapped-error"')
 
-    const failed = renderPage({ ...base, unmapped: [], unmappedError: '<git failed>' }, 'tok')
+    const failed = renderConsolePage({ ...base, unmapped: [], unmappedError: '<git failed>' }, 'tok')
     expect(failed).toContain('data-banner="unmapped-error"')
     expect(failed).toContain('&lt;git failed&gt;')
     expect(failed).not.toContain('data-banner="unmapped"')

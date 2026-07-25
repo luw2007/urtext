@@ -1,8 +1,9 @@
-import type { SpawnSyncReturns } from 'node:child_process'
+import { EventEmitter } from 'node:events'
+import type { ChildProcess, SpawnSyncReturns } from 'node:child_process'
 
 import { describe, expect, test } from 'vitest'
 
-import { auditTimeoutMs, commandFor, runAuditAgent } from '../src/audit-runner.js'
+import { auditTimeoutMs, commandFor, runAuditAgent, runAuditAgentAsync, runAgentText, type AsyncSpawn } from '../src/audit-runner.js'
 import type { AuditRequest } from '../src/audit.js'
 
 const request: AuditRequest = {
@@ -134,5 +135,142 @@ describe('auditTimeoutMs', () => {
     process.env.URTEXT_AUDIT_TIMEOUT_MS = '0'
     expect(auditTimeoutMs()).toBe(3_600_000)
     delete process.env.URTEXT_AUDIT_TIMEOUT_MS
+  })
+})
+
+describe('runAuditAgentAsync (injected fake child)', () => {
+  type FakeBehavior = { stdout?: string; code?: number | null; errorMessage?: string }
+
+  const fakeSpawn = (behavior: FakeBehavior): AsyncSpawn =>
+    ((..._args: unknown[]) => {
+      const child = new EventEmitter() as unknown as ChildProcess
+      const stdout = new EventEmitter()
+      Object.assign(child, {
+        stdout,
+        stdin: {
+          end: () => {
+            queueMicrotask(() => {
+              if (behavior.errorMessage !== undefined) {
+                child.emit('error', new Error(behavior.errorMessage))
+                return
+              }
+              if (behavior.stdout !== undefined) stdout.emit('data', Buffer.from(behavior.stdout))
+              child.emit('close', behavior.code ?? 0)
+            })
+          },
+        },
+        kill: () => {},
+      })
+      return child
+    }) as AsyncSpawn
+
+  const hangingSpawn = (): AsyncSpawn =>
+    ((..._args: unknown[]) => {
+      const child = new EventEmitter() as unknown as ChildProcess
+      let killed = false
+      Object.assign(child, {
+        stdout: new EventEmitter(),
+        stdin: { end: () => {} },
+        kill: () => {
+          killed = true
+          setImmediate(() => child.emit('close', null))
+        },
+      })
+      return child
+    }) as AsyncSpawn
+
+  test('completes with exact JSON coverage from an injected async child', async () => {
+    const stdout = JSON.stringify({ verdicts: [{ evidenceId: 11, verdict: 'agree', note: 'ok' }, { evidenceId: 12, verdict: 'agree', note: 'ok' }] })
+    const result = await runAuditAgentAsync(request, { id: 'omp' }, fakeSpawn({ stdout }))
+    expect(result).toMatchObject({ kind: 'completed' })
+    expect(result.verdicts).toHaveLength(2)
+  })
+
+  test('rejects missing evidence id coverage', async () => {
+    const stdout = JSON.stringify({ verdicts: [{ evidenceId: 11, verdict: 'agree', note: 'ok' }] })
+    const result = await runAuditAgentAsync(request, { id: 'omp' }, fakeSpawn({ stdout }))
+    expect(result).toMatchObject({ kind: 'rejected' })
+  })
+
+  test('rejects duplicate evidence id coverage', async () => {
+    const stdout = JSON.stringify({ verdicts: [{ evidenceId: 11, verdict: 'agree', note: 'ok' }, { evidenceId: 11, verdict: 'agree', note: 'again' }] })
+    const result = await runAuditAgentAsync(request, { id: 'omp' }, fakeSpawn({ stdout }))
+    expect(result).toMatchObject({ kind: 'rejected' })
+  })
+
+  test('rejects malformed (non-JSON) stdout', async () => {
+    const result = await runAuditAgentAsync(request, { id: 'omp' }, fakeSpawn({ stdout: 'not json at all' }))
+    expect(result).toMatchObject({ kind: 'rejected' })
+  })
+
+  test('rejects a non-zero exit', async () => {
+    const result = await runAuditAgentAsync(request, { id: 'omp' }, fakeSpawn({ code: 7 }))
+    expect(result).toMatchObject({ kind: 'rejected', message: 'auditor exited 7' })
+  })
+
+  test('rejects ENOENT (missing binary)', async () => {
+    const result = await runAuditAgentAsync(request, { id: 'omp' }, fakeSpawn({ errorMessage: 'ENOENT' }))
+    expect(result).toMatchObject({ kind: 'rejected', message: 'ENOENT' })
+  })
+
+  test('times out and kills the injected child', async () => {
+    process.env.URTEXT_AUDIT_TIMEOUT_MS = '20'
+    const result = await runAuditAgentAsync(request, { id: 'omp' }, hangingSpawn())
+    delete process.env.URTEXT_AUDIT_TIMEOUT_MS
+    expect(result).toMatchObject({ kind: 'rejected', message: 'auditor timed out' })
+  })
+})
+
+describe('runAgentText (injected fake child)', () => {
+  type FakeBehavior = { stdout?: string; code?: number | null; errorMessage?: string }
+
+  const fakeSpawn = (behavior: FakeBehavior): AsyncSpawn =>
+    ((..._args: unknown[]) => {
+      const child = new EventEmitter() as unknown as ChildProcess
+      const stdout = new EventEmitter()
+      Object.assign(child, {
+        stdout,
+        stdin: {
+          end: () => {
+            queueMicrotask(() => {
+              if (behavior.errorMessage !== undefined) {
+                child.emit('error', new Error(behavior.errorMessage))
+                return
+              }
+              if (behavior.stdout !== undefined) stdout.emit('data', Buffer.from(behavior.stdout))
+              child.emit('close', behavior.code ?? 0)
+            })
+          },
+        },
+        kill: () => {},
+      })
+      return child
+    }) as AsyncSpawn
+
+  test('returns the trimmed text from an injected async child', async () => {
+    const result = await runAgentText('explain this', { id: 'claude' }, fakeSpawn({ stdout: '  a considered explanation  \n' }))
+    expect(result).toEqual({ kind: 'completed', text: 'a considered explanation' })
+  })
+
+  test('rejects empty output', async () => {
+    const result = await runAgentText('explain this', { id: 'claude' }, fakeSpawn({ stdout: '   \n' }))
+    expect(result).toMatchObject({ kind: 'rejected', message: 'agent returned no text' })
+  })
+
+  test('rejects a non-zero exit', async () => {
+    const result = await runAgentText('explain this', { id: 'claude' }, fakeSpawn({ code: 3 }))
+    expect(result).toMatchObject({ kind: 'rejected', message: 'agent exited 3' })
+  })
+
+  test('times out and kills the injected child', async () => {
+    process.env.URTEXT_AUDIT_TIMEOUT_MS = '20'
+    const hangingChild = ((..._args: unknown[]) => {
+      const child = new EventEmitter() as unknown as ChildProcess
+      Object.assign(child, { stdout: new EventEmitter(), stdin: { end: () => {} }, kill: () => {} })
+      return child
+    }) as AsyncSpawn
+    const result = await runAgentText('explain this', { id: 'claude' }, hangingChild)
+    delete process.env.URTEXT_AUDIT_TIMEOUT_MS
+    expect(result).toMatchObject({ kind: 'rejected', message: 'agent timed out' })
   })
 })
