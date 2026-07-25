@@ -67,7 +67,38 @@ dependent/manual targets, the `unmapped.txt` dirty/clean roundtrip, the
 external-outDir compile, and all eight stub-wrapper modes plus the delayed
 mode.
 
-## 5. Manual agent-stub smoke (spot check, four wrappers × two modes)
+## 5. Compiled internal server helper — real HTTP, local stub transport
+
+```sh
+./node_modules/.bin/vitest run tests/ui-acceptance-server.test.ts
+```
+
+Expect: 4/4 green. `scripts/ui-acceptance-server.ts` deep-imports
+`startUiServerWithDeps` (never the public `startUiServer`) and is compiled by
+the same `scripts/tsconfig.ui-acceptance.json` external-outDir build as the
+fixture and stub entries. Run as `node <ACC>/scripts/ui-acceptance-server.js
+--root <fixture-root>` from any cwd, it opens the fixture's own registry,
+builds a local `.urtext/ui-agent-stubs/` wrapper bundle, and starts the
+internal server on port 0 with an injected `spawnAsync` that only ever routes
+to those local wrappers — never a real agent CLI or the network. It prints
+one readiness JSON line (`{"schema":"urtext.ui-acceptance-server.ready/1","url":...}`)
+once listening, and on `SIGINT` (or an IPC `"shutdown"` message) closes the
+server and db, releases the port, and prints one final sanitized-result JSON
+line (`{"schema":"urtext.ui-acceptance-server.result/1","requests":[...],"stubs":[...]}`)
+before exiting 0. Both ledgers are redacted shape-only records — no raw
+argv, prompt, CSRF token, model, or profile ever appears in either.
+
+The test drives real HTTP against the compiled, running instance: console
+GET + CSRF token, a manual-pass decide rejected inline on an empty note (with
+the domain `decisions` table proven unwritten), a valid decide, a high-risk
+review approve, a missing-CSRF 403 that reaches no stub, and all eight
+stub-backed transport submissions (4 auditors × `/api/audit-run`, 4 clients ×
+`/api/explain`) — each yielding exactly one local stub invocation and one
+redacted request record. The domain ledger (SQLite `decisions`/`reviews`/
+`audit_verdicts` tables), the request ledger, and the stub-invocation ledger
+are asserted as three structurally distinct records.
+
+## 6. Manual agent-stub smoke (spot check, four wrappers × two modes)
 
 ```sh
 FIXROOT=$(mktemp -d /tmp/urtext-fixture-XXXXXX)/fixture

@@ -212,6 +212,7 @@ export interface AccBuildPaths {
   outDir: string
   fixtureEntry: string
   stubEntry: string
+  serverEntry: string
 }
 
 /**
@@ -236,6 +237,7 @@ export const compileAccBuild = (outDir: string): AccBuildPaths => {
     outDir,
     fixtureEntry: join(outDir, 'scripts/ui-acceptance-fixture.js'),
     stubEntry: join(outDir, 'scripts/ui-agent-stub.js'),
+    serverEntry: join(outDir, 'scripts/ui-acceptance-server.js'),
   }
 }
 
