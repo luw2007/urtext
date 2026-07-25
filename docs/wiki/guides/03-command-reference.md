@@ -187,6 +187,22 @@ auto-start), the same category as the editor `git rebase -i` spawns (VISION P8).
 Hardening: loopback-only, per-session CSRF token, same-origin and
 JSON-content-type checks, request-body cap. Exit 0 on Ctrl-C.
 
+**Redesigned console/brief (urtext-20260724-ui-redesign)**: every page has a
+skip link, `<header>`, `<nav aria-label="页面导航">`, and one `<main>`; all
+guarded actions (decide/review/explain) are inline `<details>` forms with
+labelled fields and `aria-live` output — the UI never calls `prompt()` or
+`alert()`. The homepage's All Specs section groups every live clause by spec
+file even outside either queue. Each mapping's Code Blame Diff is a
+collapsible block; high-risk or short diffs open by default
+(`URTEXT_UI_DIFF_OPEN_MAX_LINES`, default 80) and every diff truncates past a
+display cap (`URTEXT_UI_DIFF_DISPLAY_MAX_LINES`, default 2000) — both env vars
+must be positive integers or the server fails fast at startup. Every route,
+not only the write routes, validates the loopback `Host` header. Styling ships
+as one inline stylesheet with light/dark tokens (`prefers-color-scheme`),
+`prefers-reduced-motion: reduce` disabling all transitions/animations, and no
+client-side framework, build step, or network fetch — dependency-free and
+local-only end to end.
+
 ## Exit-code summary
 
 This table is a working guide, not an exhaustive spec (the CLI in `src/cli.ts` is

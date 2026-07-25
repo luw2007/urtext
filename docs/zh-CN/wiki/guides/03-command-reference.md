@@ -160,6 +160,19 @@ No decisions recorded.
 （VISION P8）。加固：仅 loopback、会话级 CSRF token、同源与 JSON
 content-type 校验、请求体上限。Ctrl-C 时 Exit 0。
 
+**重设计后的 console/brief（urtext-20260724-ui-redesign）**：每页都有 skip
+link、`<header>`、`<nav aria-label="页面导航">` 与唯一 `<main>`；全部守卫动作
+（decide/review/explain）都是带 label 与 `aria-live` 输出的内联 `<details>`
+表单——页面不再使用 `prompt()`/`alert()`。首页新增 All Specs 区块，按 spec
+文件分组展示全部子句（含未进任一队列的）。每个 mapping 的 Code Blame Diff
+可折叠；高风险或短 diff 默认展开（`URTEXT_UI_DIFF_OPEN_MAX_LINES`，默认
+80），任何 diff 超过显示上限即截断（`URTEXT_UI_DIFF_DISPLAY_MAX_LINES`，默认
+2000）——两个环境变量必须是正整数，否则服务启动即 fail-fast。不止写路由，
+全部路由都校验 loopback `Host` header。样式为单一内联样式表，含
+light/dark token（`prefers-color-scheme`）与 `prefers-reduced-motion: reduce`
+（关闭全部 transition/animation），无客户端框架、无构建步骤、无外部网络
+请求——从头到尾零依赖、仅本地。
+
 ## 退出码摘要
 
 这张表是工作指南，不是穷尽规范（`src/cli.ts` 中的 CLI 才是

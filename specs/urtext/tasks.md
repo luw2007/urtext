@@ -24,3 +24,5 @@
     brief-hash+clean-worktree domain 守卫、gate 脏树重路由、ui 双车道+/brief+hash 直通。
 - [x] T013 UI Spec 影响浏览与 Blame Diff <!-- role:coder depends:T012 gate:true clauses:C019 -->
     全部 clause 浏览、风险/证据/dependency 状态、映射范围真实 diff、workspace unmapped 操作指引与导航刷新。
+- [ ] T014 UI 重设计 browser/evidence 工具与文档同步 <!-- role:coder depends:T013 clauses:C019 -->
+    scripts/ui-browser-check.ts + ui-browser-check-wrapper.mjs + ui-evidence-manifest.ts（纯校验/非自指 manifest/六工具 preflight，静态/单元测试覆盖）；英中命令参考同步渲染契约、diff 阈值环境变量、全路由 Host 校验、light/dark/reduced-motion；不含真实 Chrome/cmux 最终 browser/AX 证据——该项由 trusted final gate 单独完成后方可勾选。
