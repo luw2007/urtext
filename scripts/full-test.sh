@@ -31,16 +31,15 @@ run_negcheck() {
 
   sed '/REPRODUCE FIRST/d' "$tmp/$target" > "$tmp/$target.tmp"
   mv "$tmp/$target.tmp" "$tmp/$target"
+  tsc_bin="$tmp/node_modules/.bin/tsc"
+  test -x "$tsc_bin" || {
+    echo "negcheck: local tsc binary not found in copied worktree: $tsc_bin" >&2
+    exit 1
+  }
 
   verify_output="$tmp/verify.out"
   verify_rc=0
-  (cd "$tmp" && npx --prefix "$ROOT" --no-install tsx src/cli.ts verify) > "$verify_output" || verify_rc=$?
-
-  if [ "$verify_rc" -ne 1 ]; then
-    cat "$verify_output"
-    echo "negcheck: expected verify exit 1, got $verify_rc" >&2
-    exit 1
-  fi
+  (cd "$tmp" && "$tsc_bin" -p tsconfig.json && node dist/cli.js verify) > "$verify_output" || verify_rc=$?
   if ! grep -q 'C301' "$verify_output"; then
     cat "$verify_output"
     echo "negcheck: verify output did not contain C301" >&2
@@ -53,9 +52,18 @@ run_negcheck() {
 
 case "${1-}" in
   '')
-    npx tsc --noEmit -p tsconfig.json
-    npx vitest run
-    npx tsx src/cli.ts verify
+    TSC="$ROOT/node_modules/.bin/tsc"
+    VITEST="$ROOT/node_modules/.bin/vitest"
+    for bin in "$TSC" "$VITEST"; do
+      test -x "$bin" || {
+        echo "full-test: local binary not found: $bin — no dynamic install fallback" >&2
+        exit 1
+      }
+    done
+    "$TSC" --noEmit -p tsconfig.json
+    "$VITEST" run
+    "$TSC" -p tsconfig.json
+    node dist/cli.js verify
     bun build .claude/workflows/urtext-overnight-hunt.js --no-bundle
     bun build .claude/workflows/urtext-fix-cycle.js --no-bundle
     bun build .claude/workflows/urtext-spec-audit.js --no-bundle

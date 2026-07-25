@@ -8,6 +8,11 @@ import type { AuditRequest, AuditVerdictInput } from './audit.js'
 export const AUDITORS = ['claude', 'codex', 'traex', 'omp'] as const
 export type AuditorId = (typeof AUDITORS)[number]
 
+export type AsyncSpawn = typeof spawn
+export interface AgentTransportDeps {
+  spawnAsync?: AsyncSpawn
+}
+
 /** Audit runs invoke an external agent CLI end-to-end; large batches on slow
  * models are minutes-long. Default 60 min; override with URTEXT_AUDIT_TIMEOUT_MS. */
 export const auditTimeoutMs = (): number => {
@@ -186,13 +191,17 @@ export const runAuditAgent = (
   }
 }
 
-export const runAuditAgentAsync = async (request: AuditRequest, options: AuditorOptions): Promise<AuditRunnerResult> => {
+export const runAuditAgentAsync = async (
+  request: AuditRequest,
+  options: AuditorOptions,
+  spawnAsync: AsyncSpawn = spawn
+): Promise<AuditRunnerResult> => {
   if (request.items.length === 0) return { kind: 'completed', verdicts: [] }
   const temp = schemaPath()
   try {
     const { command, args } = commandFor(options, temp.path)
     const output = await new Promise<{ stdout: string; error?: Error }>((resolve) => {
-      const child = spawn(command, args, { stdio: ['pipe', 'pipe', 'ignore'] })
+      const child = spawnAsync(command, args, { stdio: ['pipe', 'pipe', 'ignore'] })
       let stdout = ''
       let settled = false
       const finish = (result: { stdout: string; error?: Error }) => {
@@ -249,11 +258,11 @@ const textCommandFor = (
 
 /** Run a plain-text prompt through a selected headless client and return its
  * text output. Fail-closed: missing client / non-zero / timeout → rejected. */
-export const runAgentText = async (prompt: string, options: AuditorOptions): Promise<AgentTextResult> => {
+export const runAgentText = async (prompt: string, options: AuditorOptions, spawnAsync: AsyncSpawn = spawn): Promise<AgentTextResult> => {
   const { command, args, viaStdin } = textCommandFor(options, prompt)
   try {
     const output = await new Promise<{ stdout: string; error?: Error }>((resolve) => {
-      const child = spawn(command, args, { stdio: ['pipe', 'pipe', 'ignore'] })
+      const child = spawnAsync(command, args, { stdio: ['pipe', 'pipe', 'ignore'] })
       let stdout = ''
       let settled = false
       const finish = (result: { stdout: string; error?: Error }) => {

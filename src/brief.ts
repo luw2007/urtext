@@ -43,6 +43,10 @@ export interface BriefMapping {
   note: string | null
   /** Range content from the CURRENT working tree; null when the file is gone. */
   content: string | null
+  /** Patch hunks from the mapping's recorded HEAD to the current working tree. */
+  diff: string | null
+  /** Git/format failure is distinct from a clean mapped range. */
+  diffError: string | null
 }
 
 export interface BriefManifest {
@@ -128,6 +132,60 @@ const rangeContent = (
   return file.split('\n').slice(lineStart - 1, lineEnd).join('\n')
 }
 
+const HUNK_HEADER = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/
+
+const overlaps = (aStart: number, aEnd: number, bStart: number, bEnd: number): boolean =>
+  aStart <= bEnd && bStart <= aEnd
+
+/** Diff only one mapped file, then retain hunks intersecting the mapping's
+ * new-side range. Mapping ranges are recorded against the working-tree side of
+ * the claim-time diff, so the new-side coordinates are the matching contract. */
+const mappedDiff = (
+  workspaceRoot: string,
+  mapping: { filePath: string; lineStart: number; lineEnd: number; commitSha: string }
+): { diff: string | null; error: string | null } => {
+  const result = spawnSync(
+    'git',
+    ['diff', '--no-ext-diff', '--unified=3', mapping.commitSha, '--', mapping.filePath],
+    { cwd: workspaceRoot, encoding: 'utf8' }
+  )
+  if (result.error || result.status !== 0) {
+    return { diff: null, error: (result.stderr || String(result.error)).trim() || 'git diff failed' }
+  }
+  const output = result.stdout ?? ''
+  if (/^(?:Binary files|GIT binary patch)/m.test(output)) {
+    return { diff: null, error: 'binary diff is not supported' }
+  }
+  if (/^rename (?:from|to) /m.test(output)) {
+    return { diff: null, error: 'rename diff cannot be attributed to a recorded line range' }
+  }
+  const selected: string[] = []
+  let current: string[] | null = null
+  let intersects = false
+  const flush = () => {
+    if (current !== null && intersects) selected.push(current.join('\n'))
+  }
+  for (const line of output.split('\n')) {
+    const header = line.match(HUNK_HEADER)
+    if (header) {
+      flush()
+      const rawCount = header[4] === undefined ? 1 : Number(header[4])
+      if (rawCount === 0) {
+        return { diff: null, error: 'pure deletion diff cannot be attributed to a new-side mapped range' }
+      }
+      current = [line]
+      const start = Math.max(Number(header[3]), 1)
+      const count = rawCount
+      const end = start + Math.max(count, 1) - 1
+      intersects = overlaps(mapping.lineStart, mapping.lineEnd, start, end)
+    } else if (current !== null) {
+      current.push(line)
+    }
+  }
+  flush()
+  return { diff: selected.length > 0 ? selected.join('\n') : null, error: null }
+}
+
 export const buildBrief = (db: Database, workspaceRoot: string, target: ClauseTarget): BriefOutcome => {
   ensureEvidenceLedger(db)
   ensureAuditLedger(db)
@@ -186,6 +244,12 @@ export const buildBrief = (db: Database, workspaceRoot: string, target: ClauseTa
     const rangeKey = `${row.file_path}:${row.line_start}-${row.line_end}`
     if (seenRanges.has(rangeKey)) continue
     seenRanges.add(rangeKey)
+    const diff = mappedDiff(workspaceRoot, {
+      filePath: row.file_path,
+      lineStart: row.line_start,
+      lineEnd: row.line_end,
+      commitSha: row.commit_sha,
+    })
     mappings.push({
       filePath: row.file_path,
       lineStart: row.line_start,
@@ -193,6 +257,8 @@ export const buildBrief = (db: Database, workspaceRoot: string, target: ClauseTa
       commitSha: row.commit_sha,
       note: row.note,
       content: rangeContent(workspaceRoot, row.file_path, row.line_start, row.line_end),
+      diff: diff.diff,
+      diffError: diff.error,
     })
   }
   mappings.sort(

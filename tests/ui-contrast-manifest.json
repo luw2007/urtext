@@ -1,0 +1,398 @@
+{
+  "schema": "urtext.ui-contrast-consumers/2",
+  "sourceContractSha256": "10ed1b746c85ce1a54a101725b5e6537b5b9023324ac58309409cb8b74e6b44d",
+  "renderContractSha256": "aa43ca9283bb2f7badfc5b260d7c41c0173257130ae4d05fecbb7e729c10a193",
+  "fixtureMatrix": [
+    {
+      "id": "console-quiet",
+      "page": "console",
+      "branches": [
+        "console.human.empty",
+        "console.agentLane.open",
+        "console.unmapped.clean",
+        "console.wip.normal",
+        "console.audit.absent",
+        "console.decided.empty"
+      ],
+      "csrfToken": "csrf-token-1",
+      "snapshot": {
+        "head": "1111111111111111111111111111111111111111",
+        "dirty": false,
+        "status": {
+          "schema": "urtext.status/1",
+          "head": "1111111111111111111111111111111111111111",
+          "items": [],
+          "counts": { "agent": 0, "human": 0, "autoPass": 0 },
+          "wip": { "limit": 10, "exceeded": false }
+        },
+        "clauses": [],
+        "decided": 0,
+        "totalManual": 0,
+        "unmapped": [],
+        "unmappedError": null
+      }
+    },
+    {
+      "id": "console-busy",
+      "page": "console",
+      "branches": [
+        "console.human.nonEmpty",
+        "console.agentLane.closed",
+        "console.unmapped.clean",
+        "console.wip.exceeded",
+        "console.audit.present",
+        "console.decided.nonEmpty"
+      ],
+      "csrfToken": "csrf-token-2",
+      "auditResult": "Imported 3 verdict(s) from Claude Code.",
+      "snapshot": {
+        "head": "2222222222222222222222222222222222222222",
+        "dirty": true,
+        "status": {
+          "schema": "urtext.status/1",
+          "head": "2222222222222222222222222222222222222222",
+          "items": [
+            {
+              "key": "specs/a/spec.md#C001",
+              "kind": "clause",
+              "lane": "human",
+              "primary": "manual_undecided",
+              "reasons": ["manual_undecided"],
+              "next": "decide pass/fail",
+              "specPath": "specs/a/spec.md",
+              "clauseId": "C001",
+              "title": "Widget contrast",
+              "risk": "high"
+            },
+            {
+              "key": "specs/a/spec.md#C002",
+              "kind": "clause",
+              "lane": "agent",
+              "primary": "unaudited",
+              "reasons": ["unaudited"],
+              "next": "run audit",
+              "specPath": "specs/a/spec.md",
+              "clauseId": "C002",
+              "title": "Widget audit",
+              "risk": "low"
+            }
+          ],
+          "counts": { "agent": 1, "human": 1, "autoPass": 2 },
+          "wip": { "limit": 1, "exceeded": true }
+        },
+        "clauses": [
+          {
+            "specPath": "specs/a/spec.md",
+            "clauseId": "C001",
+            "title": "Widget contrast",
+            "risk": "high",
+            "decisionVerdict": "pass",
+            "evidenceVerdict": "pass",
+            "stale": false,
+            "actionable": false
+          },
+          {
+            "specPath": "specs/a/spec.md",
+            "clauseId": "C002",
+            "title": "Widget audit",
+            "risk": "low",
+            "decisionVerdict": "fail",
+            "evidenceVerdict": "fail",
+            "stale": false,
+            "actionable": false
+          },
+          {
+            "specPath": "specs/a/spec.md",
+            "clauseId": "C003",
+            "title": "Widget pending",
+            "risk": "low",
+            "decisionVerdict": "none",
+            "evidenceVerdict": "pending",
+            "stale": false,
+            "actionable": false
+          },
+          {
+            "specPath": "specs/a/spec.md",
+            "clauseId": "C004",
+            "title": "Widget unaudited",
+            "risk": "low",
+            "decisionVerdict": "none",
+            "evidenceVerdict": "missing",
+            "stale": false,
+            "actionable": false
+          }
+        ],
+        "decided": 2,
+        "totalManual": 4,
+        "unmapped": [],
+        "unmappedError": null
+      }
+    },
+    {
+      "id": "console-unmapped-hunks",
+      "page": "console",
+      "branches": ["console.unmapped.hunks"],
+      "csrfToken": "csrf-token-3",
+      "snapshot": {
+        "head": "3333333333333333333333333333333333333333",
+        "dirty": false,
+        "status": {
+          "schema": "urtext.status/1",
+          "head": "3333333333333333333333333333333333333333",
+          "items": [],
+          "counts": { "agent": 0, "human": 0, "autoPass": 0 },
+          "wip": { "limit": 10, "exceeded": false }
+        },
+        "clauses": [],
+        "decided": 0,
+        "totalManual": 0,
+        "unmapped": [{ "filePath": "src/foo.ts", "lineStart": 10, "lineEnd": 20 }],
+        "unmappedError": null
+      }
+    },
+    {
+      "id": "console-unmapped-error",
+      "page": "console",
+      "branches": ["console.unmapped.error"],
+      "csrfToken": "csrf-token-4",
+      "snapshot": {
+        "head": "4444444444444444444444444444444444444444",
+        "dirty": false,
+        "status": {
+          "schema": "urtext.status/1",
+          "head": "4444444444444444444444444444444444444444",
+          "items": [],
+          "counts": { "agent": 0, "human": 0, "autoPass": 0 },
+          "wip": { "limit": 10, "exceeded": false }
+        },
+        "clauses": [],
+        "decided": 0,
+        "totalManual": 0,
+        "unmapped": [],
+        "unmappedError": "git diff failed: fatal: ambiguous argument 'HEAD'"
+      }
+    },
+    {
+      "id": "brief-full",
+      "page": "brief",
+      "branches": [
+        "brief.risk.high",
+        "brief.reviewable.true",
+        "brief.evidence.fresh",
+        "brief.mapping.normal",
+        "brief.dependent.current",
+        "brief.nav.prevPresent",
+        "brief.nav.nextPresent"
+      ],
+      "input": {
+        "text": "raw brief text for C001",
+        "csrfToken": "csrf-token-b1",
+        "key": "specs/a/spec.md#C001",
+        "briefHash": "aa11bb22cc33",
+        "reviewable": true,
+        "facts": { "title": "C001 Widget contrast", "files": ["src/foo.ts"], "dependents": 1 },
+        "view": {
+          "schema": "urtext.spec-impact/1",
+          "head": "5555555555555555555555555555555555555555",
+          "target": { "specPath": "specs/a/spec.md", "clauseId": "C001" },
+          "oracleKind": "manual",
+          "oracleRef": null,
+          "risk": "high",
+          "stale": false,
+          "hasEvidence": true,
+          "mappings": [
+            {
+              "filePath": "src/foo.ts",
+              "lineStart": 1,
+              "lineEnd": 5,
+              "commitSha": "abcdef1234567890",
+              "note": null,
+              "content": "const x = 1",
+              "diff": "@@ -1,3 +1,3 @@\n-old line\n+new line\n context line",
+              "diffError": null
+            }
+          ],
+          "impact": {
+            "source": { "specPath": "specs/a/spec.md", "clauseId": "C001" },
+            "affectedClauses": [{ "specPath": "specs/a/spec.md", "clauseId": "C002" }],
+            "affectedTasks": [{ "specPath": "specs/a/tasks.md", "fileId": "T1", "title": "Task one", "clauseId": "C001" }]
+          },
+          "dependents": [
+            { "specPath": "specs/a/spec.md", "clauseId": "C002", "title": "Dependent clause", "stale": false, "evidenceVerdict": "pass" }
+          ],
+          "navigation": {
+            "previous": { "specPath": "specs/a/spec.md", "clauseId": "C000" },
+            "next": { "specPath": "specs/a/spec.md", "clauseId": "C002" }
+          }
+        },
+        "config": { "diffOpenMaxLines": 80, "diffDisplayMaxLines": 2000 }
+      }
+    },
+    {
+      "id": "brief-quiet",
+      "page": "brief",
+      "branches": [
+        "brief.risk.low",
+        "brief.reviewable.false",
+        "brief.evidence.noEvidence",
+        "brief.mapping.empty",
+        "brief.dependent.empty",
+        "brief.nav.prevAbsent",
+        "brief.nav.nextAbsent"
+      ],
+      "input": {
+        "text": "raw brief text for C010",
+        "csrfToken": "csrf-token-b2",
+        "key": "specs/b/spec.md#C010",
+        "briefHash": "dd44ee55ff66",
+        "reviewable": false,
+        "facts": { "title": "C010 Quiet clause", "files": [], "dependents": 0 },
+        "view": {
+          "schema": "urtext.spec-impact/1",
+          "head": "6666666666666666666666666666666666666666",
+          "target": { "specPath": "specs/b/spec.md", "clauseId": "C010" },
+          "oracleKind": "cmd",
+          "oracleRef": "true",
+          "risk": "low",
+          "stale": false,
+          "hasEvidence": false,
+          "mappings": [],
+          "impact": {
+            "source": { "specPath": "specs/b/spec.md", "clauseId": "C010" },
+            "affectedClauses": [],
+            "affectedTasks": []
+          },
+          "dependents": [],
+          "navigation": { "previous": null, "next": null }
+        },
+        "config": { "diffOpenMaxLines": 80, "diffDisplayMaxLines": 2000 }
+      }
+    },
+    {
+      "id": "brief-stale",
+      "page": "brief",
+      "branches": ["brief.evidence.stale", "brief.mapping.error", "brief.dependent.stale"],
+      "input": {
+        "text": "raw brief text for C003",
+        "csrfToken": "csrf-token-b3",
+        "key": "specs/a/spec.md#C003",
+        "briefHash": "112233445566",
+        "reviewable": true,
+        "facts": { "title": "C003 Stale clause", "files": ["src/bar.ts"], "dependents": 1 },
+        "view": {
+          "schema": "urtext.spec-impact/1",
+          "head": "5555555555555555555555555555555555555555",
+          "target": { "specPath": "specs/a/spec.md", "clauseId": "C003" },
+          "oracleKind": "manual",
+          "oracleRef": null,
+          "risk": "high",
+          "stale": true,
+          "hasEvidence": true,
+          "mappings": [
+            {
+              "filePath": "src/bar.ts",
+              "lineStart": 2,
+              "lineEnd": 4,
+              "commitSha": "0123456789ab",
+              "note": null,
+              "content": null,
+              "diff": null,
+              "diffError": "git show failed: binary file"
+            }
+          ],
+          "impact": {
+            "source": { "specPath": "specs/a/spec.md", "clauseId": "C003" },
+            "affectedClauses": [],
+            "affectedTasks": []
+          },
+          "dependents": [
+            { "specPath": "specs/a/spec.md", "clauseId": "C004", "title": "Stale dependent", "stale": true, "evidenceVerdict": "fail" }
+          ],
+          "navigation": { "previous": null, "next": { "specPath": "specs/a/spec.md", "clauseId": "C005" } }
+        },
+        "config": { "diffOpenMaxLines": 80, "diffDisplayMaxLines": 2000 }
+      }
+    },
+    {
+      "id": "brief-truncated",
+      "page": "brief",
+      "branches": ["brief.mapping.truncated"],
+      "input": {
+        "text": "raw brief text for C006",
+        "csrfToken": "csrf-token-b4",
+        "key": "specs/a/spec.md#C006",
+        "briefHash": "aabbccddeeff",
+        "reviewable": false,
+        "facts": { "title": "C006 Truncated clause", "files": ["src/baz.ts"], "dependents": 0 },
+        "view": {
+          "schema": "urtext.spec-impact/1",
+          "head": "5555555555555555555555555555555555555555",
+          "target": { "specPath": "specs/a/spec.md", "clauseId": "C006" },
+          "oracleKind": "manual",
+          "oracleRef": null,
+          "risk": "low",
+          "stale": false,
+          "hasEvidence": true,
+          "mappings": [
+            {
+              "filePath": "src/baz.ts",
+              "lineStart": 1,
+              "lineEnd": 6,
+              "commitSha": "fedcba987654",
+              "note": null,
+              "content": "stuff",
+              "diff": "@@ -1,5 +1,5 @@\n-old1\n+new1\n context1\n+new2\n-old2",
+              "diffError": null
+            }
+          ],
+          "impact": {
+            "source": { "specPath": "specs/a/spec.md", "clauseId": "C006" },
+            "affectedClauses": [],
+            "affectedTasks": []
+          },
+          "dependents": [],
+          "navigation": { "previous": null, "next": null }
+        },
+        "config": { "diffOpenMaxLines": 80, "diffDisplayMaxLines": 3 }
+      }
+    },
+    {
+      "id": "error-page",
+      "page": "error",
+      "branches": ["error.page"],
+      "message": "未找到该条款"
+    }
+  ],
+  "consumers": [
+    { "id": "c-body-main-default", "page": "console", "fixture": "console-quiet", "selector": "body,main", "state": "default", "foregroundToken": "fg", "backgroundToken": "bg" },
+    { "id": "c-a-default", "page": "console", "fixture": "console-quiet", "selector": "a", "state": "default", "foregroundToken": "accent", "backgroundToken": "bg" },
+    { "id": "c-a-focus", "page": "console", "fixture": "console-quiet", "selector": "a", "state": "focus-visible", "foregroundToken": "accent", "backgroundToken": "bg" },
+    { "id": "c-skip-default", "page": "console", "fixture": "console-quiet", "selector": ".skip", "state": "default", "foregroundToken": "skip-fg", "backgroundToken": "skip-bg" },
+    { "id": "c-skip-focus", "page": "console", "fixture": "console-quiet", "selector": ".skip", "state": "focus-visible", "foregroundToken": "skip-fg", "backgroundToken": "skip-bg" },
+    { "id": "c-table-default", "page": "console", "fixture": "console-quiet", "selector": "table", "state": "default", "foregroundToken": "fg", "backgroundToken": "surface" },
+    { "id": "c-table-a-default", "page": "console", "fixture": "console-busy", "selector": "table a", "state": "default", "foregroundToken": "accent", "backgroundToken": "surface" },
+    { "id": "c-muted-default", "page": "console", "fixture": "console-busy", "selector": "[data-tone=\"muted\"]", "state": "default", "foregroundToken": "muted", "backgroundToken": "bg" },
+    { "id": "c-ok-default", "page": "console", "fixture": "console-busy", "selector": "[data-tone=\"ok\"]", "state": "default", "foregroundToken": "ok", "backgroundToken": "ok-bg" },
+    { "id": "c-warn-default", "page": "console", "fixture": "console-busy", "selector": "[data-tone=\"warn\"]", "state": "default", "foregroundToken": "warn", "backgroundToken": "warn-bg" },
+    { "id": "c-danger-default", "page": "console", "fixture": "console-busy", "selector": "[data-tone=\"danger\"]", "state": "default", "foregroundToken": "danger", "backgroundToken": "danger-bg" },
+    { "id": "c-alert-default", "page": "console", "fixture": "console-unmapped-hunks", "selector": "[role=\"alert\"]", "state": "default", "foregroundToken": "danger", "backgroundToken": "danger-bg" },
+    { "id": "b-body-main-default", "page": "brief", "fixture": "brief-full", "selector": "body,main", "state": "default", "foregroundToken": "fg", "backgroundToken": "bg" },
+    { "id": "b-a-default", "page": "brief", "fixture": "brief-full", "selector": "a", "state": "default", "foregroundToken": "accent", "backgroundToken": "bg" },
+    { "id": "b-a-focus", "page": "brief", "fixture": "brief-full", "selector": "a", "state": "focus-visible", "foregroundToken": "accent", "backgroundToken": "bg" },
+    { "id": "b-skip-default", "page": "brief", "fixture": "brief-full", "selector": ".skip", "state": "default", "foregroundToken": "skip-fg", "backgroundToken": "skip-bg" },
+    { "id": "b-skip-focus", "page": "brief", "fixture": "brief-full", "selector": ".skip", "state": "focus-visible", "foregroundToken": "skip-fg", "backgroundToken": "skip-bg" },
+    { "id": "b-muted-default", "page": "brief", "fixture": "brief-quiet", "selector": "[data-tone=\"muted\"]", "state": "default", "foregroundToken": "muted", "backgroundToken": "bg" },
+    { "id": "b-ok-default", "page": "brief", "fixture": "brief-full", "selector": "[data-tone=\"ok\"]", "state": "default", "foregroundToken": "ok", "backgroundToken": "ok-bg" },
+    { "id": "b-warn-default", "page": "brief", "fixture": "brief-stale", "selector": "[data-tone=\"warn\"]", "state": "default", "foregroundToken": "warn", "backgroundToken": "warn-bg" },
+    { "id": "b-danger-default", "page": "brief", "fixture": "brief-full", "selector": "[data-tone=\"danger\"]", "state": "default", "foregroundToken": "danger", "backgroundToken": "danger-bg" },
+    { "id": "b-diff-add-default", "page": "brief", "fixture": "brief-full", "selector": ".diff-add", "state": "default", "foregroundToken": "ok", "backgroundToken": "ok-bg" },
+    { "id": "b-diff-hunk-default", "page": "brief", "fixture": "brief-full", "selector": ".diff-hunk", "state": "default", "foregroundToken": "warn", "backgroundToken": "warn-bg" },
+    { "id": "b-diff-del-default", "page": "brief", "fixture": "brief-full", "selector": ".diff-del", "state": "default", "foregroundToken": "danger", "backgroundToken": "danger-bg" },
+    { "id": "e-body-main-default", "page": "error", "fixture": "error-page", "selector": "body,main", "state": "default", "foregroundToken": "fg", "backgroundToken": "bg" },
+    { "id": "e-a-default", "page": "error", "fixture": "error-page", "selector": "a", "state": "default", "foregroundToken": "accent", "backgroundToken": "bg" },
+    { "id": "e-a-focus", "page": "error", "fixture": "error-page", "selector": "a", "state": "focus-visible", "foregroundToken": "accent", "backgroundToken": "bg" },
+    { "id": "e-skip-default", "page": "error", "fixture": "error-page", "selector": ".skip", "state": "default", "foregroundToken": "skip-fg", "backgroundToken": "skip-bg" },
+    { "id": "e-skip-focus", "page": "error", "fixture": "error-page", "selector": ".skip", "state": "focus-visible", "foregroundToken": "skip-fg", "backgroundToken": "skip-bg" },
+    { "id": "e-alert-default", "page": "error", "fixture": "error-page", "selector": "[role=\"alert\"]", "state": "default", "foregroundToken": "danger", "backgroundToken": "danger-bg" }
+  ]
+}

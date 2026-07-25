@@ -147,4 +147,32 @@ describe('brief-hash freshness semantics', () => {
       expect(outcome.brief.manifest.mappings[0]?.content).toBe('TWO CHANGED AGAIN')
     }
   })
+
+  test('mapped code includes only intersecting blame diff hunks from the mapping HEAD', () => {
+    const root = makeRepo('## C001 t <!-- oracle:cmd:true -->')
+    const baseline = Array.from({ length: 12 }, (_, index) => `line ${index + 1}`)
+    writeFileSync(join(root, 'src.txt'), baseline.join('\n') + '\n')
+    git(root, 'add', '-A')
+    git(root, 'commit', '-q', '-m', 'code baseline')
+    scanWorkspace(db, root)
+
+    const changed = [...baseline]
+    changed[1] = 'LINE TWO CHANGED'
+    changed[10] = 'LINE ELEVEN UNRELATED'
+    writeFileSync(join(root, 'src.txt'), changed.join('\n') + '\n')
+    expect(recordMapping(
+      db,
+      { ...KEY, filePath: 'src.txt', lineStart: 2, lineEnd: 2 },
+      root,
+      1
+    ).kind).toBe('mapped')
+
+    const outcome = buildBrief(db, root, KEY)
+    if (outcome.kind !== 'built') throw new Error('expected a brief')
+    const mapping = outcome.brief.manifest.mappings[0]
+    expect(mapping?.diff).toContain('-line 2')
+    expect(mapping?.diff).toContain('+LINE TWO CHANGED')
+    expect(mapping?.diff).not.toContain('LINE ELEVEN UNRELATED')
+    expect(mapping?.diffError).toBeNull()
+  })
 })

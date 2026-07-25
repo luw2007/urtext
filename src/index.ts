@@ -104,16 +104,22 @@ export {
 } from './decision.js'
 export {
   buildUiSnapshot,
-  renderPage,
   handleDecide,
   handleBrief,
-  renderBriefPage,
+  buildSpecImpactView,
   briefHistory,
   type UiSnapshot,
   type UiClause,
   type DecideResult,
   type BriefApiResult,
+  type ReviewFacts,
+  type ImpactDependent,
+  type ClauseNavigation,
+  type SpecImpactView,
 } from './review-ui.js'
+export { renderConsolePage } from './ui/render-console.js'
+export { renderBriefPage, renderBriefErrorPage } from './ui/render-brief.js'
+export { type BriefPageInput, type UiRenderConfig, readUiRenderConfig, DEFAULT_UI_RENDER_CONFIG } from './ui/contracts.js'
 export { startUiServer, type UiServerHandle } from './ui-server.js'
 export {
   buildStatus,

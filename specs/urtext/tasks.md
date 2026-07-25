@@ -22,3 +22,7 @@
     条文全量+映射内容+内容寻址证据 digest+影响闭包；ready-guard；CLI/ui 共享文本渲染器。
 - [x] T012 批准前置强化与 ui 操作台 <!-- role:coder depends:T011 gate:true clauses:C018 -->
     brief-hash+clean-worktree domain 守卫、gate 脏树重路由、ui 双车道+/brief+hash 直通。
+- [x] T013 UI Spec 影响浏览与 Blame Diff <!-- role:coder depends:T012 gate:true clauses:C019 -->
+    全部 clause 浏览、风险/证据/dependency 状态、映射范围真实 diff、workspace unmapped 操作指引与导航刷新。
+- [x] T014 UI 重设计 browser/evidence 工具与文档同步 <!-- role:coder depends:T013 clauses:C019 -->
+    scripts/ui-browser-check.ts + ui-browser-check-wrapper.mjs + ui-evidence-manifest.ts；schema v2 contrast manifest 绑定 source/render hashes；英中命令参考同步。trusted final gate 已通过 cmux 真实交互与 Chrome 3 页 × 3 viewport × 2 theme 矩阵：998/998 assertions、18 screenshots、0 failure。
