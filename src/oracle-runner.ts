@@ -7,6 +7,8 @@
  */
 
 import { spawnSync } from 'node:child_process'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 
 import type { ParsedClause } from './clause-parser.js'
 
@@ -84,10 +86,20 @@ export const runOracle = (clause: ParsedClause, workspaceRoot: string): OracleRe
     return { verdict: 'fail', exitCode: null, output: 'clause has no oracle' }
   }
   switch (oracle.kind) {
-    case 'test':
-      return oracle.ref
-        ? runCommand('npx', ['vitest', 'run', oracle.ref], workspaceRoot)
-        : { verdict: 'fail', exitCode: null, output: 'test oracle requires a file ref' }
+    case 'test': {
+      if (!oracle.ref) {
+        return { verdict: 'fail', exitCode: null, output: 'test oracle requires a file ref' }
+      }
+      const vitestBin = join(workspaceRoot, 'node_modules', '.bin', 'vitest')
+      if (!existsSync(vitestBin)) {
+        return {
+          verdict: 'fail',
+          exitCode: null,
+          output: `local vitest binary not found at ${vitestBin} — no dynamic install fallback`,
+        }
+      }
+      return runCommand(vitestBin, ['run', oracle.ref], workspaceRoot)
+    }
     case 'cmd': {
       if (!oracle.ref) {
         return { verdict: 'fail', exitCode: null, output: 'cmd oracle requires a command ref' }
