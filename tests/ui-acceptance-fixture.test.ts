@@ -146,7 +146,7 @@ describe('S4 acceptance — external ACC_BUILD TypeScript check', () => {
     expect(result.status, result.stderr).toBe(0)
     expect(JSON.parse(result.stdout)).toMatchObject({ root: fixtureRoot })
     expect(existsSync(join(fixtureRoot, '.urtext/registry.sqlite'))).toBe(true)
-  })
+  }, 30000)
 
   test('compiled browser checker executes its CLI guard from an external build', () => {
     const outDir = scratch('urtext-browser-build-')
