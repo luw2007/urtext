@@ -12,5 +12,5 @@
     "sourceMap": false,
     "skipLibCheck": true
   },
-  "include": ["../src/**/*.ts", "ui-acceptance-fixture.ts", "ui-agent-stub.ts", "ui-browser-check.ts", "ui-evidence-manifest.ts"]
+  "include": ["../src/**/*.ts", "ui-acceptance-fixture.ts", "ui-agent-stub.ts", "ui-acceptance-server.ts", "ui-browser-check.ts", "ui-evidence-manifest.ts"]
 }
