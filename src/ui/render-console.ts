@@ -47,7 +47,7 @@ const appNav = (route: ConsoleRoute, page: number): string => {
   return `<nav aria-label="页面导航">${link('queue', 'Your queue')} · ${link('agent', 'Agent lane')} · ${link(
     'specs',
     'All Specs'
-  )} · ${link('decisions', 'Decided')} · <a href="${esc(pageHref(ROUTE_PATH[route], page))}">刷新状态</a></nav>`
+  )} · ${link('decisions', 'Decided')} · <a class="nav-refresh" href="${esc(pageHref(ROUTE_PATH[route], page))}">刷新状态</a></nav>`
 }
 
 const summary = (snapshot: UiSnapshot): string => {

@@ -57,13 +57,19 @@ Every status is text + symbol + color token — never color alone (§D4).
 | Stale | ⚠ | stale / 证据已过期 | `--warn` | `stale` / `dependent-stale` |
 | Unmapped/error | ⚠ | (existing copy) | `--danger` | `unmapped` / `unmapped-error` / `error` |
 
-## 7. Visual tokens
+## 7. Visual language and tokens
 
-`src/ui/theme.ts` (`THEME_CSS`) is the single source. Light and dark palettes, type scale, and spacing all live there — see the file for exact values. No external fonts, icons, or `url()` resources. Component classes and both `data-tone` values share one CSS string across every page.
+The visual direction is Google Cloud Console + Workspace: restrained product chrome, clear surface hierarchy, compact data density, and prominent but calm interaction states. This is an interaction-language reference, not Google branding: Urtext uses no Google logo, proprietary icon, external font, stylesheet, script, or asset.
 
-## 8. Typography & spacing
+`src/ui/theme.ts` (`THEME_CSS`) remains the single source. The page canvas uses `--canvas`; the application bar, destination navigation, and primary content use `--surface`; supporting controls and headers use `--surface-container` / `--surface-container-high`. `--primary`, `--primary-container`, `--on-primary`, and `--on-primary-container` define actions and active destinations. Light and dark palettes are complete. The committed bidirectional contrast manifest names every visible selector-to-role pair and resolves each pair in both themes; the real Chrome matrix independently checks computed foreground/background contrast.
 
-Type scale: `--fs-s:13px` / `--fs-m:14px` (body) / `--fs-l:16px` / `--fs-xl:20px`; line height `--lh:1.5`. Spacing scale: `--sp-1:4px` through `--sp-6:32px`. Monospace (`--mono`) is reserved for `<code>`, hashes, and diff `<pre>` blocks only — never for prose.
+Shape/elevation are restrained: fields and alerts use 8px radii, tables/forms/details use 12px, and the page surface uses 16px plus one low elevation shadow. Status, destination-navigation, and pagination controls use pill geometry to identify compact states and destinations. No gradient, glass effect, decorative illustration, or ornamental motion. The optional table-row hover tint uses `color-mix()` (Chrome 111+, Safari 16.2+, Firefox 113+); older engines safely omit only that decorative tint.
+
+## 8. Typography, spacing, and component density
+
+Arial/Helvetica/system sans provides the familiar Google-product density without downloading Google Sans or Roboto. Type scale: `--fs-s:13px` / `--fs-m:14px` (body) / `--fs-l:16px` / `--fs-xl:22px`; line height `--lh:1.5`. Spacing remains `--sp-1:4px` through `--sp-6:32px`. Monospace (`--mono`) is reserved for code, hashes, paths, commands, and diff blocks.
+
+The 64px application bar owns product identity and runtime metadata. The destination nav uses 40px links with an explicit primary-container current state. Native inputs, selects, textareas, and buttons have a 44px minimum interaction height; forms are outlined supporting surfaces. Tables use one outlined rounded container, a surface-container header, 52px rows, and a subtle hover tint. Status chips have consistent 24px height, padding, radius, and weight. Pagination is a separated footer toolbar whose previous/next actions and state remain visible at every viewport.
 
 ## 9. Accessibility contract
 

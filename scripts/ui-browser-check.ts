@@ -742,10 +742,10 @@ export const captureFocusOrder = async (client: CdpClient, steps: number): Promi
     await client.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 })
     const res = await client.send('Runtime.evaluate', {
       expression:
-        '(()=>{const e=document.activeElement;if(!e||e===document.body)return "";if(e.classList&&e.classList.contains("skip"))return "skip-link";return e.id||e.tagName.toLowerCase();})()',
-      returnByValue: true,
+        '(()=>{const e=document.activeElement;if(!e||e===document.body)return "";if(e.classList&&e.classList.contains("skip"))return "skip-link";if(e.id)return e.id;const i=Array.prototype.indexOf.call(document.querySelectorAll("*"),e);return e.tagName.toLowerCase()+"@"+i;})()',
     })
     const id = String(res.result.value)
+    if (id !== '' && id === order[0]) break
     if (id !== '') order.push(id)
   }
   return order

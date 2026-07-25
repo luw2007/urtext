@@ -224,12 +224,25 @@ describe('ui contrast manifest — visible-branch coverage', () => {
 // ---------------------------------------------------------------------------
 
 const REGISTERED_PAIRS: Record<string, { fg: string; bg: string }> = {
-  'body,main': { fg: 'fg', bg: 'bg' },
+  body: { fg: 'fg', bg: 'canvas' },
+  main: { fg: 'fg', bg: 'surface' },
+  'body>header code': { fg: 'muted', bg: 'surface-container' },
+  'body>nav a': { fg: 'muted', bg: 'surface' },
+  'body>nav a[aria-current=page]': { fg: 'on-primary-container', bg: 'primary-container' },
+  '.nav-refresh': { fg: 'primary', bg: 'surface' },
+  'thead th': { fg: 'muted', bg: 'surface-container' },
+  'tbody th[scope="rowgroup"]': { fg: 'fg', bg: 'surface-container-high' },
+  caption: { fg: 'muted', bg: 'surface' },
+  label: { fg: 'muted', bg: 'surface-container' },
+  form: { fg: 'fg', bg: 'surface-container' },
+  pre: { fg: 'fg', bg: 'surface-container' },
+  button: { fg: 'on-primary', bg: 'primary' },
+  'button[data-v="fail"],button[data-v="reject"]': { fg: 'danger', bg: 'surface-container' },
   table: { fg: 'fg', bg: 'surface' },
-  a: { fg: 'accent', bg: 'bg' },
+  a: { fg: 'primary', bg: 'surface' },
   '.skip': { fg: 'skip-fg', bg: 'skip-bg' },
-  'table a': { fg: 'accent', bg: 'surface' },
-  '[data-tone="muted"]': { fg: 'muted', bg: 'bg' },
+  'table a': { fg: 'primary', bg: 'surface' },
+  '[data-tone="muted"]': { fg: 'muted', bg: 'surface-container' },
   '[data-tone="ok"]': { fg: 'ok', bg: 'ok-bg' },
   '.diff-add': { fg: 'ok', bg: 'ok-bg' },
   '[data-tone="warn"]': { fg: 'warn', bg: 'warn-bg' },
@@ -237,7 +250,7 @@ const REGISTERED_PAIRS: Record<string, { fg: string; bg: string }> = {
   '[data-tone="danger"]': { fg: 'danger', bg: 'danger-bg' },
   '.diff-del': { fg: 'danger', bg: 'danger-bg' },
   '[role="alert"]': { fg: 'danger', bg: 'danger-bg' },
-  'button[disabled]': { fg: 'muted', bg: 'bg' },
+  'button[disabled]': { fg: 'muted', bg: 'surface-container' },
 }
 
 /** Detection must ignore the embedded `<style>` block: THEME_CSS's own
@@ -248,7 +261,20 @@ const bodyOnly = (html: string): string => html.replace(/<style>[\s\S]*?<\/style
 const withinTables = (html: string): string[] => [...bodyOnly(html).matchAll(/<table>[\s\S]*?<\/table>/g)].map((m) => m[0])
 
 const SELECTOR_DETECTORS: Record<string, (html: string) => boolean> = {
-  'body,main': (html) => /<body>/.test(html) && /<main id="main">/.test(html),
+  body: (html) => /<body>/.test(html),
+  main: (html) => /<main id="main">/.test(html),
+  'body>header code': (html) => /<header>[\s\S]*?<code>/.test(bodyOnly(html)),
+  'body>nav a': (html) => /<nav aria-label="页面导航">[\s\S]*?<a\s/.test(bodyOnly(html)),
+  'body>nav a[aria-current=page]': (html) => /<nav aria-label="页面导航">[\s\S]*?<a[^>]*aria-current="page"/.test(bodyOnly(html)),
+  '.nav-refresh': (html) => /<a class="nav-refresh"\s/.test(bodyOnly(html)),
+  caption: (html) => /<caption>/.test(bodyOnly(html)),
+  'thead th': (html) => /<thead>[\s\S]*?<th(?:\s|>)/.test(bodyOnly(html)),
+  'tbody th[scope="rowgroup"]': (html) => /<tbody[^>]*>[\s\S]*?<th[^>]*scope="rowgroup"/.test(bodyOnly(html)),
+  label: (html) => /<label(?:\s|>)/.test(bodyOnly(html)),
+  form: (html) => /<form(?:\s|>)/.test(bodyOnly(html)),
+  pre: (html) => /<pre(?:\s|>)/.test(bodyOnly(html)),
+  button: (html) => /<button(?![^>]*\sdisabled)[^>]*>/.test(bodyOnly(html)),
+  'button[data-v="fail"],button[data-v="reject"]': (html) => /<button[^>]*data-v="(?:fail|reject)"/.test(bodyOnly(html)),
   a: (html) => /<a\s/.test(bodyOnly(html)),
   '.skip': (html) => /<a class="skip"\s/.test(bodyOnly(html)),
   table: (html) => /<table>/.test(bodyOnly(html)),

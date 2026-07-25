@@ -204,7 +204,7 @@ describe('pageShell', () => {
 
 describe('THEME_CSS accessibility tokens', () => {
   test('defines a :focus-visible outline', () => {
-    expect(THEME_CSS).toMatch(/:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--accent\)/)
+    expect(THEME_CSS).toMatch(/:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--primary\)/)
   })
 
   test('defines a dark theme via prefers-color-scheme', () => {
@@ -238,7 +238,7 @@ describe('THEME_CSS Google-inspired product shell', () => {
   test('renders a distinct application bar, destination navigation, and main surface', () => {
     expect(THEME_CSS).toMatch(/body>header\{[^}]*min-height:64px/)
     expect(THEME_CSS).toMatch(/body>nav\{[^}]*border-bottom:1px solid var\(--outline-variant\)/)
-    expect(THEME_CSS).toMatch(/body>nav a\[aria-current="page"\]\{[^}]*background:var\(--primary-container\)/)
+    expect(THEME_CSS).toMatch(/body>nav a\[aria-current=page\]\{[^}]*background:var\(--primary-container\)/)
     expect(THEME_CSS).toMatch(/main\{[^}]*border-radius:var\(--radius-l\)/)
     expect(THEME_CSS).toMatch(/main\{[^}]*box-shadow:var\(--shadow-1\)/)
   })
@@ -316,15 +316,19 @@ const darkBlockStart = THEME_CSS.indexOf('@media (prefers-color-scheme: dark)')
 const darkTokens = parseTokens(THEME_CSS.slice(darkBlockStart))
 
 const pairs: Array<[string, string]> = [
-  ['fg', 'bg'],
-  ['muted', 'bg'],
-  ['accent', 'bg'],
-  ['ok', 'bg'],
+  ['fg', 'canvas'],
+  ['fg', 'surface'],
+  ['fg', 'surface-container'],
+  ['fg', 'surface-container-high'],
+  ['muted', 'surface'],
+  ['muted', 'surface-container'],
+  ['primary', 'surface'],
+  ['on-primary', 'primary'],
+  ['on-primary-container', 'primary-container'],
   ['ok', 'ok-bg'],
   ['warn', 'warn-bg'],
-  ['warn', 'bg'],
-  ['danger', 'bg'],
   ['danger', 'danger-bg'],
+  ['danger', 'surface-container'],
 ]
 
 describe.each([

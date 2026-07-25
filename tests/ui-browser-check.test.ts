@@ -405,6 +405,36 @@ describe('captureFocusOrder', () => {
     expect(order).toEqual(['skip-link', 'main'])
     expect(client.send).toHaveBeenCalledWith('Input.dispatchKeyEvent', expect.objectContaining({ key: 'Tab', type: 'keyDown' }))
   })
+
+  test('distinguishes separate focusable elements that have no id', async () => {
+    const client: CdpClient = {
+      send: vi.fn(async (method: string) => {
+        if (method === 'Input.dispatchKeyEvent') return {}
+        if (method === 'Runtime.evaluate') return { result: { value: 'a@17' } }
+        throw new Error(`unexpected ${method}`)
+      }),
+      close: vi.fn(),
+    }
+    await expect(captureFocusOrder(client, 1)).resolves.toEqual(['a@17'])
+    expect(client.send).toHaveBeenCalledWith(
+      'Runtime.evaluate',
+      expect.objectContaining({ expression: expect.stringContaining('document.querySelectorAll') }),
+    )
+  })
+
+  test('stops after one complete tab cycle instead of reporting normal wraparound as duplication', async () => {
+    const activeIds = ['skip-link', 'a@10', 'skip-link']
+    let call = 0
+    const client: CdpClient = {
+      send: vi.fn(async (method: string) => {
+        if (method === 'Input.dispatchKeyEvent') return {}
+        if (method === 'Runtime.evaluate') return { result: { value: activeIds[call++] } }
+        throw new Error(`unexpected ${method}`)
+      }),
+      close: vi.fn(),
+    }
+    await expect(captureFocusOrder(client, 3)).resolves.toEqual(['skip-link', 'a@10'])
+  })
 })
 
 describe('waitForPageLoad', () => {
