@@ -1,5 +1,7 @@
 # Urtext Web UI 重设计方案（urtext-20260724-ui-redesign）
 
+> 2026-07-25：本文件 §3.1 的单页 console IA 已由 `docs/plans/urtext-20260725-console-pagination.md` 取代（四路由 + 每路由独立 `?page=`）；token、安全、验收基建章节继续有效。
+
 - 作者：Claude Fable 5（principal product designer & frontend architect）
 - 日期：2026-07-24
 - 性质：决策完备提案（planning only）；落地前须过 plan-approval gate

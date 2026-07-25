@@ -1,14 +1,14 @@
 # Urtext UI Design Contract
 
-Canonical UX contract for the operator console (`/`) and clause detail (`/brief`) pages. Sourced from `docs/plans/urtext-20260724-ui-redesign.md`; any change to information architecture, tokens, or the semantic-attribute registry must update this file in the same change (§16).
+Canonical UX contract for the four console-family pages (`/`, `/agent`, `/specs`, `/decisions`) and clause detail (`/brief`). Sourced from `docs/plans/urtext-20260724-ui-redesign.md` and superseded where noted by `docs/plans/urtext-20260725-console-pagination.md`; any change to information architecture, tokens, or the semantic-attribute registry must update this file in the same change (§16).
 
 ## 1. Scope & non-goals
 
-In scope: server-rendered console and brief pages, their shared visual/token system, and guarded-action forms. Non-goals: client-side filtering/search, a JS framework, client-side routing or state, build tooling, external fonts/icons/scripts, dashboards (charts, cards, gradients). `>150 clauses` or `>8 specs` are noted as future observation values only — they are not implemented, configured, or tested in this contract (YAGNI, §D6).
+In scope: server-rendered console-family and brief pages, their shared visual/token system, pagination, and guarded-action forms. Non-goals: client-side filtering/search, a JS framework, client-side routing or state, build tooling, external fonts/icons/scripts, dashboards (charts, cards, gradients), cursor pagination, or numeric page windows. `>150 clauses` or `>8 specs` are future observation values only — they are not implemented, configured, or tested in this contract (YAGNI, §D6).
 
 ## 2. Authority boundary
 
-This file (`DESIGN.md`, repo root) is the single source of truth for UX: information architecture, interaction, accessibility, content, and visual tokens for the two UI pages. `docs/DESIGN.md` remains the architecture authority (module boundaries, data flow, domain layering) and is not duplicated here. Where the two overlap (e.g. a UI module's place in the dependency graph), `docs/DESIGN.md` governs.
+This file (`DESIGN.md`, repo root) is the single source of truth for UX: information architecture, interaction, accessibility, content, and visual tokens for these five UI pages. `docs/DESIGN.md` remains the architecture authority (module boundaries, data flow, domain layering) and is not duplicated here. Where the two overlap (e.g. a UI module's place in the dependency graph), `docs/DESIGN.md` governs.
 
 ## 3. Personas & core loop
 
@@ -16,17 +16,31 @@ Single persona: the **operator** — one person adjudicating spec clauses agains
 
 ## 4. Information architecture
 
-### 4.1 Console (`/`)
+Each console-family page has exactly one main list region. When non-empty it contains exactly one `<table>`; `/`, `/agent`, and `/decisions` keep their empty copy inside the table body, while `/specs` renders `no live clauses` outside a table.
 
-Fixed top-to-bottom order: skip link → header (title, HEAD sha, dirty chip, quit hint) → nav (Your queue · Agent lane · All Specs · 刷新) → main: summary strip → unmapped banner (if any) → Your queue (default-open) → Agent lane (audit controls always visible; lane list collapsed when the human queue is non-empty) → All Specs (grouped by spec path) → Decided manual clauses.
+### 4.1 Your queue (`/`)
 
-### 4.2 Clause detail (`/brief`)
+Fixed order: shared shell → summary strip → compact unmapped status → paginated human queue. Unmapped remediation commands live only in the corresponding queue rows.
 
-Fixed order: skip link → header (nav: ← console · 查看全部 Specs · 刷新状态 · ← prev/next →) → clause identity header (spec#clause, title, risk badge, oracle metadata) → evidence status chip → mapping status → Code Blame Diff (per-mapping collapsible) → stale dependencies → raw brief text (collapsed `<details>`) → review actions (only when reviewable). Error pages keep the same shell (skip link, header, nav) with no risk badge.
+### 4.2 Agent lane (`/agent`)
+
+Fixed order: shared shell → compact unmapped status → audit result, when present → always-visible audit form → deduplicated next-hint list for the current page → paginated agent queue. The audit form is disabled with an explicit empty state when no evidence is auditable.
+
+### 4.3 All Specs (`/specs`)
+
+Fixed order: shared shell → compact unmapped status → paginated live clauses. A non-empty page uses one table with contiguous spec paths represented as `<tbody data-spec>` row groups; the empty state is `no live clauses` without a table.
+
+### 4.4 Decided (`/decisions`)
+
+Fixed order: shared shell → compact unmapped status → paginated decided manual clauses at HEAD.
+
+### 4.5 Clause detail (`/brief`)
+
+Fixed order: skip link → header (nav: ← console · 查看全部 Specs · 刷新状态 · ← prev/next →) → clause identity header (spec#clause, title, risk badge, oracle metadata) → evidence status chip → mapping status → Code Blame Diff (per-mapping collapsible) → stale dependencies → raw brief text (collapsed `<details>`) → review actions (only when reviewable). Error pages keep the same shell (skip link, header, nav) with no risk badge. `查看全部 Specs` links to `/specs`.
 
 ## 5. Semantic attribute/ID registry
 
-Static IDs: `#main`, `#console-title`, `#your-queue-title`, `#agent-lane-title`, `#all-specs`, `#all-specs-title`, `#decided-title`, `#brief-title`, `#mappings-title`, `#stale-dependencies-title`, `#raw-brief-title`, `#review-title`, `#audit-runner`, `#audit-progress`, `#review-msg`, `#explain-out`, `#workspace-alert-title`, `#error-title`. Dynamic IDs: `spec-group-{index}-title` (0-based render order, one per spec group). `data-*` contracts: `data-banner="unmapped|unmapped-error|wip"`, `data-state="risk-high|risk-low|fresh|stale|no-evidence|dependent-*|error"`, `data-clause="{spec}#{id}"`, `data-section="agent-lane|mappings|stale-dependencies"`, `data-tone="ok|warn|danger|muted"`. Every `aria-labelledby` target above must exist and be unique per rendered page.
+Static IDs: `#main`, `#console-title`, `#your-queue-title`, `#agent-lane-title`, `#all-specs`, `#all-specs-title`, `#decided-title`, `#brief-title`, `#mappings-title`, `#stale-dependencies-title`, `#raw-brief-title`, `#review-title`, `#audit-runner`, `#audit-progress`, `#audit-result`, `#review-msg`, `#explain-out`, `#error-title`. `#agent-lane-title` is an `<h2>` id. `data-*` contracts: `data-banner="unmapped|unmapped-error|wip"`, `data-state="risk-high|risk-low|fresh|stale|no-evidence|dependent-*|error"`, `data-row="{queue-or-decision-key}"`, `data-spec="{spec-path}"`, `data-clause="{spec}#{id}"`, `data-section="mappings|stale-dependencies"`, `data-tone="ok|warn|danger|muted"`. Navigation contracts: `nav[aria-label="页面导航"]`, `nav[aria-label="分页"]`, `a[rel="prev"|"next"]`, and exactly one `aria-current="page"` in the page navigation. Every `aria-labelledby` target must exist and be unique per rendered page.
 
 ## 6. Status vocabulary
 
@@ -57,7 +71,7 @@ Type scale: `--fs-s:13px` / `--fs-m:14px` (body) / `--fs-l:16px` / `--fs-xl:20px
 
 ## 10. Responsive contract
 
-Two breakpoints, min-width first: **720px** (nav wraps below this, tables gain `overflow-x:auto`). Never `display:none` a risk badge, evidence status, unmapped banner, guarded-action button, or error message at any width — only reflow, scroll, or a smaller font step. Diff `<pre>` never soft-wraps (alignment over readability); it scrolls horizontally, including on touch.
+Two breakpoints, min-width first: **720px** (nav wraps below this, tables gain `overflow-x:auto`). Never `display:none` a risk badge, evidence status, unmapped banner, guarded-action button, error message, or pagination control at any width — only reflow, scroll, or a smaller font step. Diff `<pre>` never soft-wraps (alignment over readability); it scrolls horizontally, including on touch.
 
 ## 11. Content guidelines
 
@@ -65,7 +79,7 @@ Interface chrome is Chinese; domain terms (clause, oracle, stale, unmapped, brie
 
 ## 12. Disclosure rules
 
-Your queue is the only default-open work section. Agent lane list is collapsed when the human queue is non-empty, open when it is empty; its audit-run form stays visible regardless. Per-mapping Blame Diff is open when risk is high or the diff is within `config.diffOpenMaxLines`, otherwise collapsed; display truncates at `config.diffDisplayMaxLines`. The raw brief text is always a collapsed `<details>`.
+Console-family lists are separate pages rather than disclosures. The audit form is always visible on `/agent`; when no evidence is auditable its submit button is disabled and an explicit empty-state message remains visible. Per-mapping Blame Diff is open when risk is high or the diff is within `config.diffOpenMaxLines`, otherwise collapsed; display truncates at `config.diffDisplayMaxLines`. The raw brief text is always a collapsed `<details>`.
 
 ## 13. Security constraints for UI
 
@@ -73,11 +87,11 @@ All dynamic values pass through `esc()` before interpolation — no exceptions. 
 
 ## 14. Thresholds
 
-`UiRenderConfig.diffOpenMaxLines` defaults to `80`; `UiRenderConfig.diffDisplayMaxLines` defaults to `2000`. Overridable via `URTEXT_UI_DIFF_OPEN_MAX_LINES` / `URTEXT_UI_DIFF_DISPLAY_MAX_LINES`; both must parse as positive integers or `readUiRenderConfig` throws (fail-fast, no silent clamping). The `>150 clauses` / `>8 specs` values in §1 are non-runtime design guidance only.
+`UiRenderConfig.diffOpenMaxLines` defaults to `80`; `UiRenderConfig.diffDisplayMaxLines` defaults to `2000`. Overridable via `URTEXT_UI_DIFF_OPEN_MAX_LINES` / `URTEXT_UI_DIFF_DISPLAY_MAX_LINES`; both must parse as positive integers or `readUiRenderConfig` throws (fail-fast, no silent clamping). Console-family pagination defaults to 20 items per page and can be overridden by positive-integer `URTEXT_UI_PAGE_SIZE`; this is server/UI-internal configuration and is not part of the public `UiRenderConfig` contract. The `>150 clauses` / `>8 specs` values in §1 are non-runtime design guidance only.
 
 ## 15. Testing contract
 
-`src/ui/*.ts` are pure string builders, tested as string contracts (exact escaping, exact element order, exact token presence) without a browser — see `tests/ui-html.test.ts`. Full-page renderers (console/brief, added by later phases) additionally require actual browser/AX verification for keyboard flow and computed contrast; string tests alone do not clear that bar.
+`src/ui/*.ts` are pure string builders, tested as string contracts (exact escaping, exact element order, exact token presence) without a browser — see `tests/ui-html.test.ts`. Full-page renderers additionally require browser/AX verification for keyboard flow and computed contrast. The console-family matrix uses page names `console`, `agent`, `specs`, `specs-page-2`, and `decisions`; brief and error retain their own page names. String tests alone do not clear that bar.
 
 ## 16. Change protocol
 

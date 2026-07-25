@@ -318,8 +318,12 @@ describe('console-family pagination over HTTP', () => {
       for (const query of ['?page=', '?page=0', '?page=-1', '?page=01', '?page=1.5', '?page=%2B1', '?page=abc', '?page=1e3', '?page=1&page=2']) {
         expect(await body(query)).toBe(first)
       }
-      expect(await body('?page=%32')).toBe(await body('?page=2'))
-      expect(await body(`?page=${'9'.repeat(400)}`)).toBe(await body('?page=3'))
+      const second = await body('?page=2')
+      expect(second).not.toBe(first)
+      expect(await body('?page=%32')).toBe(second)
+      const pageCount = Number(first.match(/第 1 \/ 共 (\d+) 页/)?.[1])
+      expect(await body(`?page=${'9'.repeat(400)}`)).toBe(await body(`?page=${pageCount}`))
+      expect(records.length).toBeGreaterThan(0)
       expect(records.every((record) => record.pathClass === 'specs' && record.status === 200 && record.stage === 'handler')).toBe(true)
     } finally {
       localServer.close()
@@ -327,7 +331,20 @@ describe('console-family pagination over HTTP', () => {
   })
 
   test('pageSize=1 traverses every route in snapshot order with no duplicates', async () => {
+    writeFileSync(join(root, 'specs/x/spec.md'), [
+      '## C001 guarded <!-- oracle:cmd:true risk:high -->',
+      '## C002 dependent <!-- oracle:cmd:true refs:specs/x/spec.md#C001 -->',
+      '## C003 manual gate <!-- oracle:manual -->',
+      '## C004 second manual <!-- oracle:manual -->',
+    ].join('\n'))
+    writeFileSync(join(root, 'tracked-2.txt'), 'baseline')
+    git('add', '-A')
+    git('commit', '-q', '-m', 'add traversal fixtures')
+    scanWorkspace(db, root)
+    writeFileSync(join(root, 'tracked.txt'), 'changed')
+    writeFileSync(join(root, 'tracked-2.txt'), 'changed')
     recordDecision(db, { specPath: 'specs/x/spec.md', clauseId: 'C003', verdict: 'fail', decider: 'test' }, root, 1)
+    recordDecision(db, { specPath: 'specs/x/spec.md', clauseId: 'C004', verdict: 'fail', decider: 'test' }, root, 1)
     const snapshot = buildUiSnapshot(db, root)
     const localServer = await startUiServerWithDeps(db, root, { port: 0, open: false, decider: 'test', pageSize: 1 })
     try {
@@ -340,6 +357,7 @@ describe('console-family pagination over HTTP', () => {
       for (const [path, attribute, expected] of cases) {
         const first = await fetch(`${localServer.url}${path}`).then((response) => response.text())
         const pageCount = Number(first.match(/第 1 \/ 共 (\d+) 页/)?.[1] ?? 1)
+        expect(pageCount).toBeGreaterThan(1)
         const pages = [first]
         for (let page = 2; page <= pageCount; page += 1) {
           pages.push(await fetch(`${localServer.url}${path}?page=${page}`).then((response) => response.text()))

@@ -26,3 +26,5 @@
     全部 clause 浏览、风险/证据/dependency 状态、映射范围真实 diff、workspace unmapped 操作指引与导航刷新。
 - [x] T014 UI 重设计 browser/evidence 工具与文档同步 <!-- role:coder depends:T013 clauses:C019 -->
     scripts/ui-browser-check.ts + ui-browser-check-wrapper.mjs + ui-evidence-manifest.ts；schema v2 contrast manifest 绑定 source/render hashes；英中命令参考同步。trusted final gate 已通过 cmux 真实交互与 Chrome 3 页 × 3 viewport × 2 theme 矩阵：998/998 assertions、18 screenshots、0 failure。
+- [ ] T015 console 分页与页面拆分 <!-- role:coder depends:T014 gate:true clauses:C019 -->
+    四路由 console-family、每路由独立服务端分页、All Specs 跨页完整可达、audit 归属与 browser/contrast/installed-consumer 验收同步。

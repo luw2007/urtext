@@ -163,45 +163,44 @@ No decisions recorded.
 ```
 
 ### `urtext ui [--port <n>] [--no-open]`
-Open the local operator console. Starts an **ephemeral** foreground server on
+Open the local operator UI. It starts an **ephemeral** foreground server on
 `127.0.0.1` (random port unless `--port`), opens your browser (`--no-open` skips
-it), and blocks until **Ctrl-C**. The console renders the same two-lane queue as
-`urtext status` and shows workspace-level unmapped hunks prominently; a detection
-failure is a visible error, never an empty all-clear. Every clause item links to
-its brief. The homepage also lists every live clause, including clauses absent
-from both queues, so the UI is a complete Spec browser rather than only a work
-queue. The brief keeps the exact text printed by `urtext brief` and adds a
-structured summary of `low|high` risk, current evidence freshness, mapped-code
-state, downstream dependency freshness, and the potential impact closure. For
-each mapping it renders the real Git patch from the mapping's recorded HEAD to
-the current working tree, filtered to hunks intersecting that mapped range.
-No mapping, no mapped-range changes, and diff failures are distinct states.
-Pending manual clauses have pass/fail buttons. The browser fetches the current
-brief-hash and posts to the same guarded `recordDecision` path as `urtext decide`;
-passing additionally requires a one-sentence ledger note. A review-ready high-risk
-code clause exposes approve/reject controls on `/brief`, backed by the same
-`recordReview` guards as the CLI: clean worktree, current brief-hash, and HEAD
-binding. The UI never starts nested `urtext` processes or parses CLI display text.
-This is an interactive-session process — not a daemon (no fork, no pid file, no
-auto-start), the same category as the editor `git rebase -i` spawns (VISION P8).
-Hardening: loopback-only, per-session CSRF token, same-origin and
-JSON-content-type checks, request-body cap. Exit 0 on Ctrl-C.
+it), and blocks until **Ctrl-C**. The console family is split into four pages:
+`/` for the human queue and workspace summary, `/agent` for the agent queue and
+audit controls, `/specs` for every live clause, and `/decisions` for decided
+manual clauses at HEAD. Each list owns an independent `?page=N`; page 1 omits
+the query. `URTEXT_UI_PAGE_SIZE` sets the positive-integer server page size
+(default 20). It is internal server/UI configuration, not part of the public
+`UiRenderConfig` package API.
 
-**Redesigned console/brief (urtext-20260724-ui-redesign)**: every page has a
-skip link, `<header>`, `<nav aria-label="页面导航">`, and one `<main>`; all
-guarded actions (decide/review/explain) are inline `<details>` forms with
-labelled fields and `aria-live` output — the UI never calls `prompt()` or
-`alert()`. The homepage's All Specs section groups every live clause by spec
-file even outside either queue. Each mapping's Code Blame Diff is a
-collapsible block; high-risk or short diffs open by default
-(`URTEXT_UI_DIFF_OPEN_MAX_LINES`, default 80) and every diff truncates past a
-display cap (`URTEXT_UI_DIFF_DISPLAY_MAX_LINES`, default 2000) — both env vars
-must be positive integers or the server fails fast at startup. Every route,
-not only the write routes, validates the loopback `Host` header. Styling ships
-as one inline stylesheet with light/dark tokens (`prefers-color-scheme`),
-`prefers-reduced-motion: reduce` disabling all transitions/animations, and no
-client-side framework, build step, or network fetch — dependency-free and
-local-only end to end.
+Workspace-level unmapped detection remains visible on every console-family
+page. The compact notice links back to `/`; exact `urtext map` / `urtext ack`
+remediation appears once, in the corresponding paginated human-queue row. A
+detection failure is a visible error, never an empty all-clear. Every clause
+item links to `/brief`; the All Specs page includes clauses absent from both
+queues. The brief keeps the exact text printed by `urtext brief` and adds risk,
+evidence, mapped-code, dependency, impact, and real mapped-range Git diff state.
+
+Pending manual clauses have pass/fail buttons. The browser fetches the current
+brief-hash and posts through the same guarded `recordDecision` path as the CLI;
+passing also requires a one-sentence ledger note. High-risk code review controls
+remain on `/brief` and use the same clean-worktree, brief-hash, and HEAD guards
+as `urtext review`. Audit controls are always present on `/agent` and disabled
+with an explicit empty state when nothing is auditable. The UI never starts
+nested `urtext` processes or parses CLI display text.
+
+Every page has a skip link, `<header>`, `<nav aria-label="页面导航">`, and one
+`<main>`. Guarded actions are labelled inline forms with `aria-live` output; the
+UI never calls `prompt()` or `alert()`. Each mapping's Code Blame Diff is
+collapsible: high-risk or short diffs open by default
+(`URTEXT_UI_DIFF_OPEN_MAX_LINES`, default 80), and output truncates at
+`URTEXT_UI_DIFF_DISPLAY_MAX_LINES` (default 2000). All three environment values
+must be positive integers or the server fails fast. Every route validates the
+loopback `Host`; writes also enforce per-session CSRF, same-origin, exact JSON
+content type, and a request-body cap. Styling is one inline light/dark,
+reduced-motion-aware stylesheet with no framework, build step, external
+resource, or network request. This is an interactive-session process, not a
+daemon; Ctrl-C exits 0.
 
 ## Codebase fact distillation
 

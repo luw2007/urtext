@@ -146,32 +146,35 @@ No decisions recorded.
 ```
 
 ### `urtext ui [--port <n>] [--no-open]`
-打开本地操作台。在 `127.0.0.1` 起一个**临时**前台服务（随机端口，`--port`
-指定），自动开浏览器（`--no-open` 关闭），Ctrl-C 前一直阻塞。页面渲染与
-`urtext status` 相同的双车道队列，每个子句项链接到其简报（`/brief` 包裹的
-正是 `urtext brief` 打印的同一份文本），待裁决 manual 子句给出 pass/fail
-按钮——点击会先取 brief-hash 再提交到与 `urtext decide` 相同的受守卫
-`recordDecision` 路径，因此高风险 manual 子句没有当前简报无法通过（C018），
-裁决即刻落 `decisions` 账本。点击 **pass** 还会要求输入一句话理由，作为
-决策的 note 落账，并在 ui 写路径上强制非空——一键批准正是盖章化风险所在；
-`fail` 可以不填。高风险**代码**评审保持 CLI-only：面板只展示
-待办与命令，代码是唯一可评审的事实（P5）。这是交互会话期进程——非 daemon
-（不 fork、无 pid 文件、不自启），与 `git rebase -i` 唤起编辑器同类
-（VISION P8）。加固：仅 loopback、会话级 CSRF token、同源与 JSON
-content-type 校验、请求体上限。Ctrl-C 时 Exit 0。
+打开本地操作台。在 `127.0.0.1` 启动**临时**前台服务（随机端口，或由
+`--port` 指定），自动打开浏览器（`--no-open` 可关闭），并阻塞到 Ctrl-C。
+console-family 拆为四页：`/` 是人工队列和工作区摘要，`/agent` 是 Agent 队列
+与 audit 控件，`/specs` 浏览全部 live clause，`/decisions` 浏览当前 HEAD 已裁决
+的 manual clause。每个列表独立使用 `?page=N`，第 1 页省略 query。
+`URTEXT_UI_PAGE_SIZE` 配置正整数服务器页大小（默认 20）；它是服务器/UI 内部
+配置，不属于包的公共 `UiRenderConfig` API。
 
-**重设计后的 console/brief（urtext-20260724-ui-redesign）**：每页都有 skip
-link、`<header>`、`<nav aria-label="页面导航">` 与唯一 `<main>`；全部守卫动作
-（decide/review/explain）都是带 label 与 `aria-live` 输出的内联 `<details>`
-表单——页面不再使用 `prompt()`/`alert()`。首页新增 All Specs 区块，按 spec
-文件分组展示全部子句（含未进任一队列的）。每个 mapping 的 Code Blame Diff
-可折叠；高风险或短 diff 默认展开（`URTEXT_UI_DIFF_OPEN_MAX_LINES`，默认
-80），任何 diff 超过显示上限即截断（`URTEXT_UI_DIFF_DISPLAY_MAX_LINES`，默认
-2000）——两个环境变量必须是正整数，否则服务启动即 fail-fast。不止写路由，
-全部路由都校验 loopback `Host` header。样式为单一内联样式表，含
-light/dark token（`prefers-color-scheme`）与 `prefers-reduced-motion: reduce`
-（关闭全部 transition/animation），无客户端框架、无构建步骤、无外部网络
-请求——从头到尾零依赖、仅本地。
+四页都显示 workspace 级 unmapped 状态。紧凑提示指回 `/`；精确的 `urtext map`
+与 `urtext ack` 修复命令只在对应的分页人工队列行出现一次。检测失败始终是可见
+错误，不会伪装成空的 all-clear。所有 clause 项都链接 `/brief`；All Specs 页也
+包含未进入任一队列的 clause。brief 保留 `urtext brief` 的原文，并展示风险、
+证据新鲜度、映射代码、依赖影响和真实映射范围 Git diff。
+
+待裁决 manual clause 提供 pass/fail 按钮，浏览器先取得当前 brief-hash，再走与
+CLI 相同的 `recordDecision` 守卫；pass 还必须提供一句落账理由。高风险代码评审
+仍在 `/brief`，沿用 clean-worktree、brief-hash 和 HEAD 守卫。audit 表单在
+`/agent` 恒存在；没有可审计项时按钮禁用并显示明确空态。UI 不启动嵌套
+`urtext` 进程，也不解析 CLI 展示文本。
+
+每页都有 skip link、`<header>`、`<nav aria-label="页面导航">` 和唯一 `<main>`；
+守卫动作是带 label 与 `aria-live` 输出的内联表单，不调用 `prompt()`/`alert()`。
+Code Blame Diff 可折叠：高风险或短 diff 默认展开
+（`URTEXT_UI_DIFF_OPEN_MAX_LINES`，默认 80），显示超过
+`URTEXT_UI_DIFF_DISPLAY_MAX_LINES`（默认 2000）即截断。三个环境变量都必须是
+正整数，否则服务启动即 fail-fast。全部路由校验 loopback `Host`；写路由额外
+校验会话 CSRF、同源、精确 JSON content-type 和请求体上限。样式为单一内联
+light/dark、reduced-motion 样式表，无框架、外部资源或网络请求。该进程不是
+daemon；Ctrl-C 时 Exit 0。
 
 ## 退出码摘要
 
