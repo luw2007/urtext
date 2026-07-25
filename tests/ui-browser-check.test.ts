@@ -8,6 +8,7 @@ import {
   accessibleNameSource,
   attachNetworkGuard,
   buildAssertions,
+  collectPageAxLinks,
   captureFocusOrder,
   checkContrastPairs,
   computeExitCode,
@@ -320,20 +321,24 @@ describe('extractDiffIds', () => {
 })
 
 describe('extractAxNodes', () => {
-  test('maps real Accessibility.getFullAXTree nodes and drops ignored ones', async () => {
+  test('maps the full AX tree, preserving ignored ancestors for closure', async () => {
     const client = fakeClient({
       'Accessibility.getFullAXTree': {
         nodes: [
-          { role: { value: 'button' }, name: { value: '' }, ignored: false },
-          { role: { value: 'generic' }, name: { value: 'skip' }, ignored: true },
-          { role: { value: 'link' }, name: { value: 'Home' }, ignored: false },
+          { nodeId: '1', role: { value: 'generic' }, name: { value: '' }, ignored: true },
+          { nodeId: '2', parentId: '1', role: { value: 'button' }, name: { value: '' }, ignored: false },
+          { nodeId: '3', parentId: '1', role: { value: 'link' }, name: { value: 'Home' }, ignored: false },
         ],
       },
     })
-    await expect(extractAxNodes(client)).resolves.toEqual([
-      { role: 'button', name: '', interactive: true },
-      { role: 'link', name: 'Home', interactive: true },
+    const nodes = await extractAxNodes(client)
+    expect(nodes).toEqual([
+      { role: 'generic', name: '', interactive: false, ignored: true, nodeId: '1' },
+      { role: 'button', name: '', interactive: true, ignored: false, nodeId: '2', parentId: '1' },
+      { role: 'link', name: 'Home', interactive: true, ignored: false, nodeId: '3', parentId: '1' },
     ])
+    expect(validateAxTreeClosure(nodes)).toEqual([])
+    expect(missingAxLabels(nodes)).toEqual([nodes[1]])
   })
 
   test('carries nodeId/parentId/backendDOMNodeId/nameSources through for DOM<->AX linkage', async () => {
@@ -356,6 +361,7 @@ describe('extractAxNodes', () => {
       role: 'button',
       name: 'Run audit',
       interactive: true,
+      ignored: false,
       nodeId: '5',
       parentId: '1',
       backendDOMNodeId: 42,
@@ -552,7 +558,26 @@ describe('runCheckAtViewport / buildAssertions / computeExitCode — full wiring
     expect(computeExitCode([ok, bad])).toBe(1)
     expect(computeExitCode([ok])).toBe(0)
   })
+  test('an injected DOM/AX linkage failure reaches the summary assertion and exit code', async () => {
+    const base = buildDispatcher({ axNodes: [{ role: { value: 'button' }, name: { value: 'Run audit' }, ignored: false }] })
+    const originalSend = base.send
+    base.send = vi.fn(async (method: string, params?: Record<string, unknown>) => {
+      if (method === 'DOM.getDocument') return { root: { nodeId: 1 } }
+      if (method === 'DOM.querySelector') return { nodeId: 5 }
+      if (method === 'DOM.describeNode') return { node: { backendNodeId: 42, attributes: ['class', 'id', 'id', 'audit-runner'] } }
+      return originalSend(method, params)
+    })
+    const summary = await runCheckAtViewport(base, 'http://127.0.0.1:9', 'console', 1440, 'light', {
+      ...config,
+      axLinkSelectors: { console: ['#audit-runner'] },
+    })
+    expect(summary.axLinkErrors).toHaveLength(1)
+    expect(buildAssertions(summary).find((assertion) => assertion.name.endsWith(':dom-ax-linkage'))?.pass).toBe(false)
+    expect(computeExitCode([summary])).toBe(1)
+  })
+
 })
+
 
 describe('accessibleNameSource', () => {
   test('reports the first attempted name source', () => {
@@ -607,13 +632,18 @@ describe('linkSelectorToAxNode', () => {
     const client = fakeClient({
       'DOM.getDocument': { root: { nodeId: 1 } },
       'DOM.querySelector': { nodeId: 5 },
-      'DOM.describeNode': { node: { backendNodeId: 42 } },
+      'DOM.describeNode': { node: { backendNodeId: 42, attributes: ['id', 'audit-runner'] } },
     })
-    const axNodes = [{ role: 'button', name: 'Run audit', interactive: true, backendDOMNodeId: 42 }]
+    const axNodes = [{ role: 'button', name: 'Run audit', interactive: true, nodeId: 'ax-42', backendDOMNodeId: 42, nameSources: ['contents'] }]
     await expect(linkSelectorToAxNode(client, '#audit-runner', axNodes)).resolves.toEqual({
       selector: '#audit-runner',
+      domNodeId: 5,
+      domId: 'audit-runner',
       backendDOMNodeId: 42,
-      axNode: axNodes[0],
+      axNodeId: 'ax-42',
+      role: 'button',
+      name: 'Run audit',
+      accessibleNameSource: 'contents',
     })
   })
 
@@ -625,6 +655,35 @@ describe('linkSelectorToAxNode', () => {
     })
     const axNodes = [{ role: 'button', name: 'Run audit', interactive: true, backendDOMNodeId: 7 }]
     await expect(linkSelectorToAxNode(client, '#audit-runner', axNodes)).rejects.toThrow(/no AX node carries backendDOMNodeId 42/)
+  })
+})
+
+describe('collectPageAxLinks', () => {
+  test('records a DOM-backed AX identity for every configured selector', async () => {
+    const client = fakeClient({
+      'DOM.getDocument': { root: { nodeId: 1 } },
+      'DOM.querySelector': { nodeId: 5 },
+      'DOM.describeNode': { node: { backendNodeId: 42, attributes: ['id', 'main'] } },
+    })
+    const result = await collectPageAxLinks(
+      client,
+      'console',
+      [{ role: 'main', name: 'Main', interactive: false, nodeId: 'ax-main', backendDOMNodeId: 42, nameSources: ['contents'] }],
+      { console: ['#main'] },
+    )
+    expect(result.errors).toEqual([])
+    expect(result.links[0]).toMatchObject({ selector: '#main', domId: 'main', backendDOMNodeId: 42, axNodeId: 'ax-main' })
+  })
+
+  test('an injected selector without AX backing becomes a failing linkage record', async () => {
+    const client = fakeClient({
+      'DOM.getDocument': { root: { nodeId: 1 } },
+      'DOM.querySelector': { nodeId: 5 },
+      'DOM.describeNode': { node: { backendNodeId: 42 } },
+    })
+    const result = await collectPageAxLinks(client, 'brief', [], { brief: ['#explain-btn'] })
+    expect(result.links).toEqual([])
+    expect(result.errors[0]).toContain('no AX node carries backendDOMNodeId 42')
   })
 })
 
@@ -727,6 +786,7 @@ describe('verifyButtonDisablesDuringSubmit', () => {
       send: vi.fn(async (method: string) => {
         if (method === 'DOM.getDocument') return { root: { nodeId: 1 } }
         if (method === 'DOM.querySelector') return { nodeId: 9 }
+        if (method === 'DOM.scrollIntoViewIfNeeded') return {}
         if (method === 'DOM.getBoxModel') return { model: { content: [0, 0, 10, 0, 10, 10, 0, 10] } }
         if (method === 'Input.dispatchMouseEvent') {
           clicked = true

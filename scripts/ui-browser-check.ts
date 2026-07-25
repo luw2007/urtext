@@ -197,13 +197,14 @@ export interface AxNode {
   parentId?: string | undefined
   backendDOMNodeId?: number | undefined
   nameSources?: string[] | undefined
+  ignored?: boolean | undefined
 }
 
 const INTERACTIVE_ROLES = new Set(['button', 'link', 'textbox', 'checkbox'])
 
 /** Interactive AX nodes with no accessible name (§5.1 aria label contract). */
 export const missingAxLabels = (nodes: AxNode[]): AxNode[] =>
-  nodes.filter((n) => (n.interactive || INTERACTIVE_ROLES.has(n.role)) && n.name.trim().length === 0)
+  nodes.filter((n) => n.ignored !== true && (n.interactive || INTERACTIVE_ROLES.has(n.role)) && n.name.trim().length === 0)
 
 /** Keyboard focus order errors: skip link must be first, and `expectedFirst` after it must appear before any element not in `order`'s prefix (§5.1/§3.1 item 1). */
 export const validateFocusOrder = (order: string[]): string[] => {
@@ -454,7 +455,7 @@ export const extractDiffIds = async (client: CdpClient): Promise<string[]> => {
   return JSON.parse(res.result.value) as string[]
 }
 
-/** Real accessible-name AX nodes from `Accessibility.getFullAXTree`, filtered to non-ignored nodes. */
+/** Real full AX tree from `Accessibility.getFullAXTree`, including ignored ancestors so parent/child closure remains verifiable. */
 export const extractAxNodes = async (client: CdpClient): Promise<AxNode[]> => {
   const res = await client.send('Accessibility.getFullAXTree', {})
   const nodes = (res.nodes ?? []) as {
@@ -465,21 +466,20 @@ export const extractAxNodes = async (client: CdpClient): Promise<AxNode[]> => {
     name?: { value?: string; sources?: { type?: string; attempted?: boolean }[] }
     ignored?: boolean
   }[]
-  return nodes
-    .filter((n) => n.ignored !== true)
-    .map((n) => {
-      const role = n.role?.value ?? ''
-      const nameSources = n.name?.sources?.filter((s) => s.attempted !== false).map((s) => s.type ?? 'unknown')
-      return {
-        role,
-        name: n.name?.value ?? '',
-        interactive: INTERACTIVE_ROLES.has(role),
-        nodeId: n.nodeId,
-        parentId: n.parentId,
-        backendDOMNodeId: n.backendDOMNodeId,
-        nameSources: nameSources !== undefined && nameSources.length > 0 ? nameSources : undefined,
-      }
-    })
+  return nodes.map((n) => {
+    const role = n.role?.value ?? ''
+    const nameSources = n.name?.sources?.filter((s) => s.attempted !== false).map((s) => s.type ?? 'unknown')
+    return {
+      role,
+      name: n.name?.value ?? '',
+      interactive: n.ignored !== true && INTERACTIVE_ROLES.has(role),
+      ignored: n.ignored === true,
+      nodeId: n.nodeId,
+      parentId: n.parentId,
+      backendDOMNodeId: n.backendDOMNodeId,
+      nameSources: nameSources !== undefined && nameSources.length > 0 ? nameSources : undefined,
+    }
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -488,32 +488,84 @@ export const extractAxNodes = async (client: CdpClient): Promise<AxNode[]> => {
 // one node in the AX tree, proving the two trees describe the same page.
 // ---------------------------------------------------------------------------
 
-/** Resolves a CSS `selector` to its `backendNodeId` via a real DOM.getDocument -> DOM.querySelector -> DOM.describeNode round trip. Throws if the selector matches nothing. */
-export const resolveSelectorBackendNodeId = async (client: CdpClient, selector: string): Promise<number> => {
+export interface DomIdentity {
+  nodeId: number
+  backendDOMNodeId: number
+  domId: string | null
+}
+
+export const resolveSelectorDomIdentity = async (client: CdpClient, selector: string): Promise<DomIdentity> => {
   const { root } = (await client.send('DOM.getDocument', { depth: -1, pierce: true })) as { root: { nodeId: number } }
   const { nodeId } = (await client.send('DOM.querySelector', { nodeId: root.nodeId, selector })) as { nodeId: number }
   if (!nodeId) throw new Error(`selector not found in DOM: ${selector}`)
-  const { node } = (await client.send('DOM.describeNode', { nodeId })) as { node: { backendNodeId: number } }
-  return node.backendNodeId
+  const { node } = (await client.send('DOM.describeNode', { nodeId })) as { node: { backendNodeId: number; attributes?: string[] } }
+  const attributes = node.attributes ?? []
+  let domId: string | null = null
+  for (let index = 0; index < attributes.length; index += 2) {
+    if (attributes[index] === 'id') domId = attributes[index + 1] ?? null
+  }
+  return { nodeId, backendDOMNodeId: node.backendNodeId, domId }
 }
+
+/** Resolves a CSS `selector` to its `backendNodeId` via a real DOM round trip. */
+export const resolveSelectorBackendNodeId = async (client: CdpClient, selector: string): Promise<number> =>
+  (await resolveSelectorDomIdentity(client, selector)).backendDOMNodeId
 
 export interface AxLink {
   selector: string
+  domNodeId: number
+  domId: string | null
   backendDOMNodeId: number
-  axNode: AxNode
+  axNodeId: string | null
+  role: string
+  name: string
+  accessibleNameSource: string
 }
 
 /** Links a CSS `selector` to its AX node by resolving its `backendDOMNodeId` through the DOM and matching it against `axNodes`. Throws if no AX node carries that id — a real linkage failure, not a placeholder. */
 export const linkSelectorToAxNode = async (client: CdpClient, selector: string, axNodes: AxNode[]): Promise<AxLink> => {
-  const backendDOMNodeId = await resolveSelectorBackendNodeId(client, selector)
-  const axNode = axNodes.find((n) => n.backendDOMNodeId === backendDOMNodeId)
-  if (axNode === undefined) throw new Error(`no AX node carries backendDOMNodeId ${backendDOMNodeId} for selector ${JSON.stringify(selector)}`)
-  return { selector, backendDOMNodeId, axNode }
+  const dom = await resolveSelectorDomIdentity(client, selector)
+  const axNode = axNodes.find((node) => node.backendDOMNodeId === dom.backendDOMNodeId)
+  if (axNode === undefined) throw new Error(`no AX node carries backendDOMNodeId ${dom.backendDOMNodeId} for selector ${JSON.stringify(selector)}`)
+  return {
+    selector,
+    domNodeId: dom.nodeId,
+    domId: dom.domId,
+    backendDOMNodeId: dom.backendDOMNodeId,
+    axNodeId: axNode.nodeId ?? null,
+    role: axNode.role,
+    name: axNode.name,
+    accessibleNameSource: accessibleNameSource(axNode),
+  }
 }
 
 /** The first attempted accessible-name computation source (e.g. `contents`, `attribute`) for an AX node, or `'none'` if it has no name. */
 export const accessibleNameSource = (node: AxNode): string => (node.name.trim().length === 0 ? 'none' : (node.nameSources?.[0] ?? 'unknown'))
 
+
+export const PAGE_AX_LINK_SELECTORS: Record<string, string[]> = {
+  console: ['.skip', 'header', 'nav[aria-label="页面导航"]', 'main', 'h1', '#audit-runner', 'table', 'th[scope="col"]'],
+  brief: ['.skip', 'header', 'nav[aria-label="页面导航"]', 'main', 'h1', 'details[data-section="blame-diff"]', '#raw-brief-title', '#review-form', '#explain-btn'],
+  error: ['.skip', 'header', 'nav[aria-label="页面导航"]', 'main', 'h1', '[role="alert"]'],
+}
+
+export const collectPageAxLinks = async (
+  client: CdpClient,
+  page: string,
+  axNodes: AxNode[],
+  selectors: Record<string, string[]> = PAGE_AX_LINK_SELECTORS,
+): Promise<{ links: AxLink[]; errors: string[] }> => {
+  const links: AxLink[] = []
+  const errors: string[] = []
+  for (const selector of selectors[page] ?? []) {
+    try {
+      links.push(await linkSelectorToAxNode(client, selector, axNodes))
+    } catch (error) {
+      errors.push(`${page}:${selector}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+  return { links, errors }
+}
 /** Parent/child closure errors (§8.3.4): every non-root `parentId` must reference a node id present in the same tree. Empty = a fully closed tree. */
 export const validateAxTreeClosure = (nodes: AxNode[]): string[] => {
   const ids = new Set(nodes.map((n) => n.nodeId).filter((id): id is string => id !== undefined))
@@ -638,6 +690,7 @@ export const verifyButtonDisablesDuringSubmit = async (
   const { root } = (await client.send('DOM.getDocument', { depth: -1, pierce: true })) as { root: { nodeId: number } }
   const { nodeId } = (await client.send('DOM.querySelector', { nodeId: root.nodeId, selector })) as { nodeId: number }
   if (!nodeId) throw new Error(`selector not found in DOM: ${selector}`)
+  await client.send('DOM.scrollIntoViewIfNeeded', { nodeId })
   const { model } = (await client.send('DOM.getBoxModel', { nodeId })) as { model: { content: number[] } }
   const [x0, y0, , , x2, y2] = model.content
   const x = (x0! + x2!) / 2
@@ -713,6 +766,8 @@ export interface CheckSummary {
   guardResults: { name: string; pass: boolean }[]
   axClosureErrors: string[]
   pageSpecificErrors: string[]
+  axLinks: AxLink[]
+  axLinkErrors: string[]
   externalRequestCount: number
   disabledCheck: DisabledCheckResult | null
 }
@@ -724,6 +779,7 @@ export interface RunCheckConfig {
   guardCases: HttpGuardCase[]
   pageSpecificExpectations?: PageSpecificExpectation[] | undefined
   disabledButtonSelector?: string | undefined
+  axLinkSelectors?: Record<string, string[]> | undefined
 }
 
 /**
@@ -760,6 +816,9 @@ export const runCheckAtViewport = async (
   const relevantSelectors =
     pageSpecificExpectations !== undefined ? [...new Set(pageSpecificExpectations.filter((e) => e.page === page).map((e) => e.selector))] : []
   const selectorCounts = relevantSelectors.length > 0 ? await extractSelectorCounts(client, relevantSelectors) : {}
+  const axLinkage = config.axLinkSelectors === undefined
+    ? { links: [], errors: [] }
+    : await collectPageAxLinks(client, page, axNodes, config.axLinkSelectors)
 
   const disabledCheck =
     config.disabledButtonSelector !== undefined ? await verifyButtonDisablesDuringSubmit(client, config.disabledButtonSelector) : null
@@ -781,6 +840,8 @@ export const runCheckAtViewport = async (
     axClosureErrors: validateAxTreeClosure(axNodes),
     pageSpecificErrors: pageSpecificExpectations !== undefined ? validatePageSpecificSelectors(page, selectorCounts, pageSpecificExpectations) : [],
     externalRequestCount: networkRecords.filter((r) => r.originClass === 'external').length,
+    axLinks: axLinkage.links,
+    axLinkErrors: axLinkage.errors,
     disabledCheck,
   }
 }
@@ -806,6 +867,7 @@ export const buildAssertions = (summary: CheckSummary): Assertion[] => {
     { name: `${prefix}:real-diff-count`, expected: true, actual: summary.realDiffCount, pass: summary.realDiffCount },
     { name: `${prefix}:ax-closure`, expected: [], actual: summary.axClosureErrors, pass: summary.axClosureErrors.length === 0 },
     { name: `${prefix}:page-specific-selectors`, expected: [], actual: summary.pageSpecificErrors, pass: summary.pageSpecificErrors.length === 0 },
+    { name: `${prefix}:dom-ax-linkage`, expected: [], actual: summary.axLinkErrors, pass: summary.axLinkErrors.length === 0 },
     { name: `${prefix}:no-external-requests`, expected: 0, actual: summary.externalRequestCount, pass: summary.externalRequestCount === 0 },
     ...summary.contrast.map((c) => ({ name: `${prefix}:contrast:${c.label}`, expected: true, actual: c.pass, pass: c.pass })),
     ...summary.guardResults.map((g) => ({ name: `${prefix}:guard:${g.name}`, expected: true, actual: g.pass, pass: g.pass })),
@@ -906,6 +968,7 @@ if (isMain()) {
     disclosureExpectations,
     guardCases: HTTP_GUARD_CASES,
     pageSpecificExpectations: PAGE_SPECIFIC_SELECTORS,
+    axLinkSelectors: PAGE_AX_LINK_SELECTORS,
   }
 
   const summaries: CheckSummary[] = []
