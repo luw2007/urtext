@@ -9,10 +9,10 @@
  * resolved absolutely so the fixture works from any process cwd.
  */
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync, chmodSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync, chmodSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 
 import DatabaseConstructor, { type Database } from 'better-sqlite3'
 
@@ -230,6 +230,7 @@ export const compileAccBuild = (outDir: string): AccBuildPaths => {
   }
   mkdirSync(outDir, { recursive: true })
   writeFileSync(join(outDir, 'package.json'), `${JSON.stringify({ type: 'module' }, null, 2)}\n`)
+  symlinkSync(join(repoRoot, 'node_modules'), join(outDir, 'node_modules'), 'dir')
   return {
     outDir,
     fixtureEntry: join(outDir, 'scripts/ui-acceptance-fixture.js'),
@@ -284,9 +285,10 @@ export const createAgentStubBundle = (
 
   return { binDir, homeDir, logPath, wrappers }
 }
-
-const isMain = (): boolean =>
-  process.argv[1] !== undefined && pathToFileURL(process.argv[1]).href === import.meta.url
+const isMain = (): boolean => {
+  const entry = process.argv[1]
+  return entry !== undefined && realpathSync(entry) === realpathSync(fileURLToPath(import.meta.url))
+}
 
 if (isMain()) {
   const args = process.argv.slice(2)

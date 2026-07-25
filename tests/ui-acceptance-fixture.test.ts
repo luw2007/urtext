@@ -135,6 +135,20 @@ describe('S4 acceptance fixture — unmapped hunk toggle stays clean-tree provab
 })
 
 describe('S4 acceptance — external ACC_BUILD TypeScript check', () => {
+  test('compiled fixture runs from an arbitrary cwd with the approved local dependency closure', () => {
+    const outDir = scratch('urtext-acc-build-')
+    const paths = compileAccBuild(outDir)
+    const fixtureRoot = join(scratch('urtext-compiled-fixture-'), 'fixture')
+    const result = spawnSync(process.execPath, [paths.fixtureEntry, '--root', fixtureRoot], {
+      cwd: tmpdir(),
+      encoding: 'utf8',
+    })
+
+    expect(result.status, result.stderr).toBe(0)
+    expect(JSON.parse(result.stdout)).toMatchObject({ root: fixtureRoot })
+    expect(existsSync(join(fixtureRoot, '.urtext/registry.sqlite'))).toBe(true)
+  })
+
   test('compiles fixture + stub entries to an external outDir with zero repo/dist artifacts', () => {
     const outDir = scratch('urtext-acc-build-')
     const paths = compileAccBuild(outDir)

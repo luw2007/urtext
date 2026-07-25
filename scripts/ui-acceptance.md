@@ -58,7 +58,7 @@ exits 0 with `{"ok":true,...}` and the root remains absent.
 ## 4. Targeted Vitest
 
 ```sh
-npx vitest run tests/ui-acceptance-fixture.test.ts
+./node_modules/.bin/vitest run tests/ui-acceptance-fixture.test.ts
 ```
 
 Expect: 10/10 green, covering arbitrary-cwd setup, cleanup idempotency,
