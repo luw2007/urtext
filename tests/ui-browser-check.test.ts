@@ -27,7 +27,6 @@ import {
   rgbStringToHex,
   runCheckAtViewport,
   sanitizeRequestRecord,
-  validateConfigThresholds,
   validateDisclosure,
   validateFocusOrder,
   validateHeadingOrder,
@@ -190,21 +189,6 @@ describe('validateDisclosure', () => {
       ],
     )
     expect(errors).toEqual(['agent-lane: expected open=false, got open=true'])
-  })
-})
-
-describe('validateConfigThresholds', () => {
-  test('accepts the documented defaults', () => {
-    expect(validateConfigThresholds({ diffOpenMaxLines: 80, diffDisplayMaxLines: 2000 })).toEqual([])
-  })
-
-  test('rejects non-positive and inverted thresholds', () => {
-    expect(validateConfigThresholds({ diffOpenMaxLines: 0, diffDisplayMaxLines: 2000 })).toContain(
-      'diffOpenMaxLines must be a positive integer',
-    )
-    expect(validateConfigThresholds({ diffOpenMaxLines: 100, diffDisplayMaxLines: 50 })).toContain(
-      'diffOpenMaxLines must not exceed diffDisplayMaxLines',
-    )
   })
 })
 

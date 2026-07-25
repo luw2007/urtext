@@ -286,7 +286,6 @@ const pairs: Array<[string, string]> = [
   ['fg', 'bg'],
   ['muted', 'bg'],
   ['accent', 'bg'],
-  ['accent', 'accent-bg'],
   ['ok', 'bg'],
   ['ok', 'ok-bg'],
   ['warn', 'warn-bg'],

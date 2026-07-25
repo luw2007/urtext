@@ -38,8 +38,8 @@ run_negcheck() {
   }
 
   verify_output="$tmp/verify.out"
-  verify_rc=0
-  (cd "$tmp" && "$tsc_bin" -p tsconfig.json && node dist/cli.js verify) > "$verify_output" || verify_rc=$?
+  (cd "$tmp" && "$tsc_bin" -p tsconfig.json)
+  (cd "$tmp" && node dist/cli.js verify) > "$verify_output" || true
   if ! grep -q 'C301' "$verify_output"; then
     cat "$verify_output"
     echo "negcheck: verify output did not contain C301" >&2

@@ -1,7 +1,7 @@
 {
   "schema": "urtext.ui-contrast-consumers/2",
-  "sourceContractSha256": "10ed1b746c85ce1a54a101725b5e6537b5b9023324ac58309409cb8b74e6b44d",
-  "renderContractSha256": "aa43ca9283bb2f7badfc5b260d7c41c0173257130ae4d05fecbb7e729c10a193",
+  "sourceContractSha256": "2910935fa0071666ae7a4c6f8659b77a03ffcf404da88830a67582f29c70d75c",
+  "renderContractSha256": "1d086368aaca3f3360c77533505a964c649e030851c5277d8bae14e3789bf73b",
   "fixtureMatrix": [
     {
       "id": "console-quiet",

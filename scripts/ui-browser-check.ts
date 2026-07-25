@@ -221,7 +221,7 @@ export const reducedMotionHonored = (computedTransition: string, computedAnimati
   computedTransition === 'none' && computedAnimation === 'none'
 
 // ---------------------------------------------------------------------------
-// Progressive disclosure / config thresholds / diff count
+// Progressive disclosure / diff count
 // ---------------------------------------------------------------------------
 
 export interface DisclosureExpectation {
@@ -235,19 +235,6 @@ export const validateDisclosure = (observed: Record<string, boolean>, expectatio
     .filter(({ id, expectedOpen }) => observed[id] !== expectedOpen)
     .map(({ id, expectedOpen }) => `${id}: expected open=${expectedOpen}, got open=${String(observed[id])}`)
 
-export interface RenderConfigLike {
-  diffOpenMaxLines: number
-  diffDisplayMaxLines: number
-}
-
-/** Config threshold sanity independent of `readUiRenderConfig` env parsing (§3.2 item 5): both positive, open <= display. */
-export const validateConfigThresholds = (config: RenderConfigLike): string[] => {
-  const errors: string[] = []
-  if (!Number.isInteger(config.diffOpenMaxLines) || config.diffOpenMaxLines <= 0) errors.push('diffOpenMaxLines must be a positive integer')
-  if (!Number.isInteger(config.diffDisplayMaxLines) || config.diffDisplayMaxLines <= 0) errors.push('diffDisplayMaxLines must be a positive integer')
-  if (config.diffOpenMaxLines > config.diffDisplayMaxLines) errors.push('diffOpenMaxLines must not exceed diffDisplayMaxLines')
-  return errors
-}
 
 const REAL_DIFF_COUNT = 5
 

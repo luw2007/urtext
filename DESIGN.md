@@ -26,7 +26,7 @@ Fixed order: skip link → header (nav: ← console · 查看全部 Specs · 刷
 
 ## 5. Semantic attribute/ID registry
 
-Static IDs: `#main`, `#console-title`, `#your-queue-title`, `#agent-lane-title`, `#all-specs`, `#all-specs-title`, `#decided-title`, `#brief-title`, `#mappings-title`, `#stale-dependencies-title`, `#raw-brief-title`, `#review-title`, `#audit-runner`, `#audit-progress`, `#review-msg`, `#explain-out`, `#workspace-alert-title`, `#error-title`. Dynamic IDs: `spec-group-{index}-title` (0-based render order, one per spec group). `data-*` contracts: `data-banner="unmapped|unmapped-error|wip"`, `data-state="risk-high|risk-low|fresh|stale|no-evidence|dependent-*|error"`, `data-clause="{spec}#{id}"`, `data-section="agent-lane|mappings|stale-dependencies"`, `data-tone="ok|warn|danger|muted|accent"`. Every `aria-labelledby` target above must exist and be unique per render.
+Static IDs: `#main`, `#console-title`, `#your-queue-title`, `#agent-lane-title`, `#all-specs`, `#all-specs-title`, `#decided-title`, `#brief-title`, `#mappings-title`, `#stale-dependencies-title`, `#raw-brief-title`, `#review-title`, `#audit-runner`, `#audit-progress`, `#review-msg`, `#explain-out`, `#workspace-alert-title`, `#error-title`. Dynamic IDs: `spec-group-{index}-title` (0-based render order, one per spec group). `data-*` contracts: `data-banner="unmapped|unmapped-error|wip"`, `data-state="risk-high|risk-low|fresh|stale|no-evidence|dependent-*|error"`, `data-clause="{spec}#{id}"`, `data-section="agent-lane|mappings|stale-dependencies"`, `data-tone="ok|warn|danger|muted"`. Every `aria-labelledby` target above must exist and be unique per rendered page.
 
 ## 6. Status vocabulary
 

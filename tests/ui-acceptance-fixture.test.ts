@@ -7,7 +7,6 @@ import { afterEach, describe, expect, test } from 'vitest'
 
 import { handleBrief } from '../src/index.js'
 import {
-  AGENT_TRANSPORTS,
   buildFixture,
   cleanupFixture,
   compileAccBuild,
@@ -17,7 +16,7 @@ import {
   setupFixture,
   type FixtureHandle,
 } from '../scripts/ui-acceptance-fixture.js'
-import { MODES } from '../scripts/ui-agent-stub.js'
+import { MODES, TRANSPORTS } from '../scripts/ui-agent-stub.js'
 
 const scratchDirs: string[] = []
 const scratch = (prefix: string): string => {
@@ -188,8 +187,8 @@ describe('S4 acceptance — compiled local agent stub bundle', () => {
     const root = scratch('urtext-ui-acceptance-stub-')
     const bundle = createAgentStubBundle(root, paths.stubEntry)
 
-    expect(Object.keys(bundle.wrappers)).toEqual([...AGENT_TRANSPORTS])
-    for (const transport of AGENT_TRANSPORTS) {
+    expect(Object.keys(bundle.wrappers)).toEqual([...TRANSPORTS])
+    for (const transport of TRANSPORTS) {
       const wrapperPath = bundle.wrappers[transport]
       expect(statSync(wrapperPath).mode & 0o777).toBe(0o700)
       for (const mode of MODES) {
@@ -206,14 +205,14 @@ describe('S4 acceptance — compiled local agent stub bundle', () => {
     }
 
     const logLines = readFileSync(bundle.logPath, 'utf8').trim().split('\n')
-    expect(logLines).toHaveLength(AGENT_TRANSPORTS.length * MODES.length)
+    expect(logLines).toHaveLength(TRANSPORTS.length * MODES.length)
     for (const line of logLines) {
       const entry = JSON.parse(line) as Record<string, unknown>
       expect(Object.keys(entry).sort()).toEqual(
         ['argvCount', 'delayedMs', 'mode', 'pid', 'transport', 'ts', 'wrapperRealpath'].sort()
       )
       expect(entry.delayedMs).toBe(0)
-      expect(AGENT_TRANSPORTS as readonly string[]).toContain(entry.transport)
+      expect(TRANSPORTS as readonly string[]).toContain(entry.transport)
     }
   })
 

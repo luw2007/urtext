@@ -25,6 +25,7 @@ import {
   recordMapping,
   worktreeDirty,
 } from '../src/index.js'
+import { TRANSPORTS, type Transport } from './ui-agent-stub.js'
 
 const DEMO_SPEC = `## C001 low runnable base <!-- oracle:cmd:true risk:low -->
 Foundational demo clause with no dependencies; evidence and audit both agree.
@@ -238,14 +239,12 @@ export const compileAccBuild = (outDir: string): AccBuildPaths => {
   }
 }
 
-export const AGENT_TRANSPORTS = ['claude', 'codex', 'traecli', 'omp'] as const
-export type AgentTransport = (typeof AGENT_TRANSPORTS)[number]
 
 export interface AgentStubBundle {
   binDir: string
   homeDir: string
   logPath: string
-  wrappers: Record<AgentTransport, string>
+  wrappers: Record<Transport, string>
 }
 
 /** POSIX single-quote a literal for safe inclusion inside a `sh` command. */
@@ -271,8 +270,8 @@ export const createAgentStubBundle = (
   mkdirSync(homeDir, { recursive: true })
   writeFileSync(logPath, '')
 
-  const wrappers = {} as Record<AgentTransport, string>
-  for (const transport of AGENT_TRANSPORTS) {
+  const wrappers = {} as Record<Transport, string>
+  for (const transport of TRANSPORTS) {
     const wrapperPath = join(binDir, transport)
     writeFileSync(wrapperPath, '#!/bin/sh\nexit 90\n')
     chmodSync(wrapperPath, 0o700)
