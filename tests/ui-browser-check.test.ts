@@ -1,14 +1,28 @@
-import { describe, expect, test } from 'vitest'
+import { describe, expect, test, vi } from 'vitest'
 
+import type { CdpClient, RunCheckConfig } from '../scripts/ui-browser-check.js'
 import {
+  buildAssertions,
+  captureFocusOrder,
   checkContrastPairs,
+  computeExitCode,
   contrastRatio,
   evaluateHttpGuardCase,
+  extractAxNodes,
+  extractContrastPairs,
+  extractDisclosureState,
+  extractDiffIds,
+  extractHeadings,
+  extractLandmarks,
+  extractOverflow,
+  extractReducedMotion,
   HTTP_GUARD_CASES,
   hasHorizontalOverflow,
   missingAxLabels,
   missingLandmarks,
   reducedMotionHonored,
+  rgbStringToHex,
+  runCheckAtViewport,
   sanitizeRequestRecord,
   validateConfigThresholds,
   validateDisclosure,
@@ -16,6 +30,7 @@ import {
   validateHeadingOrder,
   validateRealDiffCount,
   VIEWPORTS,
+  waitForPageLoad,
 } from '../scripts/ui-browser-check.js'
 
 describe('VIEWPORTS', () => {
@@ -191,5 +206,277 @@ describe('sanitizeRequestRecord', () => {
     const sanitized = sanitizeRequestRecord({ status: 200, argv: ['--model', 'x'] }) as Record<string, unknown>
     expect(sanitized.status).toBe(200)
     expect(sanitized.argv).toBe('[REDACTED]')
+  })
+})
+
+const evalValue = (value: unknown): { result: { value: string } } => ({ result: { value: JSON.stringify(value) } })
+
+/** A fake `CdpClient` whose `send` returns queued responses keyed by method, proving each extractor really reads `client.send()` output and nothing is hardcoded. */
+const fakeClient = (responses: Record<string, unknown>): CdpClient => ({
+  send: vi.fn(async (method: string) => {
+    if (!(method in responses)) throw new Error(`unexpected CDP call ${method}`)
+    return responses[method]
+  }),
+  close: vi.fn(),
+})
+
+describe('rgbStringToHex', () => {
+  test('converts a computed rgb() string to lowercase hex', () => {
+    expect(rgbStringToHex('rgb(26, 26, 26)')).toBe('#1a1a1a')
+    expect(rgbStringToHex('rgba(255, 255, 255, 1)')).toBe('#ffffff')
+  })
+
+  test('rejects an unparseable color', () => {
+    expect(() => rgbStringToHex('currentcolor')).toThrow(/unparseable computed color/)
+  })
+})
+
+describe('extractLandmarks', () => {
+  test('parses the real tag list returned by the injected client', async () => {
+    const client = fakeClient({ 'Runtime.evaluate': evalValue(['header', 'nav', 'main']) })
+    await expect(extractLandmarks(client)).resolves.toEqual(['header', 'nav', 'main'])
+  })
+})
+
+describe('extractHeadings', () => {
+  test('parses the real heading list returned by the injected client', async () => {
+    const client = fakeClient({ 'Runtime.evaluate': evalValue([{ level: 1, text: 'title' }]) })
+    await expect(extractHeadings(client)).resolves.toEqual([{ level: 1, text: 'title' }])
+  })
+})
+
+describe('extractOverflow', () => {
+  test('parses real scrollWidth/clientWidth from the injected client', async () => {
+    const client = fakeClient({ 'Runtime.evaluate': evalValue({ scrollWidth: 1600, clientWidth: 1440 }) })
+    await expect(extractOverflow(client)).resolves.toEqual({ scrollWidth: 1600, clientWidth: 1440 })
+  })
+})
+
+describe('extractReducedMotion', () => {
+  test('parses real computed transition/animation from the injected client', async () => {
+    const client = fakeClient({ 'Runtime.evaluate': evalValue({ transition: 'all 0.2s', animation: 'none' }) })
+    await expect(extractReducedMotion(client)).resolves.toEqual({ transition: 'all 0.2s', animation: 'none' })
+  })
+})
+
+describe('extractDisclosureState', () => {
+  test('parses real data-section keyed open state from the injected client', async () => {
+    const client = fakeClient({ 'Runtime.evaluate': evalValue({ 'agent-lane': true }) })
+    await expect(extractDisclosureState(client)).resolves.toEqual({ 'agent-lane': true })
+  })
+})
+
+describe('extractDiffIds', () => {
+  test('parses real blame-diff block ids from the injected client', async () => {
+    const client = fakeClient({ 'Runtime.evaluate': evalValue(['d1', 'd2', 'd3']) })
+    await expect(extractDiffIds(client)).resolves.toEqual(['d1', 'd2', 'd3'])
+  })
+})
+
+describe('extractAxNodes', () => {
+  test('maps real Accessibility.getFullAXTree nodes and drops ignored ones', async () => {
+    const client = fakeClient({
+      'Accessibility.getFullAXTree': {
+        nodes: [
+          { role: { value: 'button' }, name: { value: '' }, ignored: false },
+          { role: { value: 'generic' }, name: { value: 'skip' }, ignored: true },
+          { role: { value: 'link' }, name: { value: 'Home' }, ignored: false },
+        ],
+      },
+    })
+    await expect(extractAxNodes(client)).resolves.toEqual([
+      { role: 'button', name: '', interactive: true },
+      { role: 'link', name: 'Home', interactive: true },
+    ])
+  })
+})
+
+describe('extractContrastPairs', () => {
+  test('converts the injected client rgb() pairs to hex ContrastPair records', async () => {
+    const client = fakeClient({
+      'Runtime.evaluate': evalValue([{ label: 'p-0', fg: 'rgb(26, 26, 26)', bg: 'rgb(255, 255, 255)' }]),
+    })
+    await expect(extractContrastPairs(client)).resolves.toEqual([{ label: 'p-0', fg: '#1a1a1a', bg: '#ffffff' }])
+  })
+})
+
+describe('captureFocusOrder', () => {
+  test('dispatches real Tab key events and maps the skip anchor to skip-link', async () => {
+    const activeIds = ['skip-link', 'main']
+    let call = 0
+    const client: CdpClient = {
+      send: vi.fn(async (method: string) => {
+        if (method === 'Input.dispatchKeyEvent') return {}
+        if (method === 'Runtime.evaluate') return { result: { value: activeIds[call++] } }
+        throw new Error(`unexpected ${method}`)
+      }),
+      close: vi.fn(),
+    }
+    const order = await captureFocusOrder(client, 2)
+    expect(order).toEqual(['skip-link', 'main'])
+    expect(client.send).toHaveBeenCalledWith('Input.dispatchKeyEvent', expect.objectContaining({ key: 'Tab', type: 'keyDown' }))
+  })
+})
+
+describe('waitForPageLoad', () => {
+  test('polls document.readyState via the injected client until complete', async () => {
+    const states = ['loading', 'interactive', 'complete']
+    let call = 0
+    const client = fakeClient({})
+    client.send = vi.fn(async () => ({ result: { value: states[call++] } }))
+    await waitForPageLoad(client, 5000, 0)
+    expect(client.send).toHaveBeenCalledTimes(3)
+  })
+
+  test('throws if the page never reaches complete before the timeout', async () => {
+    const client = fakeClient({})
+    client.send = vi.fn(async () => ({ result: { value: 'loading' } }))
+    await expect(waitForPageLoad(client, 10, 5)).rejects.toThrow(/page load timed out/)
+  })
+})
+
+describe('runCheckAtViewport / buildAssertions / computeExitCode — full wiring and failure injection', () => {
+  const buildDispatcher = (overrides: Partial<{
+    landmarks: string[]
+    headings: { level: number; text: string }[]
+    overflow: { scrollWidth: number; clientWidth: number }
+    motion: { transition: string; animation: string }
+    disclosure: Record<string, boolean>
+    diffIds: string[]
+    contrast: { label: string; fg: string; bg: string }[]
+    focusIds: string[]
+    axNodes: { role: { value: string }; name: { value: string }; ignored?: boolean }[]
+  }>): CdpClient => {
+    const landmarks = overrides.landmarks ?? ['header', 'nav', 'main']
+    const headings = overrides.headings ?? [{ level: 1, text: 'h' }]
+    const overflow = overrides.overflow ?? { scrollWidth: 1440, clientWidth: 1440 }
+    const motion = overrides.motion ?? { transition: 'none', animation: 'none' }
+    const disclosure = overrides.disclosure ?? { 'agent-lane': false }
+    const diffIds = overrides.diffIds ?? ['d1', 'd2', 'd3', 'd4', 'd5']
+    const contrast = overrides.contrast ?? [{ label: 'p-0', fg: 'rgb(26, 26, 26)', bg: 'rgb(255, 255, 255)' }]
+    const focusIds = overrides.focusIds ?? ['skip-link']
+    const axNodes = overrides.axNodes ?? [{ role: { value: 'link' }, name: { value: 'Home' }, ignored: false }]
+
+    let focusCall = 0
+    return {
+      send: vi.fn(async (method: string, params?: Record<string, unknown>) => {
+        if (method === 'Accessibility.getFullAXTree') return { nodes: axNodes }
+        if (method === 'Input.dispatchKeyEvent') return {}
+        if (method === 'Runtime.evaluate') {
+          const expr = String(params?.expression ?? '')
+          if (expr.includes('querySelectorAll("main,header,nav")')) return evalValue(landmarks)
+          if (expr.includes('h1,h2,h3,h4,h5,h6')) return evalValue(headings)
+          if (expr.includes('scrollWidth')) return evalValue(overflow)
+          if (expr.includes('transitionProperty')) return evalValue(motion)
+          if (expr.includes('data-section]')) return evalValue(disclosure)
+          if (expr.includes('blame-diff')) return evalValue(diffIds)
+          if (expr.includes('document.activeElement')) return { result: { value: focusIds[focusCall++] ?? '' } }
+          if (expr.includes("querySelectorAll('body *')")) return evalValue(contrast)
+          throw new Error(`unexpected Runtime.evaluate expression: ${expr}`)
+        }
+        throw new Error(`unexpected CDP call ${method}`)
+      }),
+      close: vi.fn(),
+    }
+  }
+
+  const config: RunCheckConfig = {
+    focusSteps: 1,
+    expectedDiffCount: 5,
+    disclosureExpectations: [{ id: 'agent-lane', expectedOpen: false }],
+    guardCases: [],
+  }
+
+  test('wires every field from the injected client — no field is a fixed placeholder', async () => {
+    const client = buildDispatcher({})
+    const summary = await runCheckAtViewport(client, 'http://127.0.0.1:9', 'console', 1440, 'light', config)
+    expect(summary).toMatchObject({
+      page: 'console',
+      viewport: 1440,
+      colorScheme: 'light',
+      landmarkErrors: [],
+      headingErrors: [],
+      axLabelErrors: [],
+      focusErrors: [],
+      horizontalOverflow: false,
+      reducedMotionOk: true,
+      disclosureErrors: [],
+      realDiffCount: true,
+    })
+    expect(summary.contrast[0]?.pass).toBe(true)
+    expect(buildAssertions(summary).every((a) => a.pass)).toBe(true)
+    expect(computeExitCode([summary])).toBe(0)
+  })
+
+  test('an injected missing landmark fails the corresponding assertion and the exit code', async () => {
+    const client = buildDispatcher({ landmarks: ['header'] })
+    const summary = await runCheckAtViewport(client, 'http://127.0.0.1:9', 'console', 1440, 'light', config)
+    expect(summary.landmarkErrors).toEqual(['main', 'nav'])
+    const landmarkAssertion = buildAssertions(summary).find((a) => a.name.endsWith(':landmarks'))
+    expect(landmarkAssertion?.pass).toBe(false)
+    expect(computeExitCode([summary])).toBe(1)
+  })
+
+  test('an injected duplicate h1 fails the heading assertion and the exit code', async () => {
+    const client = buildDispatcher({ headings: [{ level: 1, text: 'a' }, { level: 1, text: 'b' }] })
+    const summary = await runCheckAtViewport(client, 'http://127.0.0.1:9', 'brief', 1024, 'dark', config)
+    expect(summary.headingErrors.length).toBeGreaterThan(0)
+    expect(computeExitCode([summary])).toBe(1)
+  })
+
+  test('an injected unlabeled interactive AX node fails the ax-labels assertion', async () => {
+    const client = buildDispatcher({ axNodes: [{ role: { value: 'button' }, name: { value: '' } }] })
+    const summary = await runCheckAtViewport(client, 'http://127.0.0.1:9', 'brief', 390, 'light', config)
+    expect(summary.axLabelErrors).toHaveLength(1)
+    expect(computeExitCode([summary])).toBe(1)
+  })
+
+  test('an injected horizontal overflow fails its assertion', async () => {
+    const client = buildDispatcher({ overflow: { scrollWidth: 1600, clientWidth: 1440 } })
+    const summary = await runCheckAtViewport(client, 'http://127.0.0.1:9', 'console', 390, 'light', config)
+    expect(summary.horizontalOverflow).toBe(true)
+    expect(computeExitCode([summary])).toBe(1)
+  })
+
+  test('an injected active transition under reduced-motion fails its assertion', async () => {
+    const client = buildDispatcher({ motion: { transition: 'all 0.2s', animation: 'none' } })
+    const summary = await runCheckAtViewport(client, 'http://127.0.0.1:9', 'console', 1440, 'dark', config)
+    expect(summary.reducedMotionOk).toBe(false)
+    expect(computeExitCode([summary])).toBe(1)
+  })
+
+  test('an injected disclosure state mismatch fails its assertion', async () => {
+    const client = buildDispatcher({ disclosure: { 'agent-lane': true } })
+    const summary = await runCheckAtViewport(client, 'http://127.0.0.1:9', 'console', 1440, 'light', config)
+    expect(summary.disclosureErrors).toHaveLength(1)
+    expect(computeExitCode([summary])).toBe(1)
+  })
+
+  test('an injected wrong diff count fails the real-diff-count assertion', async () => {
+    const client = buildDispatcher({ diffIds: ['d1', 'd2'] })
+    const summary = await runCheckAtViewport(client, 'http://127.0.0.1:9', 'brief', 1440, 'light', config)
+    expect(summary.realDiffCount).toBe(false)
+    expect(computeExitCode([summary])).toBe(1)
+  })
+
+  test('an injected low-contrast pair fails its contrast assertion', async () => {
+    const client = buildDispatcher({ contrast: [{ label: 'low', fg: 'rgb(204, 204, 204)', bg: 'rgb(255, 255, 255)' }] })
+    const summary = await runCheckAtViewport(client, 'http://127.0.0.1:9', 'console', 1440, 'light', config)
+    expect(summary.contrast[0]?.pass).toBe(false)
+    expect(computeExitCode([summary])).toBe(1)
+  })
+
+  test('an injected out-of-order focus capture (skip link not first) fails the focus assertion', async () => {
+    const client = buildDispatcher({ focusIds: ['nav-1'] })
+    const summary = await runCheckAtViewport(client, 'http://127.0.0.1:9', 'console', 1440, 'light', config)
+    expect(summary.focusErrors.length).toBeGreaterThan(0)
+    expect(computeExitCode([summary])).toBe(1)
+  })
+
+  test('a passing summary alongside one injected-failing summary still fails the overall exit code', async () => {
+    const ok = await runCheckAtViewport(buildDispatcher({}), 'http://127.0.0.1:9', 'console', 1440, 'light', config)
+    const bad = await runCheckAtViewport(buildDispatcher({ landmarks: [] }), 'http://127.0.0.1:9', 'error', 1440, 'light', config)
+    expect(computeExitCode([ok, bad])).toBe(1)
+    expect(computeExitCode([ok])).toBe(0)
   })
 })

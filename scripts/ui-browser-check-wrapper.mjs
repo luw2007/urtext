@@ -11,7 +11,7 @@
  * layout to run the wrapper itself.
  *
  * Usage:
- *   node scripts/ui-browser-check-wrapper.mjs --chrome <path> --check <path-to-compiled-ui-browser-check.js> --url <url>
+ *   node scripts/ui-browser-check-wrapper.mjs --chrome <path> --check <path-to-compiled-ui-browser-check.js> --page <name>=<url> [--page <name>=<url> ...]
  */
 import { spawn } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
@@ -74,10 +74,19 @@ if (isMain()) {
   const args = process.argv.slice(2)
   const chromePath = readArg(args, '--chrome')
   const checkPath = readArg(args, '--check')
-  const url = readArg(args, '--url')
-  if (chromePath === undefined || checkPath === undefined || url === undefined) {
-    process.stderr.write('usage: ui-browser-check-wrapper.mjs --chrome <path> --check <compiled-ui-browser-check.js> --url <url>\n')
+  if (chromePath === undefined || checkPath === undefined) {
+    process.stderr.write(
+      'usage: ui-browser-check-wrapper.mjs --chrome <path> --check <compiled-ui-browser-check.js> --page <name>=<url> [--page <name>=<url> ...] [--output-dir <dir>] [--focus-steps <n>] [--diff-count <n>] [--disclosure <id>=<true|false>]\n',
+    )
     process.exit(2)
+  }
+  const forwardedArgs = []
+  for (let i = 0; i < args.length; i += 1) {
+    if (args[i] === '--chrome' || args[i] === '--check') {
+      i += 1
+      continue
+    }
+    forwardedArgs.push(args[i])
   }
 
   const profileDir = mkdtempSync(join(tmpdir(), 'urtext-chrome-profile-'))
@@ -86,9 +95,11 @@ if (isMain()) {
   let exitCode = 1
   try {
     const { port } = await waitForDevToolsActivePort(profileDir)
-    const check = spawn(process.execPath, [checkPath, '--port', String(port), '--profile', profileDir, '--url', url], {
-      stdio: 'inherit',
-    })
+    const check = spawn(
+      process.execPath,
+      [checkPath, '--port', String(port), '--profile', profileDir, ...forwardedArgs],
+      { stdio: 'inherit' },
+    )
     const exited = Promise.withResolvers()
     check.on('exit', (code) => exited.resolve(code ?? 1))
     exitCode = await exited.promise
