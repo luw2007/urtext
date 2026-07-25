@@ -30,7 +30,8 @@ import {
 } from './review-ui.js'
 import { readUiRenderConfig, type UiRenderConfig } from './ui/contracts.js'
 import { renderBriefErrorPage, renderBriefPage } from './ui/render-brief.js'
-import { renderConsolePage } from './ui/render-console.js'
+import { renderConsoleFamilyPage, type ConsoleRoute } from './ui/render-console.js'
+import { readPageSize, resolvePage } from './ui/pagination.js'
 
 export interface UiServerHandle {
   url: string
@@ -39,8 +40,15 @@ export interface UiServerHandle {
 
 const MAX_BODY_BYTES = 4096
 
-type PathClass = 'console' | 'brief' | 'brief-api' | 'decide' | 'review' | 'explain' | 'audit-run' | 'missing'
+type PathClass = 'console' | 'agent' | 'specs' | 'decisions' | 'brief' | 'brief-api' | 'decide' | 'review' | 'explain' | 'audit-run' | 'missing'
 type Stage = 'host' | 'origin' | 'csrf' | 'media-type' | 'body-cap' | 'validation' | 'handler' | 'not-found'
+
+const CONSOLE_ROUTE: Partial<Record<PathClass, ConsoleRoute>> = {
+  console: 'queue',
+  agent: 'agent',
+  specs: 'specs',
+  decisions: 'decisions',
+}
 type HostClass = 'loopback' | 'hostile'
 type OriginClass = 'absent' | 'loopback' | 'hostile'
 
@@ -61,6 +69,7 @@ interface InternalOpts {
   decider: string
   agentDeps?: AgentTransportDeps
   onRequest?: (record: AcceptanceRequestRecord) => void
+  pageSize?: number
 }
 
 /** The bound TCP port, or null when the address is a pipe/not yet listening. */
@@ -82,6 +91,9 @@ const classifyOrigin = (headers: IncomingMessage['headers'], port: number): Orig
 
 const pathClassOf = (method: string, pathname: string): PathClass => {
   if (method === 'GET' && pathname === '/') return 'console'
+  if (method === 'GET' && pathname === '/agent') return 'agent'
+  if (method === 'GET' && pathname === '/specs') return 'specs'
+  if (method === 'GET' && pathname === '/decisions') return 'decisions'
   if (method === 'GET' && pathname === '/brief') return 'brief'
   if (method === 'GET' && pathname === '/api/brief') return 'brief-api'
   if (method === 'POST' && pathname === '/api/decide') return 'decide'
@@ -146,6 +158,7 @@ interface Ctx {
   decider: string
   agentDeps: AgentTransportDeps
   config: UiRenderConfig
+  pageSize: number
 }
 
 const dispatchGet = async (
@@ -162,10 +175,22 @@ const dispatchGet = async (
     res.writeHead(code, { 'content-type': 'application/json' })
     res.end(JSON.stringify(obj))
   }
-  if (pathClass === 'console') {
+  const route = CONSOLE_ROUTE[pathClass]
+  if (route !== undefined) {
     scanWorkspace(ctx.db, ctx.root)
-    const audit = url.searchParams.get('audit')
-    html(200, renderConsolePage(buildUiSnapshot(ctx.db, ctx.root), ctx.csrfToken, audit ?? undefined))
+    html(
+      200,
+      renderConsoleFamilyPage({
+        route,
+        snapshot: buildUiSnapshot(ctx.db, ctx.root),
+        csrfToken: ctx.csrfToken,
+        page: resolvePage(url.searchParams),
+        pageSize: ctx.pageSize,
+        ...(route === 'agent' && url.searchParams.has('audit')
+          ? { auditResult: url.searchParams.get('audit') ?? undefined }
+          : {}),
+      })
+    )
     return { status: 200, stage: 'handler' }
   }
   if (pathClass === 'brief-api') {
@@ -266,7 +291,8 @@ const dispatchPost = async (
 export const startUiServerWithDeps = (db: Database, root: string, opts: InternalOpts): Promise<UiServerHandle> => {
   const csrfToken = randomBytes(16).toString('hex')
   const config = readUiRenderConfig(process.env)
-  const ctx: Ctx = { db, root, csrfToken, decider: opts.decider, agentDeps: opts.agentDeps ?? {}, config }
+  const pageSize = opts.pageSize ?? readPageSize(process.env)
+  const ctx: Ctx = { db, root, csrfToken, decider: opts.decider, agentDeps: opts.agentDeps ?? {}, config, pageSize }
 
   const server: Server = createServer((req, res) => {
     void (async () => {
