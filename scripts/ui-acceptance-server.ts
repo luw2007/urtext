@@ -10,7 +10,8 @@
  * fixture's registry, builds a local agent-stub wrapper bundle rooted at
  * `<root>/.urtext/ui-agent-stubs/` (its own compiled sibling `ui-agent-stub.js`
  * is the stub helper the wrappers exec), and starts the internal server on
- * port 0 with `open: false`, `decider: 'ui-acceptance'`. The injected
+ * port 0 with `open: false`, `decider: 'ui-acceptance'`, `pageSize: 2` (small
+ * enough that the fixture's 5-clause `/specs` route exercises real pagination).
  * `spawnAsync` never touches a real agent CLI or network — it routes the exact
  * command name (`claude`/`codex`/`traecli`/`omp`) an `AuditorId` resolves to
  * onto the matching local wrapper, inferring audit-vs-explain mode from the
@@ -90,6 +91,7 @@ const main = async (): Promise<void> => {
     port: 0,
     open: false,
     decider: 'ui-acceptance',
+    pageSize: 2,
     agentDeps: { spawnAsync: stubSpawnAsync },
     onRequest: (record) => {
       requestRecords.push(record)

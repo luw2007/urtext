@@ -90,7 +90,7 @@ describe('installed better-sqlite3 native closure', () => {
 })
 
 describe('installed runtime consumer — package `.` export only', () => {
-  test('three renderers, real startUiServer lifecycle, and a rejected deep import', () => {
+  test('three renderers, real startUiServer lifecycle, console-family routes, and a rejected deep import', () => {
     const script = `
       import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
       import { tmpdir } from 'node:os'
@@ -142,6 +142,12 @@ describe('installed runtime consumer — package `.` export only', () => {
       const consoleRes = await get('/')
       const briefRes = await get('/brief?spec=specs%2Fx%2Fspec.md&clause=C001')
       const briefErrorRes = await get('/brief?spec=specs%2Fx%2Fspec.md&clause=C999')
+      // Console-family pagination routes — public HTTP surface only, no new
+      // package symbol imported to reach them.
+      const agentRes = await get('/agent')
+      const specsRes = await get('/specs')
+      const specsPage2Res = await get('/specs?page=2')
+      const decisionsRes = await get('/decisions')
       server.close()
 
       if (consoleRes.status !== 200 || !consoleRes.body.includes('<html')) {
@@ -152,6 +158,18 @@ describe('installed runtime consumer — package `.` export only', () => {
       }
       if (!briefErrorRes.body.includes('<html')) {
         throw new Error('brief-error renderer missing <html>: ' + briefErrorRes.status)
+      }
+      if (agentRes.status !== 200 || !agentRes.body.includes('<html')) {
+        throw new Error('/agent missing 200 <html>: ' + agentRes.status)
+      }
+      if (specsRes.status !== 200 || !specsRes.body.includes('<html')) {
+        throw new Error('/specs missing 200 <html>: ' + specsRes.status)
+      }
+      if (specsPage2Res.status !== 200 || !specsPage2Res.body.includes('<html')) {
+        throw new Error('/specs?page=2 missing 200 <html>: ' + specsPage2Res.status)
+      }
+      if (decisionsRes.status !== 200 || !decisionsRes.body.includes('<html')) {
+        throw new Error('/decisions missing 200 <html>: ' + decisionsRes.status)
       }
 
       let deepImportRejected = false

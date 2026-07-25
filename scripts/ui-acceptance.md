@@ -73,7 +73,7 @@ mode.
 ./node_modules/.bin/vitest run tests/ui-acceptance-server.test.ts
 ```
 
-Expect: 4/4 green. `scripts/ui-acceptance-server.ts` deep-imports
+Expect: 5/5 green. `scripts/ui-acceptance-server.ts` deep-imports
 `startUiServerWithDeps` (never the public `startUiServer`) and is compiled by
 the same `scripts/tsconfig.ui-acceptance.json` external-outDir build as the
 fixture and stub entries. Run as `node <ACC>/scripts/ui-acceptance-server.js
@@ -97,6 +97,15 @@ stub-backed transport submissions (4 auditors × `/api/audit-run`, 4 clients ×
 redacted request record. The domain ledger (SQLite `decisions`/`reviews`/
 `audit_verdicts` tables), the request ledger, and the stub-invocation ledger
 are asserted as three structurally distinct records.
+
+The server is started with `pageSize: 2` (the fixture ships 5 live clauses
+across one spec), so a further assertion drives real HTTP at `/agent`,
+`/specs`, `/specs?page=2`, and `/decisions`: all four return `200` with an
+`<html` body, `/specs` renders `第 1/3 页` at the default page and `第 2/3 页`
+at `?page=2` (proving the pagination wiring itself, not just route
+presence), and the final request ledger carries `pathClass` values `agent`,
+`specs`, and `decisions` in the same six-key redacted shape as every other
+record.
 
 ## 6. Manual agent-stub smoke (spot check, four wrappers × two modes)
 
@@ -125,8 +134,46 @@ node "$ACC/scripts/ui-acceptance-fixture.js" --cleanup "$FIXROOT"
 rm -rf "$ACC"
 ```
 
+## 7. Real browser matrix — reference invocation (not executed/verified here)
+
+This checklist's own scope stops at the fixture/stub/compiled-server triad
+above; it never spawns a real browser. The full console-family + brief/error
+matrix (`docs/plans/urtext-20260725-console-pagination.md` §10) is driven
+separately, against a running compiled server (`$SERVER_URL` = the `url`
+from step 5's readiness line), with seven `--page name=url` arguments — one
+per page name in the browser/contrast matrix:
+
+```sh
+node scripts/ui-browser-check-wrapper.mjs \
+  --chrome <path-to-chrome> \
+  --check "$ACC/scripts/ui-browser-check.js" \
+  --contrast-manifest tests/ui-contrast-manifest.json \
+  --source-root . \
+  --page console="$SERVER_URL/" \
+  --page agent="$SERVER_URL/agent" \
+  --page specs="$SERVER_URL/specs" \
+  --page specs-page-2="$SERVER_URL/specs?page=2" \
+  --page decisions="$SERVER_URL/decisions" \
+  --page brief="$SERVER_URL/brief?spec=specs%2Fdemo%2Fspec.md&clause=C004" \
+  --page error="$SERVER_URL/brief?spec=specs%2Fdemo%2Fspec.md&clause=C999" \
+  --disclosure blame-diff=true
+```
+
+`specs-page-2` is its own page name because the server's `pageSize: 2` (step
+5) turns the fixture's 5 live clauses into exactly 3 `/specs` pages.
+`--disclosure` carries only `blame-diff` (brief's collapsible diff block,
+open for the high-risk C004 clause) — there is no `agent-lane` entry: Agent
+lane is no longer a collapsible `<details>` inside `/`, it is its own
+always-rendered `/agent` page, so it has no open/closed state to assert.
+
+This is reference material for whoever runs the trusted final Chrome/CDP
+gate; it is not run, and its output is not part of, this checklist's own
+sign-off below.
+
 ## Sign-off
 
-Every step above must pass with the exact commands shown — no substituted
-script, no skipped step. A failure in any step blocks S4; do not report the
-fixture as ready.
+Steps 1–6 above must all pass with the exact commands shown — no
+substituted script, no skipped step. A failure in any of them blocks S4; do
+not report the fixture as ready. Step 7 is reference material for the
+separate trusted final Chrome gate and is not executed as part of this
+sign-off.

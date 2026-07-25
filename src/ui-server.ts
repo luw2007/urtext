@@ -178,6 +178,7 @@ const dispatchGet = async (
   const route = CONSOLE_ROUTE[pathClass]
   if (route !== undefined) {
     scanWorkspace(ctx.db, ctx.root)
+    const audit = route === 'agent' ? url.searchParams.get('audit') : null
     html(
       200,
       renderConsoleFamilyPage({
@@ -186,9 +187,7 @@ const dispatchGet = async (
         csrfToken: ctx.csrfToken,
         page: resolvePage(url.searchParams),
         pageSize: ctx.pageSize,
-        ...(route === 'agent' && url.searchParams.has('audit')
-          ? { auditResult: url.searchParams.get('audit') ?? undefined }
-          : {}),
+        ...(audit !== null ? { auditResult: audit } : {}),
       })
     )
     return { status: 200, stage: 'handler' }

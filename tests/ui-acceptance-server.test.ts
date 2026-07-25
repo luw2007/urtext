@@ -336,3 +336,51 @@ describe('S4 acceptance — compiled server: eight stub-backed transport submiss
     await expectPortReleased(server.port)
   }, 30000)
 })
+
+
+describe('S4 acceptance — compiled server: paginated console routes (pageSize=2)', () => {
+  test('agent/specs/decisions GET 200 HTML, /specs paginates at pageSize=2, and the final ledger records their pathClass', async () => {
+    const paths = acc()
+    const root = buildCompiledFixture(paths)
+    const server = await startCompiledServer(paths, root)
+
+    const agentRes = await fetch(`${server.url}/agent`)
+    expect(agentRes.status).toBe(200)
+    expect(await agentRes.text()).toContain('<html')
+
+    const specsRes = await fetch(`${server.url}/specs`)
+    expect(specsRes.status).toBe(200)
+    const specsBody = await specsRes.text()
+    expect(specsBody).toContain('<html')
+    // Fixture ships 5 live clauses; pageSize:2 (scripts/ui-acceptance-server.ts) => 3 pages.
+    expect(specsBody).toContain('第 1/3 页')
+
+    const specsPage2Res = await fetch(`${server.url}/specs?page=2`)
+    expect(specsPage2Res.status).toBe(200)
+    const specsPage2Body = await specsPage2Res.text()
+    expect(specsPage2Body).toContain('<html')
+    expect(specsPage2Body).toContain('第 2/3 页')
+
+    const decisionsRes = await fetch(`${server.url}/decisions`)
+    expect(decisionsRes.status).toBe(200)
+    expect(await decisionsRes.text()).toContain('<html')
+
+    const finalResult = (await server.stopAndCollect()) as {
+      requests: { method: string; pathClass: string; status: number; stage: string; hostClass: string; originClass: string }[]
+      stubs: unknown[]
+    }
+    spawnedChildren.length = 0
+
+    for (const pathClass of ['agent', 'specs', 'decisions'] as const) {
+      const records = finalResult.requests.filter((r) => r.pathClass === pathClass)
+      expect(records.length).toBeGreaterThanOrEqual(1)
+      for (const record of records) {
+        expect(record.status).toBe(200)
+        expect(record.stage).toBe('handler')
+        expect(Object.keys(record).sort()).toEqual(['hostClass', 'method', 'originClass', 'pathClass', 'stage', 'status'])
+      }
+    }
+
+    await expectPortReleased(server.port)
+  }, 30000)
+})
