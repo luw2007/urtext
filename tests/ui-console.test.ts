@@ -8,11 +8,13 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 
 import { recordDecision } from '../src/decision.js'
 import { openRegistry } from '../src/registry.js'
-import { buildUiSnapshot } from '../src/review-ui.js'
+import { buildUiSnapshot, type UiSnapshot } from '../src/review-ui.js'
 import { scanWorkspace } from '../src/scanner.js'
+import type { StatusItem } from '../src/status.js'
 import { verifyWorkspace } from '../src/verifier.js'
-import { renderConsolePage } from '../src/ui/render-console.js'
+import { renderConsoleFamilyPage, renderConsolePage, type ConsoleRoute } from '../src/ui/render-console.js'
 import { CONSOLE_SCRIPT } from '../src/ui/console-script.js'
+import { esc } from '../src/ui/html.js'
 
 let db: Database
 const tempDirs: string[] = []
@@ -22,7 +24,6 @@ const git = (root: string, ...args: string[]) => {
   if (result.status !== 0) throw new Error(`git ${args.join(' ')} failed: ${result.stderr}`)
 }
 
-/** A git repo with a manual C001, a runnable C002 (cmd:true), verified. */
 const setupRepo = (extraClauseLine?: string): string => {
   const root = mkdtempSync(join(tmpdir(), 'urtext-ui-console-'))
   tempDirs.push(root)
@@ -40,6 +41,16 @@ const setupRepo = (extraClauseLine?: string): string => {
   return root
 }
 
+const render = (
+  route: ConsoleRoute,
+  snapshot: UiSnapshot,
+  page = 1,
+  pageSize = 20,
+  auditResult?: string
+): string => renderConsoleFamilyPage({ route, snapshot, csrfToken: 'tok', page, pageSize, ...(auditResult !== undefined ? { auditResult } : {}) })
+
+const mainListTableCount = (html: string): number => (html.match(/<table>/g) ?? []).length
+
 beforeEach(() => {
   db = new DatabaseConstructor(':memory:')
   openRegistry(db)
@@ -50,294 +61,364 @@ afterEach(() => {
   for (const dir of tempDirs.splice(0)) rmSync(dir, { force: true, recursive: true })
 })
 
-// ---------------------------------------------------------------------------
-// Page shell / landmarks / accessibility contract (§5.1)
-// ---------------------------------------------------------------------------
-
-describe('renderConsolePage — shell and landmarks', () => {
-  test('skip link is the first focusable element in the body; header/nav/main follow', () => {
-    const root = setupRepo()
-    const html = renderConsolePage(buildUiSnapshot(db, root), 'tok')
+describe('console-family shell and route ownership', () => {
+  test.each<ConsoleRoute>(['queue', 'agent', 'specs', 'decisions'])('%s keeps the shared landmark order and one h1', (route) => {
+    const snapshot = buildUiSnapshot(db, setupRepo())
+    const html = render(route, snapshot)
     const bodyStart = html.indexOf('<body>')
     const skipIdx = html.indexOf('<a class="skip" href="#main">')
     const headerIdx = html.indexOf('<header>')
     const navIdx = html.indexOf('<nav aria-label="页面导航">')
     const mainIdx = html.indexOf('<main id="main">')
-    expect(skipIdx).toBeGreaterThan(bodyStart)
+    expect(bodyStart).toBeLessThan(skipIdx)
     expect(skipIdx).toBeLessThan(headerIdx)
     expect(headerIdx).toBeLessThan(navIdx)
     expect(navIdx).toBeLessThan(mainIdx)
+    expect((html.match(/<h1[ >]/g) ?? [])).toHaveLength(1)
     expect(html).toContain('<html lang="zh-CN">')
   })
 
-  test('exactly one h1, header has no nav links', () => {
+  test('shared header renders short HEAD, dirty state, and no links', () => {
     const root = setupRepo()
-    const html = renderConsolePage(buildUiSnapshot(db, root), 'tok')
-    expect((html.match(/<h1[ >]/g) ?? []).length).toBe(1)
-    expect(html).toContain('<h1 id="console-title">urtext console</h1>')
-    const headerHtml = html.slice(html.indexOf('<header>'), html.indexOf('</header>'))
-    expect(headerHtml).not.toContain('<a href')
-  })
-
-  test('nav contains the four fixed links in order', () => {
-    const root = setupRepo()
-    const html = renderConsolePage(buildUiSnapshot(db, root), 'tok')
-    const nav = html.slice(html.indexOf('<nav'), html.indexOf('</nav>'))
-    const hrefs = [...nav.matchAll(/href="([^"]+)"/g)].map((m) => m[1])
-    expect(hrefs).toEqual(['#your-queue-title', '#agent-lane-title', '#all-specs', '/'])
-  })
-
-  test('every aria-labelledby target id exists exactly once', () => {
-    const root = setupRepo()
-    const html = renderConsolePage(buildUiSnapshot(db, root), 'tok')
-    const refs = [...html.matchAll(/aria-labelledby="([^"]+)"/g)].map((m) => m[1])
-    expect(refs.length).toBeGreaterThan(0)
-    for (const id of refs) {
-      const count = (html.match(new RegExp(`id="${id}"`, 'g')) ?? []).length
-      expect(count).toBe(1)
-    }
-  })
-
-  test('all tables have a caption and column headers with scope=col', () => {
-    const root = setupRepo()
-    const html = renderConsolePage(buildUiSnapshot(db, root), 'tok')
-    const tables = [...html.matchAll(/<table>[\s\S]*?<\/table>/g)].map((m) => m[0])
-    expect(tables.length).toBeGreaterThan(0)
-    for (const table of tables) {
-      expect(table).toContain('<caption>')
-      expect(table).toContain('<th scope="col">')
-    }
-  })
-
-  test('csrf token is embedded via the shared meta contract', () => {
-    const root = setupRepo()
-    const html = renderConsolePage(buildUiSnapshot(db, root), 'my-token')
-    expect(html).toContain('<meta name="csrf-token" content="my-token">')
-  })
-
-  test('script contains no prompt/alert calls and no inline event attributes', () => {
-    expect(CONSOLE_SCRIPT).not.toMatch(/\bprompt\(/)
-    expect(CONSOLE_SCRIPT).not.toMatch(/\balert\(/)
-    expect(CONSOLE_SCRIPT).not.toMatch(/\son\w+=/)
-  })
-})
-
-// ---------------------------------------------------------------------------
-// Header, summary, wip banner (§3.1 items 2/4)
-// ---------------------------------------------------------------------------
-
-describe('renderConsolePage — header and summary', () => {
-  test('header shows short HEAD sha and clean-worktree state (no dirty chip)', () => {
-    const root = setupRepo()
-    const snap = buildUiSnapshot(db, root)
-    const html = renderConsolePage(snap, 'tok')
-    expect(html).toContain(`<code>${snap.head!.slice(0, 7)}</code>`)
-    expect(html).not.toContain('worktree dirty')
-  })
-
-  test('dirty worktree renders the warn-toned chip in the header', () => {
-    const root = setupRepo()
+    const snapshot = buildUiSnapshot(db, root)
+    const clean = render('queue', snapshot)
+    expect(clean).toContain(`<code>${snapshot.head!.slice(0, 7)}</code>`)
+    expect(clean).not.toContain('worktree dirty')
+    const header = clean.slice(clean.indexOf('<header>'), clean.indexOf('</header>'))
+    expect(header).not.toContain('<a href')
     writeFileSync(join(root, 'specs/x/spec.md'), '## C001 design intent <!-- oracle:manual -->\nchanged\n')
-    const snap = buildUiSnapshot(db, root)
-    expect(snap.dirty).toBe(true)
-    const html = renderConsolePage(snap, 'tok')
-    expect(html).toContain('⚠ worktree dirty')
-    expect(html).toContain('data-tone="warn"')
+    const dirty = render('queue', buildUiSnapshot(db, root))
+    expect(dirty).toContain('⚠ worktree dirty')
+    expect(dirty).toContain('data-tone="warn"')
   })
 
-  test('summary strip reports counts and decided/total manual', () => {
-    const root = setupRepo()
-    const snap = buildUiSnapshot(db, root)
-    const html = renderConsolePage(snap, 'tok')
-    expect(html).toContain(
-      `${snap.status.counts.human} for you, ${snap.status.counts.agent} for the agent, ${snap.status.counts.autoPass} auto-pass · ${snap.decided}/${snap.totalManual} manual decided`
+  test.each([
+    ['queue', ['/', '/agent', '/specs', '/decisions', '/']],
+    ['agent', ['/', '/agent', '/specs', '/decisions', '/agent']],
+    ['specs', ['/', '/agent', '/specs', '/decisions', '/specs']],
+    ['decisions', ['/', '/agent', '/specs', '/decisions', '/decisions']],
+  ] as const)('%s navigation uses fixed routes, one current page, and canonical refresh', (route, hrefs) => {
+    const html = render(route, buildUiSnapshot(db, setupRepo()))
+    const nav = html.slice(html.indexOf('<nav aria-label="页面导航">'), html.indexOf('</nav>') + 6)
+    expect([...nav.matchAll(/href="([^"]+)"/g)].map((match) => match[1])).toEqual(hrefs)
+    expect((html.match(/aria-current="page"/g) ?? [])).toHaveLength(1)
+  })
+
+  test('page-two refresh preserves the canonical page without audit parameters', () => {
+    const snapshot = buildUiSnapshot(db, setupRepo())
+    const html = render('specs', snapshot, 2, 1)
+    const start = html.indexOf('<nav aria-label="页面导航">')
+    const nav = html.slice(start, html.indexOf('</nav>', start) + 6)
+    expect([...nav.matchAll(/href="([^"]+)"/g)].map((match) => match[1])).toEqual([
+      '/',
+      '/agent',
+      '/specs',
+      '/decisions',
+      '/specs?page=2',
+    ])
+    expect(nav).not.toContain('audit=')
+  })
+
+  test('each route owns exactly its specified main content', () => {
+    const snapshot = buildUiSnapshot(db, setupRepo())
+    const pages = {
+      queue: render('queue', snapshot),
+      agent: render('agent', snapshot),
+      specs: render('specs', snapshot),
+      decisions: render('decisions', snapshot),
+    }
+    expect(pages.queue).toContain('id="your-queue-title"')
+    expect(pages.queue).toContain(`${snapshot.status.counts.human} for you`)
+    expect(pages.queue).not.toContain('id="agent-lane-title"')
+    expect(pages.queue).not.toContain('id="all-specs"')
+    expect(pages.queue).not.toContain('id="decided-title"')
+    expect(pages.queue).not.toContain('id="audit-runner"')
+    expect(pages.queue).toContain(
+      `${snapshot.status.counts.human} for you, ${snapshot.status.counts.agent} for the agent, ${snapshot.status.counts.autoPass} auto-pass · ${snapshot.decided}/${snapshot.totalManual} manual decided`
     )
+
+    expect(pages.agent).toContain('id="agent-lane-title"')
+    expect(pages.agent).toContain('id="audit-runner"')
+    expect(pages.agent).not.toContain('id="your-queue-title"')
+    expect(pages.agent).not.toContain('id="all-specs"')
+    expect(pages.agent).not.toContain('id="decided-title"')
+    expect(pages.agent).not.toContain(`${snapshot.status.counts.human} for you`)
+    expect(pages.agent).not.toContain('data-banner="wip"')
+    expect(pages.agent).not.toContain('urtext map &lt;spec&gt;')
+
+    expect(pages.specs).toContain('id="all-specs"')
+    expect(pages.specs).not.toContain('id="your-queue-title"')
+    expect(pages.specs).not.toContain('id="agent-lane-title"')
+    expect(pages.specs).not.toContain('id="decided-title"')
+    expect(pages.specs).not.toContain('id="audit-runner"')
+    expect(pages.specs).not.toContain('data-banner="wip"')
+    expect(pages.specs).not.toContain('urtext map &lt;spec&gt;')
+
+    expect(pages.decisions).toContain('id="decided-title"')
+    expect(pages.decisions).not.toContain('id="your-queue-title"')
+    expect(pages.decisions).not.toContain('id="agent-lane-title"')
+    expect(pages.decisions).not.toContain('id="all-specs"')
+    expect(pages.decisions).not.toContain('id="audit-runner"')
+    expect(pages.decisions).not.toContain('data-banner="wip"')
+    expect(pages.decisions).not.toContain('urtext map &lt;spec&gt;')
   })
 
-  test('wip banner is tagged data-banner="wip" and preserves the original text', () => {
-    const root = setupRepo()
-    const snap = buildUiSnapshot(db, root)
-    snap.status.wip.exceeded = true
-    snap.status.wip.limit = 1
-    snap.status.counts.human = 5
-    const html = renderConsolePage(snap, 'tok')
-    expect(html).toContain('data-banner="wip"')
-    expect(html).toContain('warning: human queue 5 exceeds wip limit 1 — consider smaller changes')
+  test('only interactive routes carry CSRF and the console script', () => {
+    const snapshot = buildUiSnapshot(db, setupRepo())
+    for (const route of ['queue', 'agent'] as const) {
+      const html = render(route, snapshot)
+      expect(html).toContain('<meta name="csrf-token" content="tok">')
+      expect(html).toContain(CONSOLE_SCRIPT)
+    }
+    for (const route of ['specs', 'decisions'] as const) {
+      const html = render(route, snapshot)
+      expect(html).not.toContain('name="csrf-token"')
+      expect(html).not.toContain('<script>')
+    }
   })
 
-  test('audit result notice renders with the fixed id', () => {
-    const root = setupRepo()
-    const html = renderConsolePage(buildUiSnapshot(db, root), 'tok', 'imported 39 verdict(s); 22 disagreement(s) moved to Your queue.')
-    expect(html).toContain('id="audit-result"')
-    expect(html).toContain('22 disagreement(s) moved to Your queue.')
+  test('every aria-labelledby target exists exactly once and every table has a caption and column headers', () => {
+    const snapshot = buildUiSnapshot(db, setupRepo())
+    for (const route of ['queue', 'agent', 'specs', 'decisions'] as const) {
+      const html = render(route, snapshot)
+      for (const id of [...html.matchAll(/aria-labelledby="([^"]+)"/g)].map((match) => match[1])) {
+        expect((html.match(new RegExp(`id="${id}"`, 'g')) ?? [])).toHaveLength(1)
+      }
+      for (const table of [...html.matchAll(/<table>[\s\S]*?<\/table>/g)].map((match) => match[0])) {
+        expect(table).toContain('<caption>')
+        expect(table).toContain('<th scope="col">')
+      }
+      expect(mainListTableCount(html)).toBe(1)
+      expect(html).not.toContain('<nav aria-label="分页">')
+    }
+  })
+
+  test('single-page table captions report full route totals', () => {
+    const snapshot = buildUiSnapshot(db, setupRepo())
+    expect(render('queue', snapshot)).toContain('<caption>Your queue (共 1 条 · 第 1/1 页)</caption>')
+    expect(render('agent', snapshot)).toContain('<caption>Agent lane (共 1 条 · 第 1/1 页)</caption>')
+    expect(render('specs', snapshot)).toContain('<caption>All Specs (共 2 条 · 第 1/1 页)</caption>')
+    expect(render('decisions', snapshot)).toContain('<caption>Decided manual clauses at HEAD (共 0 条 · 第 1/1 页)</caption>')
   })
 })
 
-// ---------------------------------------------------------------------------
-// Unmapped banner (§3.1 item 5) — data-banner values, exact command text
-// ---------------------------------------------------------------------------
-
-describe('renderConsolePage — unmapped banner', () => {
-  test('clean workspace renders no banner', () => {
-    const root = setupRepo()
-    const snap = buildUiSnapshot(db, root)
-    const html = renderConsolePage({ ...snap, unmapped: [], unmappedError: null }, 'tok')
-    expect(html).not.toContain('data-banner="unmapped"')
-    expect(html).not.toContain('data-banner="unmapped-error"')
+describe('queue projection and unmapped remediation', () => {
+  test('queue rows paginate without reordering and include stable data-row keys', () => {
+    const snapshot = buildUiSnapshot(db, setupRepo('## C003 another manual <!-- oracle:manual -->'))
+    const human = snapshot.status.items.filter((item) => item.lane === 'human')
+    expect(human.length).toBeGreaterThanOrEqual(2)
+    const first = render('queue', snapshot, 1, 1)
+    const second = render('queue', snapshot, 2, 1)
+    expect(first).toContain(`data-row="${human[0]!.key}"`)
+    expect(first).not.toContain(`data-row="${human[1]!.key}"`)
+    expect(second).toContain(`data-row="${human[1]!.key}"`)
+    expect(first).toContain('第 1 / 共')
+    expect(second).toContain('rel="prev" href="/"')
   })
 
-  test('unmapped hunks render role=alert, exact command templates, escaped ranges', () => {
-    const root = setupRepo()
-    const snap = buildUiSnapshot(db, root)
-    const html = renderConsolePage({ ...snap, unmapped: [{ filePath: '<bad>.ts', lineStart: 2, lineEnd: 3 }], unmappedError: null }, 'tok')
-    expect(html).toContain('data-banner="unmapped"')
-    expect(html).toContain('role="alert"')
-    expect(html).toContain('aria-labelledby="workspace-alert-title"')
-    expect(html).toContain('id="workspace-alert-title"')
-    expect(html).toContain('&lt;bad&gt;.ts:2-3')
-    expect(html).toContain('urtext map &lt;spec&gt;#&lt;clause&gt; &lt;bad&gt;.ts:2-3')
-    expect(html).toContain('urtext ack &lt;bad&gt;.ts:2-3 &lt;reason&gt;')
-    expect(html).not.toContain('data-banner="unmapped-error"')
+  test('decision form ids are page-local and labels stay paired with textareas', () => {
+    const snapshot = buildUiSnapshot(db, setupRepo('## C003 another manual <!-- oracle:manual -->'))
+    for (const page of [render('queue', snapshot, 1, 1), render('queue', snapshot, 2, 1)]) {
+      expect((page.match(/id="decision-form-0"/g) ?? [])).toHaveLength(1)
+      expect(page).toContain('<label for="decision-note-0">Reason</label>')
+      expect(page).toContain('<textarea id="decision-note-0" name="note">')
+      const start = page.indexOf('<nav aria-label="分页">')
+      const pagination = page.slice(start, page.indexOf('</nav>', start) + 6)
+      expect(pagination).toContain('第 ')
+      expect(pagination).toContain('aria-disabled="true"')
+    }
   })
 
-  test('detection failure renders the error banner, distinct from empty', () => {
-    const root = setupRepo()
-    const snap = buildUiSnapshot(db, root)
-    const html = renderConsolePage({ ...snap, unmapped: [], unmappedError: '<git failed>' }, 'tok')
-    expect(html).toContain('data-banner="unmapped-error"')
-    expect(html).toContain('&lt;git failed&gt;')
-    expect(html).not.toContain('data-banner="unmapped"')
-  })
-})
-
-// ---------------------------------------------------------------------------
-// Your queue — accessible inline decide forms (§3.1 item 6)
-// ---------------------------------------------------------------------------
-
-describe('renderConsolePage — Your queue', () => {
-  test('an actionable manual clause renders an inline decide form, not prompt/alert', () => {
-    const root = setupRepo()
-    const html = renderConsolePage(buildUiSnapshot(db, root), 'tok')
+  test('queue preserves inline decide behavior, empty text, WIP copy, and escaping', () => {
+    const root = setupRepo(`## C003 <script>'"&x <!-- oracle:manual -->`)
+    const snapshot = buildUiSnapshot(db, root)
+    const html = render('queue', snapshot)
     expect(html).toContain('data-key="specs/x/spec.md#C001"')
     expect(html).toContain('class="decide-form"')
     expect(html).toContain('data-v="pass"')
     expect(html).toContain('data-v="fail"')
-    expect(html).toContain('class="decision-msg" aria-live="polite"')
-    expect(html).not.toMatch(/\bprompt\(/)
-    expect(html).not.toMatch(/\balert\(/)
+    expect(html).toContain('&lt;script&gt;')
+    expect(html).not.toContain('<script>\'"&x')
+    snapshot.status.wip = { limit: 1, exceeded: true }
+    snapshot.status.counts.human = 5
+    const wip = render('queue', snapshot)
+    expect(wip).toContain('data-banner="wip"')
+    expect(wip).toContain('warning: human queue 5 exceeds wip limit 1 — consider smaller changes')
+    const empty = render('queue', { ...snapshot, status: { ...snapshot.status, items: [] } })
+    expect(empty).toContain('nothing — prerequisites pending or all clear')
   })
 
-  test('the decide form textarea has an explicit label', () => {
-    const root = setupRepo()
-    const html = renderConsolePage(buildUiSnapshot(db, root), 'tok')
-    const labelMatch = html.match(/<label for="(decision-note-\d+)">Reason<\/label>/)
-    expect(labelMatch).not.toBeNull()
-    expect(html).toContain(`<textarea id="${labelMatch![1]}" name="note">`)
-  })
-
-  test('a decided clause no longer renders a decide form for that key', () => {
+  test('a decided clause no longer renders its decide form', () => {
     const root = setupRepo()
     recordDecision(db, { specPath: 'specs/x/spec.md', clauseId: 'C001', verdict: 'pass', decider: 'alice' }, root, 1)
-    const html = renderConsolePage(buildUiSnapshot(db, root), 'tok')
-    expect(html).not.toContain('data-key="specs/x/spec.md#C001"')
+    expect(render('queue', buildUiSnapshot(db, root))).not.toContain('data-key="specs/x/spec.md#C001"')
   })
 
-  test('empty human queue keeps a caption/header table with the preserved empty text', () => {
-    const root = setupRepo()
-    const snap = buildUiSnapshot(db, root)
-    const html = renderConsolePage({ ...snap, status: { ...snap.status, items: [] } }, 'tok')
-    expect(html).toContain('nothing — prerequisites pending or all clear')
-    expect(html).toContain('<caption>Your queue (0)</caption>')
+  test('clean snapshots render neither unmapped banner state on any route', () => {
+    const snapshot = buildUiSnapshot(db, setupRepo())
+    for (const route of ['queue', 'agent', 'specs', 'decisions'] as const) {
+      const html = render(route, { ...snapshot, unmapped: [], unmappedError: null })
+      expect(html).not.toContain('data-banner="unmapped">')
+      expect(html).not.toContain('data-banner="unmapped-error"')
+    }
   })
 
-  test('escapes clause title, key and reason content', () => {
-    const root = setupRepo(`## C003 <script>'"&x <!-- oracle:manual -->`)
-    const html = renderConsolePage(buildUiSnapshot(db, root), 'my-token')
-    expect(html).not.toContain('<script>\'"&x')
-    expect(html).toContain('&lt;script&gt;')
+  test('compact alert appears once while remediation commands exist only in paginated unmapped rows', () => {
+    const snapshot = buildUiSnapshot(db, setupRepo())
+    const unmapped: StatusItem[] = Array.from({ length: 100 }, (_, index) => ({
+      key: `src/file.ts:${index + 1}-${index + 1}`,
+      kind: 'unmapped',
+      lane: 'human',
+      primary: 'unmapped',
+      reasons: ['unmapped'],
+      next: '`urtext map <spec>#<clause> <range>` | `urtext ack <range> <reason>` | write back to spec',
+      filePath: 'src/file.ts',
+      lineStart: index + 1,
+      lineEnd: index + 1,
+    }))
+    const input = {
+      ...snapshot,
+      unmapped: unmapped.map((item) => ({ filePath: item.filePath!, lineStart: item.lineStart!, lineEnd: item.lineEnd! })),
+      status: { ...snapshot.status, items: unmapped, counts: { ...snapshot.status.counts, human: 100 } },
+    }
+    const html = render('queue', input, 1, 2)
+    expect((html.match(/data-banner="unmapped">/g) ?? [])).toHaveLength(1)
+    expect(html).toContain('⚠ 100 个未归属变更（工作区级，git diff HEAD，未跟踪文件不在检测范围）— 详见下方 Your queue 行')
+    expect((html.match(/urtext map/g) ?? [])).toHaveLength(2)
+    expect((html.match(/urtext ack/g) ?? [])).toHaveLength(2)
+    expect(html).not.toContain('workspace-alert-title')
+    expect(html).toContain('映射：<code>urtext map &lt;spec&gt;#&lt;clause&gt; src/file.ts:1-1</code>')
+    expect(html).toContain('确认例外：<code>urtext ack src/file.ts:1-1 &lt;reason&gt;</code>')
+    expect(html).not.toContain('data-banner="unmapped-error"')
   })
-})
 
-// ---------------------------------------------------------------------------
-// Agent lane — conditional open/closed, deduped hints (§3.1 item 7)
-// ---------------------------------------------------------------------------
-
-describe('renderConsolePage — Agent lane', () => {
-  test('audit form sits outside the <details> lane', () => {
-    const root = setupRepo()
-    const html = renderConsolePage(buildUiSnapshot(db, root), 'tok')
-    const detailsIdx = html.indexOf('<details data-section="agent-lane"')
-    const auditIdx = html.indexOf('id="audit-runner"')
-    if (auditIdx !== -1) expect(auditIdx).toBeLessThan(detailsIdx)
-  })
-
-  test('lane is collapsed by default when the human queue is non-empty', () => {
-    const root = setupRepo()
-    const html = renderConsolePage(buildUiSnapshot(db, root), 'tok')
-    const detailsTag = html.slice(html.indexOf('<details data-section="agent-lane"'), html.indexOf('<summary id="agent-lane-title"'))
-    expect(detailsTag).not.toContain(' open')
-  })
-
-  test('lane is open by default when the human queue is empty', () => {
-    const root = setupRepo()
-    const snap = buildUiSnapshot(db, root)
-    const html = renderConsolePage({ ...snap, status: { ...snap.status, items: snap.status.items.filter((i) => i.lane !== 'human') } }, 'tok')
-    const detailsTag = html.slice(html.indexOf('<details data-section="agent-lane"'), html.indexOf('<summary id="agent-lane-title"'))
-    expect(detailsTag).toContain(' open')
-  })
-  test('duplicate next hints are deduped into a single lane-top list', () => {
-    const root = setupRepo()
-    const snap = buildUiSnapshot(db, root)
-    const agentTemplate = snap.status.items.find((i) => i.lane === 'agent')
-    if (!agentTemplate) return
-    const duplicated = { ...snap, status: { ...snap.status, items: [agentTemplate, { ...agentTemplate, key: `${agentTemplate.key}-dup` }] } }
-    const html = renderConsolePage(duplicated, 'tok')
-    const laneHtml = html.slice(html.indexOf('<details data-section="agent-lane"'), html.indexOf('</details>'))
-    const escapedNext = agentTemplate.next.replace(/[&<>"']/g, (c) => (({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }) as Record<string, string>)[c]!)
-    const hintOccurrences = laneHtml.split(escapedNext).length - 1
-    expect(hintOccurrences).toBe(1)
+  test('non-queue routes link compact unmapped states back to Your queue', () => {
+    const snapshot = buildUiSnapshot(db, setupRepo())
+    const hunks = render('specs', { ...snapshot, unmapped: [{ filePath: 'bad.ts', lineStart: 2, lineEnd: 3 }], unmappedError: null })
+    expect(hunks).toContain('data-banner="unmapped">')
+    expect(hunks).toContain('<a href="/">在 Your queue 处理</a>')
+    expect(hunks).not.toContain('urtext map')
+    expect(hunks).not.toContain('data-banner="unmapped-error"')
+    const failed = render('decisions', { ...snapshot, unmapped: [], unmappedError: '<git failed>' })
+    expect(failed).toContain('data-banner="unmapped-error"')
+    expect(failed).toContain('&lt;git failed&gt;')
+    expect(failed).toContain('<a href="/">在 Your queue 查看</a>')
+    expect(failed).not.toContain('data-banner="unmapped">')
   })
 })
 
-// ---------------------------------------------------------------------------
-// All Specs — grouped by spec (§3.1 item 8)
-// ---------------------------------------------------------------------------
-
-describe('renderConsolePage — All Specs', () => {
-  test('groups clauses by specPath with a stable heading id per group', () => {
-    const root = setupRepo()
-    const html = renderConsolePage(buildUiSnapshot(db, root), 'tok')
-    expect(html).toContain('id="all-specs"')
-    expect(html).toContain('id="spec-group-0-title"')
-    expect(html).toContain('data-clause="specs/x/spec.md#C001"')
-    expect(html).toContain('data-clause="specs/x/spec.md#C002"')
-    expect(html).toContain('<code>specs/x/spec.md</code>')
+describe('agent projection and audit controls', () => {
+  test('audit runner is enabled for auditable items and keeps transport behavior', () => {
+    const html = render('agent', buildUiSnapshot(db, setupRepo()), 1, 20, 'imported 3 verdict(s)')
+    expect(html).toContain('id="audit-runner"')
+    expect(html).toContain('value="claude"')
+    expect(html).toContain('value="codex"')
+    expect(html).toContain('<option value="traex">Traex</option>')
+    expect(html).toContain('value="omp"')
+    expect(html).toContain('id="audit-progress"')
+    expect(html).toContain('id="audit-result"')
+    expect(html).toContain('imported 3 verdict(s)')
+    expect(html).toContain('/api/audit-run')
+    expect(html).toContain('button.disabled = true')
+    expect(html).not.toContain('<button type="submit" disabled>Run audit</button>')
+    expect(html.match(/href="[^"]*audit=[^"]*"/g)).toBeNull()
   })
 
-  test('evidence column renders as a status chip with the data-state vocabulary', () => {
-    const root = setupRepo()
-    const html = renderConsolePage(buildUiSnapshot(db, root), 'tok')
+  test('zero auditable items keep a disabled runner and explicit empty state', () => {
+    const snapshot = buildUiSnapshot(db, setupRepo())
+    const html = render('agent', { ...snapshot, status: { ...snapshot.status, items: [] } })
+    expect(html).toContain('Audit 0 evidence item(s)')
+    expect(html).toContain('<button type="submit" disabled>Run audit</button>')
+    expect(html).toContain('当前没有待审计的证据')
+  })
+
+  test('next hints are deduplicated from only the current agent page', () => {
+    const snapshot = buildUiSnapshot(db, setupRepo())
+    const template = snapshot.status.items.find((item) => item.lane === 'agent')
+    expect(template).toBeDefined()
+    const items = [template!, { ...template!, key: `${template!.key}-same` }, { ...template!, key: `${template!.key}-other`, next: 'other hint' }]
+    const html = render('agent', { ...snapshot, status: { ...snapshot.status, items } }, 1, 2)
+    expect(html.split(esc(template!.next)).length - 1).toBe(1)
+    expect(html).not.toContain('other hint')
+    expect(html).not.toContain('data-section="agent-lane"')
+    expect(html).toContain('<h2 id="agent-lane-title">')
+    expect(html).not.toContain('<details')
+  })
+})
+
+describe('spec and decision projections', () => {
+  test('All Specs uses one table with adjacent spec rowgroups and per-page counts', () => {
+    const snapshot = buildUiSnapshot(db, setupRepo('## C003 third <!-- oracle:manual -->'))
+    const clauses = [snapshot.clauses[0]!, { ...snapshot.clauses[1]!, specPath: 'specs/y/spec.md' }, { ...snapshot.clauses[2]!, specPath: 'specs/y/spec.md' }]
+    const html = render('specs', { ...snapshot, clauses }, 1, 20)
+    expect(mainListTableCount(html)).toBe(1)
+    expect(html).toContain('<tbody data-spec="specs/x/spec.md">')
+    expect(html).toContain('<tbody data-spec="specs/y/spec.md">')
+    expect(html).toContain('<th colspan="3" scope="rowgroup"><code>specs/x/spec.md</code> (本页 1)</th>')
+    expect(html).toContain('<th colspan="3" scope="rowgroup"><code>specs/y/spec.md</code> (本页 2)</th>')
+    expect(html).not.toContain('spec-group-')
+    expect(html).not.toContain('<h3')
     expect(html).toMatch(/data-state="(fresh|no-evidence)"/)
   })
-})
 
-// ---------------------------------------------------------------------------
-// Decided table (§3.1 item 9)
-// ---------------------------------------------------------------------------
-
-describe('renderConsolePage — Decided', () => {
-  test('decided clauses render pass/fail as a text+symbol status chip', () => {
-    const root = setupRepo()
-    recordDecision(db, { specPath: 'specs/x/spec.md', clauseId: 'C001', verdict: 'pass', decider: 'alice' }, root, 1)
-    const html = renderConsolePage(buildUiSnapshot(db, root), 'tok')
-    expect(html).toContain('id="decided-title"')
-    expect(html).toContain('✓ pass')
-    expect(html).toContain('data-tone="ok"')
+  test('All Specs pagination preserves data-clause order and page-local group counts', () => {
+    const snapshot = buildUiSnapshot(db, setupRepo('## C003 third <!-- oracle:manual -->'))
+    const html = render('specs', snapshot, 2, 1)
+    expect(html).toContain(`data-clause="${snapshot.clauses[1]!.specPath}#${snapshot.clauses[1]!.clauseId}"`)
+    expect(html).not.toContain(`data-clause="${snapshot.clauses[0]!.specPath}#${snapshot.clauses[0]!.clauseId}"`)
+    expect(html).toContain('(本页 1)')
+    expect(html).toContain('<caption>All Specs (共 3 条 · 第 2/3 页)</caption>')
+    expect(html).toContain('<nav aria-label="分页">')
   })
 
-  test('no decided clauses renders the preserved empty text', () => {
-    const root = setupRepo()
-    const html = renderConsolePage(buildUiSnapshot(db, root), 'tok')
-    expect(html).toContain('none yet')
+  test('empty All Specs has no table or pagination navigation', () => {
+    const snapshot = buildUiSnapshot(db, setupRepo())
+    const html = render('specs', { ...snapshot, clauses: [] })
+    expect(html).toContain('<h2 id="all-specs-title">All Specs (0)</h2><p>no live clauses</p>')
+    expect(mainListTableCount(html)).toBe(0)
+    expect(html).not.toContain('<nav aria-label="分页">')
+  })
+
+  test('decisions route filters and paginates decided clauses in snapshot order', () => {
+    const root = setupRepo('## C003 another manual <!-- oracle:manual -->')
+    const empty = render('decisions', buildUiSnapshot(db, root))
+    expect(empty).toContain('none yet')
+    recordDecision(db, { specPath: 'specs/x/spec.md', clauseId: 'C001', verdict: 'pass', decider: 'alice' }, root, 1)
+    recordDecision(db, { specPath: 'specs/x/spec.md', clauseId: 'C003', verdict: 'fail', decider: 'alice' }, root, 2)
+    const snapshot = buildUiSnapshot(db, root)
+    const first = render('decisions', snapshot, 1, 1)
+    const second = render('decisions', snapshot, 2, 1)
+    expect(first).toContain('data-row="specs/x/spec.md#C001"')
+    expect(first).toContain('✓ pass')
+    expect(first).toContain('data-tone="ok"')
+    expect(first).not.toContain('data-row="specs/x/spec.md#C003"')
+    expect(second).toContain('data-row="specs/x/spec.md#C003"')
+    expect(second).toContain('✗ fail')
+    expect(second).not.toContain('data-row="specs/x/spec.md#C001"')
+  })
+})
+
+describe('public renderConsolePage wrapper', () => {
+  test('keeps positional parameters, queue route defaults, and auditResult passthrough', () => {
+    const snapshot = buildUiSnapshot(db, setupRepo())
+    const html = renderConsolePage(snapshot, 'my-token', '<imported>')
+    expect(html).toContain('id="your-queue-title"')
+    expect(html).toContain('<meta name="csrf-token" content="my-token">')
+    expect(html).toContain('id="audit-result"')
+    expect(html).toContain('&lt;imported&gt;')
+    expect(html).not.toContain('id="agent-lane-title"')
+  })
+
+  test('omitting auditResult keeps the queue page free of the result notice', () => {
+    const snapshot = buildUiSnapshot(db, setupRepo())
+    expect(renderConsolePage(snapshot, 'tok')).not.toContain('id="audit-result"')
+  })
+
+  test('keeps script hygiene and sends audit success to the agent route', () => {
+    expect(CONSOLE_SCRIPT).not.toMatch(/\bprompt\(/)
+    expect(CONSOLE_SCRIPT).not.toMatch(/\balert\(/)
+    expect(CONSOLE_SCRIPT).not.toMatch(/\son\w+\s*=/)
+    expect(CONSOLE_SCRIPT).toContain("location.href = '/agent?audit='")
+    expect(CONSOLE_SCRIPT).not.toContain("location.href = '/?audit='")
   })
 })
