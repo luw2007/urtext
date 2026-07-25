@@ -225,6 +225,39 @@ describe('THEME_CSS accessibility tokens', () => {
   })
 })
 
+describe('THEME_CSS Google-inspired product shell', () => {
+  test('defines canvas, elevated surface, primary container, and outline roles', () => {
+    expect(THEME_CSS).toContain('--canvas:#f8fafd')
+    expect(THEME_CSS).toContain('--surface:#fff')
+    expect(THEME_CSS).toContain('--surface-container:#f0f4f9')
+    expect(THEME_CSS).toContain('--primary:#0b57d0')
+    expect(THEME_CSS).toContain('--primary-container:#d3e3fd')
+    expect(THEME_CSS).toContain('--outline:#c4c7c5')
+  })
+
+  test('renders a distinct application bar, destination navigation, and main surface', () => {
+    expect(THEME_CSS).toMatch(/body>header\{[^}]*min-height:64px/)
+    expect(THEME_CSS).toMatch(/body>nav\{[^}]*border-bottom:1px solid var\(--outline-variant\)/)
+    expect(THEME_CSS).toMatch(/body>nav a\[aria-current="page"\]\{[^}]*background:var\(--primary-container\)/)
+    expect(THEME_CSS).toMatch(/main\{[^}]*border-radius:var\(--radius-l\)/)
+    expect(THEME_CSS).toMatch(/main\{[^}]*box-shadow:var\(--shadow-1\)/)
+  })
+
+  test('styles native controls, tables, status chips, and pagination as one component system', () => {
+    expect(THEME_CSS).toMatch(/button,input,select,textarea\{[^}]*min-height:44px/)
+    expect(THEME_CSS).toMatch(/button\{[^}]*background:var\(--primary\)/)
+    expect(THEME_CSS).toMatch(/table\{[^}]*border-radius:var\(--radius-m\)/)
+    expect(THEME_CSS).toMatch(/\[data-tone\]\{[^}]*border-radius:999px/)
+    expect(THEME_CSS).toMatch(/nav\[aria-label="分页"\]\{[^}]*justify-content:space-between/)
+  })
+
+  test('keeps mobile controls reachable and stacks action forms without hiding content', () => {
+    expect(THEME_CSS).toMatch(/@media \(max-width:719px\)\{[\s\S]*body>header\{[^}]*align-items:flex-start/)
+    expect(THEME_CSS).toMatch(/@media \(max-width:719px\)\{[\s\S]*#audit-runner\{[^}]*grid-template-columns:1fr/)
+    expect(THEME_CSS).not.toMatch(/nav\[aria-label="分页"\][^{]*\{[^}]*display:none/)
+  })
+})
+
 // ---------------------------------------------------------------------------
 // Contrast: representative pairs from §5.2 must clear WCAG AA (>=4.5:1) for
 // normal text, in both light and dark themes.
