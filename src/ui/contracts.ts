@@ -18,7 +18,7 @@ export const DEFAULT_UI_RENDER_CONFIG: UiRenderConfig = {
 const DIFF_OPEN_MAX_LINES_ENV = 'URTEXT_UI_DIFF_OPEN_MAX_LINES'
 const DIFF_DISPLAY_MAX_LINES_ENV = 'URTEXT_UI_DIFF_DISPLAY_MAX_LINES'
 
-const parsePositiveInt = (name: string, raw: string): number => {
+export const parsePositiveInt = (name: string, raw: string): number => {
   if (!/^\d+$/.test(raw)) throw new Error(`${name} must be a positive integer, got ${JSON.stringify(raw)}`)
   const value = Number(raw)
   if (!Number.isInteger(value) || value <= 0) throw new Error(`${name} must be a positive integer, got ${JSON.stringify(raw)}`)

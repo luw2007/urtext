@@ -83,6 +83,7 @@ describe('pageHref and paginationNav', () => {
     expect(middle).toContain('rel="next" href="/specs?page=3"')
     expect(middle).toContain('第 2 / 共 3 页（共 44 条）')
     expect(middle).not.toContain('aria-disabled')
+    expect(middle).toBe('<nav aria-label="分页"><a rel="prev" href="/specs">← 上一页</a> <span>第 2 / 共 3 页（共 44 条）</span> <a rel="next" href="/specs?page=3">下一页 →</a></nav>')
 
     const last = paginationNav('/specs', pageWindow(44, 3, 20))
     expect(last).toContain('rel="prev" href="/specs?page=2"')
