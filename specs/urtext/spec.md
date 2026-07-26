@@ -177,7 +177,7 @@ fail-closed。守卫在 domain 写路径（recordReview/recordDecision），CLI 
 HEAD 绑定语义不变（M5a）；--reject/--fail 无前置（保守方向不设门）。gate 在
 worktree 脏时把已批准高危子句重新路由人工。
 
-## C019 UI 完整呈现 Spec 影响与映射 Diff <!-- oracle:test:tests/spec-impact-interactions.test.ts risk:high refs:specs/urtext/spec.md#C017 req:FR012 -->
+## C019 UI 完整呈现 Spec 影响与映射 Diff <!-- oracle:test:tests/spec-impact- risk:high refs:specs/urtext/spec.md#C017 req:FR012 -->
 
 `urtext ui` 必须可浏览全部 live clause；详情页区分风险、当前证据 stale、下游
 dependency stale 与潜在 impact，并展示从 clause mapping 的记录 HEAD 到当前工作树、
