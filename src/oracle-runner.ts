@@ -98,7 +98,10 @@ export const runOracle = (clause: ParsedClause, workspaceRoot: string): OracleRe
           output: `local vitest binary not found at ${vitestBin} — no dynamic install fallback`,
         }
       }
-      return runCommand(vitestBin, ['run', oracle.ref], workspaceRoot)
+      // Verbose reporter: the default reporter only prints tests slower than
+      // its slow-test threshold, so fast tests vanish from evidence output and
+      // meta-auditors cannot see which named tests actually cover the clause.
+      return runCommand(vitestBin, ['run', '--reporter=verbose', oracle.ref], workspaceRoot)
     }
     case 'cmd': {
       if (!oracle.ref) {
