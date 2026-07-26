@@ -28,7 +28,7 @@ const makeRepo = (spec: string): string => {
   git(root, 'config', 'user.email', 'test@urtext.dev')
   git(root, 'config', 'user.name', 'test')
   mkdirSync(join(root, 'specs/x'), { recursive: true })
-  writeFileSync(join(root, 'specs/x/spec.md'), spec)
+  writeFileSync(join(root, 'specs/x/spec.md'), `## FR001 test intent\n\n${spec}`)
   git(root, 'add', '-A')
   git(root, 'commit', '-q', '-m', 'baseline')
   return root
@@ -50,9 +50,9 @@ describe('buildBrief manifest', () => {
   test('assembles clause row, evidence digest, audit state, and a 12-hex hash', () => {
     const root = makeRepo(
       [
-        '## C001 pay guard <!-- oracle:cmd:true risk:high refs:specs/x/spec.md#C002 -->',
+        '## C001 pay guard <!-- oracle:cmd:true risk:high refs:specs/x/spec.md#C002 req:FR001 -->',
         'Reject stacked coupons on the apply path.',
-        '## C002 base <!-- oracle:cmd:true -->',
+        '## C002 base <!-- oracle:cmd:true req:FR001 -->',
       ].join('\n')
     )
     scanWorkspace(db, root)
@@ -68,6 +68,7 @@ describe('buildBrief manifest', () => {
       risk: 'high',
       oracleKind: 'cmd',
       refs: ['specs/x/spec.md#C002'],
+      reqs: ['FR001'],
       stale: false,
       auditVerdict: 'agree',
     })
@@ -86,14 +87,14 @@ describe('buildBrief manifest', () => {
   })
 
   test('link-guard: an unresolved ref gets no approvable hash', () => {
-    const root = makeRepo('## C001 t <!-- oracle:cmd:true refs:specs/x/spec.md#C999 -->')
+    const root = makeRepo('## C001 t <!-- oracle:cmd:true refs:specs/x/spec.md#C999 req:FR001 -->')
     scanWorkspace(db, root)
     const outcome = buildBrief(db, root, KEY)
     expect(outcome).toMatchObject({ kind: 'refused', code: 'link_error' })
   })
 
   test('unknown clause refuses', () => {
-    const root = makeRepo('## C001 t <!-- oracle:cmd:true -->')
+    const root = makeRepo('## C001 t <!-- oracle:cmd:true req:FR001 -->')
     scanWorkspace(db, root)
     expect(buildBrief(db, root, { ...KEY, clauseId: 'C999' })).toMatchObject({
       kind: 'refused',
@@ -104,7 +105,7 @@ describe('buildBrief manifest', () => {
 
 describe('brief-hash freshness semantics', () => {
   test('an identical re-verify keeps the hash stable (digest is content-based)', () => {
-    const root = makeRepo('## C001 t <!-- oracle:cmd:true -->')
+    const root = makeRepo('## C001 t <!-- oracle:cmd:true req:FR001 -->')
     scanWorkspace(db, root)
     verifyWorkspace(db, root)
     const first = currentBriefHash(db, root, KEY)
@@ -113,10 +114,10 @@ describe('brief-hash freshness semantics', () => {
   })
 
   test('an anchor-only risk change flips the hash (text_hash alone would not)', () => {
-    const root = makeRepo('## C001 t <!-- oracle:cmd:true risk:high -->\nbody')
+    const root = makeRepo('## C001 t <!-- oracle:cmd:true risk:high req:FR001 -->\nbody')
     scanWorkspace(db, root)
     const first = currentBriefHash(db, root, KEY)
-    writeFileSync(join(root, 'specs/x/spec.md'), '## C001 t <!-- oracle:cmd:true -->\nbody')
+    writeFileSync(join(root, 'specs/x/spec.md'), '## FR001 test intent\n\n## C001 t <!-- oracle:cmd:true req:FR001 -->\nbody')
     scanWorkspace(db, root)
     const second = currentBriefHash(db, root, KEY)
     expect(second).not.toBeNull()
@@ -124,7 +125,7 @@ describe('brief-hash freshness semantics', () => {
   })
 
   test('mapped code content changes flip the hash', () => {
-    const root = makeRepo('## C001 t <!-- oracle:cmd:true -->')
+    const root = makeRepo('## C001 t <!-- oracle:cmd:true req:FR001 -->')
     writeFileSync(join(root, 'src.txt'), 'one\ntwo\nthree\n')
     git(root, 'add', '-A')
     git(root, 'commit', '-q', '-m', 'code baseline')
@@ -149,7 +150,7 @@ describe('brief-hash freshness semantics', () => {
   })
 
   test('mapped code includes only intersecting blame diff hunks from the mapping HEAD', () => {
-    const root = makeRepo('## C001 t <!-- oracle:cmd:true -->')
+    const root = makeRepo('## C001 t <!-- oracle:cmd:true req:FR001 -->')
     const baseline = Array.from({ length: 12 }, (_, index) => `line ${index + 1}`)
     writeFileSync(join(root, 'src.txt'), baseline.join('\n') + '\n')
     git(root, 'add', '-A')

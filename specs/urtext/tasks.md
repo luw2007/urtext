@@ -28,3 +28,5 @@
     scripts/ui-browser-check.ts + ui-browser-check-wrapper.mjs + ui-evidence-manifest.ts；schema v2 contrast manifest 绑定 source/render hashes；英中命令参考同步。trusted final gate 已通过 cmux 真实交互与 Chrome 3 页 × 3 viewport × 2 theme 矩阵：998/998 assertions、18 screenshots、0 failure。
 - [ ] T015 console 分页与页面拆分 <!-- role:coder depends:T014 gate:true clauses:C019 -->
     四路由 console-family、每路由独立服务端分页、All Specs 跨页完整可达、audit 归属与 browser/contrast/installed-consumer 验收同步。
+- [ ] T016 需求层：FR 声明、req 绑定与覆盖报告 <!-- role:coder depends:T015 gate:true clauses:C020,C021,C022,C023,C024 -->
+    parser FR/req 与五个新错误码；requirements+clause_reqs 表；grammar version 强制重扫；linker unknown_req/ambiguous_req 与 FR stale；status 未覆盖需求区块；三个 feature 的 FR 迁移。

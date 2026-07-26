@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import DatabaseConstructor, { type Database } from 'better-sqlite3'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 
-import { impact, linkWorkspace, propagateStale } from '../src/linker.js'
+import { impact, linkWorkspace, propagateStale, uncoveredRequirements } from '../src/linker.js'
 import { indexClauseFile, indexTaskFile, openRegistry } from '../src/registry.js'
 import { scanWorkspace } from '../src/scanner.js'
 import { ensureEvidenceLedger } from '../src/verifier.js'
@@ -28,18 +28,49 @@ const index = (specPath: string, content: string, timestamp = 1) =>
 
 // billing/C001 ← coupon/C001 ← checkout/C001 (A refs B = A depends on B).
 const seedChain = () => {
-  index('specs/billing/spec.md', '## C001 结算不变量 <!-- oracle:manual -->\nbase')
+  index('specs/billing/spec.md', '## FR001 intent\n## C001 结算不变量 <!-- oracle:manual req:FR001 -->\nbase')
   index(
     'specs/coupon/spec.md',
-    '## C001 不可叠加 <!-- oracle:manual refs:specs/billing/spec.md#C001 -->\nmid'
+    '## FR001 intent\n## C001 不可叠加 <!-- oracle:manual refs:specs/billing/spec.md#C001 req:FR001 -->\nmid'
   )
   index(
     'specs/checkout/spec.md',
-    '## C001 下单校验 <!-- oracle:manual refs:specs/coupon/spec.md#C001 -->\ntop'
+    '## FR001 intent\n## C001 下单校验 <!-- oracle:manual refs:specs/coupon/spec.md#C001 req:FR001 -->\ntop'
   )
 }
 
 describe('linkWorkspace', () => {
+  test('missing bare and explicit requirements are unknown_req with a target', () => {
+    index(
+      'specs/coupon/spec.md',
+      [
+        '## C001 bare <!-- oracle:manual req:FR999 -->',
+        '## C002 path <!-- oracle:manual req:specs/ghost/spec.md#FR001 -->',
+      ].join('\n')
+    )
+    expect(linkWorkspace(db)).toEqual([
+      expect.objectContaining({ code: 'unknown_req', clauseId: 'C001', target: 'FR999' }),
+      expect.objectContaining({
+        code: 'unknown_req',
+        clauseId: 'C002',
+        target: 'specs/ghost/spec.md#FR001',
+      }),
+    ])
+  })
+
+  test('a bare binding is ambiguous across same-unit files and never picks a winner', () => {
+    index('specs/x/a.md', '## FR001 first')
+    index('specs/x/b.md', '## FR001 second')
+    index('specs/x/spec.md', '## C001 lock <!-- oracle:manual req:FR001 -->')
+    expect(linkWorkspace(db)).toEqual([
+      expect.objectContaining({ code: 'ambiguous_req', clauseId: 'C001', target: 'FR001' }),
+    ])
+    expect(uncoveredRequirements(db)).toEqual([
+      { specPath: 'specs/x/a.md', reqId: 'FR001', title: 'first' },
+      { specPath: 'specs/x/b.md', reqId: 'FR001', title: 'second' },
+    ])
+  })
+
   test('resolved cross-file refs produce no errors', () => {
     seedChain()
     expect(linkWorkspace(db)).toEqual([])
@@ -49,11 +80,12 @@ describe('linkWorkspace', () => {
     index(
       'specs/coupon/spec.md',
       [
-        '## C001 引用缺失子句 <!-- oracle:manual refs:specs/billing/spec.md#C999 -->',
-        '## C002 引用缺失文件 <!-- oracle:manual refs:specs/ghost/spec.md#C001 -->',
+        '## FR001 intent',
+        '## C001 引用缺失子句 <!-- oracle:manual refs:specs/billing/spec.md#C999 req:FR001 -->',
+        '## C002 引用缺失文件 <!-- oracle:manual refs:specs/ghost/spec.md#C001 req:FR001 -->',
       ].join('\n')
     )
-    index('specs/billing/spec.md', '## C001 存在 <!-- oracle:manual -->')
+    index('specs/billing/spec.md', '## FR001 intent\n## C001 存在 <!-- oracle:manual req:FR001 -->')
 
     const errors = linkWorkspace(db)
     expect(errors).toHaveLength(2)
@@ -68,7 +100,7 @@ describe('linkWorkspace', () => {
     expect(linkWorkspace(db)).toEqual([])
     // billing drops C001; coupon file is untouched — per-revision status
     // could never catch this, the workspace-level link pass must.
-    index('specs/billing/spec.md', '## C002 改名了 <!-- oracle:manual -->', 2)
+    index('specs/billing/spec.md', '## FR001 intent\n## C002 改名了 <!-- oracle:manual req:FR001 -->', 2)
     const errors = linkWorkspace(db)
     expect(errors).toEqual([
       expect.objectContaining({
@@ -123,6 +155,77 @@ describe('propagateStale', () => {
     ])
   })
 
+  test('an FR text change stamps its bound clause and refs dependents', () => {
+    index(
+      'specs/billing/spec.md',
+      '## FR001 intent\nv1\n## C001 base <!-- oracle:manual req:FR001 -->'
+    )
+    index(
+      'specs/coupon/spec.md',
+      '## FR001 downstream\n## C001 dep <!-- oracle:manual req:FR001 refs:specs/billing/spec.md#C001 -->'
+    )
+    insertEvidence('specs/billing/spec.md', 'C001')
+    insertEvidence('specs/coupon/spec.md', 'C001')
+    const changed = index(
+      'specs/billing/spec.md',
+      '## FR001 intent\nv2\n## C001 base <!-- oracle:manual req:FR001 -->',
+      2
+    )
+    expect(changed.kind === 'indexed' && changed.changedClauses).toEqual([])
+    const report = propagateStale(
+      db,
+      [],
+      99,
+      [{ specPath: 'specs/billing/spec.md', reqId: 'FR001' }]
+    )
+    expect(report.staleClauses).toEqual([
+      { specPath: 'specs/billing/spec.md', clauseId: 'C001' },
+      { specPath: 'specs/coupon/spec.md', clauseId: 'C001' },
+    ])
+    expect(report.invalidatedEvidence).toBe(2)
+  })
+
+  test('removed FRs match old raw keys and invalidate bound evidence', () => {
+    index('specs/x/spec.md', '## FR001 intent\n## C001 lock <!-- oracle:manual req:FR001 -->')
+    insertEvidence('specs/x/spec.md', 'C001')
+    const removed = index('specs/x/spec.md', '## C001 lock <!-- oracle:manual req:FR001 -->', 2)
+    expect(removed.kind === 'indexed' && removed.changedRequirements).toEqual(['FR001'])
+    expect(linkWorkspace(db)).toEqual([
+      expect.objectContaining({ code: 'unknown_req', clauseId: 'C001' }),
+    ])
+    const report = propagateStale(
+      db,
+      [],
+      99,
+      [{ specPath: 'specs/x/spec.md', reqId: 'FR001' }]
+    )
+    expect(report.staleClauses).toEqual([{ specPath: 'specs/x/spec.md', clauseId: 'C001' }])
+    expect(report.invalidatedEvidence).toBe(1)
+  })
+
+  test('a simultaneous clause and bound-FR edit still self-stamps exactly once', () => {
+    index(
+      'specs/x/spec.md',
+      '## FR001 intent\nv1\n## C001 lock <!-- oracle:manual req:FR001 -->\nclause v1'
+    )
+    insertEvidence('specs/x/spec.md', 'C001')
+    const changed = index(
+      'specs/x/spec.md',
+      '## FR001 intent\nv2\n## C001 lock <!-- oracle:manual req:FR001 -->\nclause v2',
+      2
+    )
+    expect(changed.kind).toBe('indexed')
+    if (changed.kind !== 'indexed') return
+    const report = propagateStale(
+      db,
+      changed.changedClauses.map((clauseId) => ({ specPath: 'specs/x/spec.md', clauseId })),
+      99,
+      changed.changedRequirements.map((reqId) => ({ specPath: 'specs/x/spec.md', reqId }))
+    )
+    expect(report.staleClauses).toEqual([{ specPath: 'specs/x/spec.md', clauseId: 'C001' }])
+    expect(report.invalidatedEvidence).toBe(1)
+  })
+
   test('no changed clauses is a no-op', () => {
     seedChain()
     expect(propagateStale(db, [], 99)).toEqual({ staleClauses: [], invalidatedEvidence: 0 })
@@ -131,14 +234,26 @@ describe('propagateStale', () => {
   test('a ref cycle terminates and marks both sides', () => {
     index(
       'specs/a/spec.md',
-      '## C001 甲 <!-- oracle:manual refs:specs/b/spec.md#C001 -->'
+      '## FR001 intent\n## C001 甲 <!-- oracle:manual refs:specs/b/spec.md#C001 req:FR001 -->'
     )
     index(
       'specs/b/spec.md',
-      '## C001 乙 <!-- oracle:manual refs:specs/a/spec.md#C001 -->'
+      '## FR001 intent\n## C001 乙 <!-- oracle:manual refs:specs/a/spec.md#C001 req:FR001 -->'
     )
     const report = propagateStale(db, [{ specPath: 'specs/a/spec.md', clauseId: 'C001' }], 99)
     expect(report.staleClauses).toEqual([{ specPath: 'specs/b/spec.md', clauseId: 'C001' }])
+  })
+})
+
+describe('uncoveredRequirements', () => {
+  test('reports only live FRs with no uniquely resolved binding', () => {
+    index(
+      'specs/x/spec.md',
+      ['## FR001 covered', '## FR002 uncovered', '## C001 lock <!-- oracle:manual req:FR001 -->'].join('\n')
+    )
+    expect(uncoveredRequirements(db)).toEqual([
+      { specPath: 'specs/x/spec.md', reqId: 'FR002', title: 'uncovered' },
+    ])
   })
 })
 
@@ -148,10 +263,10 @@ describe('scanWorkspace link pass', () => {
     tempDirs.push(root)
     mkdirSync(join(root, 'specs/billing'), { recursive: true })
     mkdirSync(join(root, 'specs/coupon'), { recursive: true })
-    writeFileSync(join(root, 'specs/billing/spec.md'), '## C001 基座 <!-- oracle:manual -->\nv1')
+    writeFileSync(join(root, 'specs/billing/spec.md'), '## FR001 intent\n## C001 基座 <!-- oracle:manual req:FR001 -->\nv1')
     writeFileSync(
       join(root, 'specs/coupon/spec.md'),
-      '## C001 依赖方 <!-- oracle:manual refs:specs/billing/spec.md#C001 -->'
+      '## FR001 intent\n## C001 依赖方 <!-- oracle:manual refs:specs/billing/spec.md#C001 req:FR001 -->'
     )
 
     const first = scanWorkspace(db, root)
@@ -165,7 +280,7 @@ describe('scanWorkspace link pass', () => {
        VALUES ('specs/coupon/spec.md', 1, 'C001', 'manual', 'pass', '', 1)`
     ).run()
 
-    writeFileSync(join(root, 'specs/billing/spec.md'), '## C001 基座 <!-- oracle:manual -->\nv2')
+    writeFileSync(join(root, 'specs/billing/spec.md'), '## FR001 intent\n## C001 基座 <!-- oracle:manual req:FR001 -->\nv2')
     const second = scanWorkspace(db, root)
     expect(second.stale.staleClauses).toEqual([
       { specPath: 'specs/coupon/spec.md', clauseId: 'C001' },
@@ -179,7 +294,7 @@ describe('scanWorkspace link pass', () => {
     mkdirSync(join(root, 'specs/coupon'), { recursive: true })
     writeFileSync(
       join(root, 'specs/coupon/spec.md'),
-      '## C001 悬空引用 <!-- oracle:manual refs:specs/ghost/spec.md#C001 -->'
+      '## FR001 intent\n## C001 悬空引用 <!-- oracle:manual refs:specs/ghost/spec.md#C001 req:FR001 -->'
     )
     const report = scanWorkspace(db, root)
     expect(report.linkErrors).toEqual([

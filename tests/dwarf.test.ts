@@ -29,7 +29,7 @@ const setupRepo = (): string => {
   mkdirSync(join(root, 'src'), { recursive: true })
   writeFileSync(
     join(root, 'specs/x/spec.md'),
-    ['## C001 不可叠加 <!-- oracle:manual -->', '## C002 结算 <!-- oracle:manual -->'].join('\n')
+    ['## FR001 test intent', '## C001 不可叠加 <!-- oracle:manual req:FR001 -->', '## C002 结算 <!-- oracle:manual req:FR001 -->'].join('\n')
   )
   writeFileSync(join(root, 'src/impl.ts'), ['const a = 1', 'const b = 2', 'const c = 3', ''].join('\n'))
   git(root, 'add', '-A')
@@ -148,7 +148,7 @@ describe('detectUnmapped', () => {
     const root = setupRepo()
     writeFileSync(
       join(root, 'specs/x/spec.md'),
-      ['## C001 不可叠加 <!-- oracle:manual -->', '## C002 结算 <!-- oracle:manual -->', '新增说明'].join('\n')
+      ['## FR001 test intent', '## C001 不可叠加 <!-- oracle:manual req:FR001 -->', '## C002 结算 <!-- oracle:manual req:FR001 -->', '新增说明'].join('\n')
     )
     const result = detectUnmapped(db, root)
     expect('unmapped' in result && result.unmapped).toEqual([])

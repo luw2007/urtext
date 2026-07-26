@@ -4,7 +4,9 @@ export {
   type OracleKind,
   type ClauseOracle,
   type ClauseRef,
+  type ClauseReq,
   type ParsedClause,
+  type ParsedRequirement,
   type ClauseParseError,
   type ParsedClauseFile,
 } from './clause-parser.js'
@@ -31,8 +33,11 @@ export {
   linkWorkspace,
   propagateStale,
   impact,
+  uncoveredRequirements,
   type LinkError,
   type ClauseKey,
+  type RequirementKey,
+  type RequirementCoverage,
   type StaleReport,
   type ImpactReport,
 } from './linker.js'

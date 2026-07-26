@@ -29,7 +29,7 @@ const setupVerified = (specContent: string): string => {
   const root = mkdtempSync(join(tmpdir(), 'urtext-m4-'))
   tempDirs.push(root)
   mkdirSync(join(root, 'specs/x'), { recursive: true })
-  writeFileSync(join(root, 'specs/x/spec.md'), specContent)
+  writeFileSync(join(root, 'specs/x/spec.md'), `## FR001 test intent\n${specContent}`)
   scanWorkspace(db, root)
   verifyWorkspace(db, root)
   return root
@@ -45,9 +45,9 @@ describe('exportRequest', () => {
   test('packages decided evidence with clause semantics; skips pending', () => {
     setupVerified(
       [
-        '## C001 Always true <!-- oracle:cmd:true -->',
+        '## C001 Always true <!-- oracle:cmd:true req:FR001 -->',
         'body of one',
-        '## C002 Human check <!-- oracle:manual -->',
+        '## C002 Human check <!-- oracle:manual req:FR001 -->',
       ].join('\n')
     )
     const request = exportRequest(db)
@@ -62,7 +62,7 @@ describe('exportRequest', () => {
   })
 
   test('a stale (invalidated) evidence row is excluded — re-verify first', () => {
-    setupVerified('## C001 Always true <!-- oracle:cmd:true -->')
+    setupVerified('## C001 Always true <!-- oracle:cmd:true req:FR001 -->')
     const id = evidenceIdFor('C001')
     db.prepare('UPDATE evidence SET invalidated_at = 1 WHERE id = ?').run(id)
     expect(exportRequest(db).items).toEqual([])
@@ -71,7 +71,7 @@ describe('exportRequest', () => {
 
 describe('importVerdicts + coverage', () => {
   test('agree verdict bound to evidence raises coverage', () => {
-    setupVerified('## C001 Always true <!-- oracle:cmd:true -->')
+    setupVerified('## C001 Always true <!-- oracle:cmd:true req:FR001 -->')
     const id = evidenceIdFor('C001')
     const outcome = importVerdicts(db, [{ evidenceId: id, auditor: 'codex', verdict: 'agree' }], 1)
     expect(outcome).toEqual({ kind: 'imported', count: 1 })
@@ -82,13 +82,13 @@ describe('importVerdicts + coverage', () => {
   })
 
   test('a verdict referencing an unknown evidence id is rejected (bound to real evidence)', () => {
-    setupVerified('## C001 Always true <!-- oracle:cmd:true -->')
+    setupVerified('## C001 Always true <!-- oracle:cmd:true req:FR001 -->')
     const outcome = importVerdicts(db, [{ evidenceId: 9999, auditor: 'codex', verdict: 'agree' }], 1)
     expect(outcome).toMatchObject({ kind: 'rejected', code: 'unknown_evidence' })
   })
 
   test('the latest verdict per evidence wins; disagree is counted', () => {
-    setupVerified('## C001 Always true <!-- oracle:cmd:true -->')
+    setupVerified('## C001 Always true <!-- oracle:cmd:true req:FR001 -->')
     const id = evidenceIdFor('C001')
     importVerdicts(db, [{ evidenceId: id, auditor: 'a', verdict: 'agree' }], 1)
     importVerdicts(db, [{ evidenceId: id, auditor: 'a', verdict: 'disagree', note: 'oracle too weak' }], 2)
@@ -102,7 +102,7 @@ describe('adjudicate (risk-tier gate)', () => {
     importVerdicts(db, [{ evidenceId: evidenceIdFor(clauseId), auditor: 'codex', verdict: 'agree' }], 1)
 
   test('low risk + pass + agree + not stale → auto-pass', () => {
-    setupVerified('## C001 Always true <!-- oracle:cmd:true -->')
+    setupVerified('## C001 Always true <!-- oracle:cmd:true req:FR001 -->')
     auditAgree('C001')
     const report = adjudicate(db)
     expect(report.overall).toBe('auto-pass')
@@ -110,7 +110,7 @@ describe('adjudicate (risk-tier gate)', () => {
   })
 
   test('high risk always needs a human even when everything else is green', () => {
-    setupVerified('## C001 Critical <!-- oracle:cmd:true risk:high -->')
+    setupVerified('## C001 Critical <!-- oracle:cmd:true risk:high req:FR001 -->')
     auditAgree('C001')
     const report = adjudicate(db)
     expect(report.overall).toBe('human')
@@ -118,14 +118,14 @@ describe('adjudicate (risk-tier gate)', () => {
   })
 
   test('unaudited evidence never auto-passes (D3: disagreement never silent)', () => {
-    setupVerified('## C001 Always true <!-- oracle:cmd:true -->')
+    setupVerified('## C001 Always true <!-- oracle:cmd:true req:FR001 -->')
     const report = adjudicate(db)
     expect(report.decisions[0]).toMatchObject({ decision: 'human', auditVerdict: 'unaudited' })
     expect(report.decisions[0]?.reasons).toContain('no meta-audit verdict')
   })
 
   test('meta-audit disagreement forces a human', () => {
-    setupVerified('## C001 Always true <!-- oracle:cmd:true -->')
+    setupVerified('## C001 Always true <!-- oracle:cmd:true req:FR001 -->')
     importVerdicts(db, [{ evidenceId: evidenceIdFor('C001'), auditor: 'codex', verdict: 'disagree' }], 1)
     const report = adjudicate(db)
     expect(report.decisions[0]?.reasons).toContain('meta-audit disagreement (D3)')
@@ -133,13 +133,13 @@ describe('adjudicate (risk-tier gate)', () => {
   })
 
   test('failing evidence forces a human', () => {
-    setupVerified('## C001 Always false <!-- oracle:cmd:false -->')
+    setupVerified('## C001 Always false <!-- oracle:cmd:false req:FR001 -->')
     const report = adjudicate(db)
     expect(report.decisions[0]).toMatchObject({ evidenceVerdict: 'fail', decision: 'human' })
   })
 
   test('a stale clause forces a human even after an agree', () => {
-    setupVerified('## C001 Always true <!-- oracle:cmd:true -->')
+    setupVerified('## C001 Always true <!-- oracle:cmd:true req:FR001 -->')
     auditAgree('C001')
     db.prepare('UPDATE evidence SET invalidated_at = 1 WHERE id = ?').run(evidenceIdFor('C001'))
     const report = adjudicate(db)
@@ -148,7 +148,7 @@ describe('adjudicate (risk-tier gate)', () => {
   })
 
   test('unmapped changes feed the overall verdict (P3 → P4)', () => {
-    setupVerified('## C001 Always true <!-- oracle:cmd:true -->')
+    setupVerified('## C001 Always true <!-- oracle:cmd:true req:FR001 -->')
     auditAgree('C001')
     const clean = adjudicate(db, 0)
     expect(clean.overall).toBe('auto-pass')

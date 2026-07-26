@@ -60,6 +60,7 @@ export interface BriefManifest {
   oracleRef: string | null
   risk: 'low' | 'high'
   refs: string[]
+  reqs: string[]
   stale: boolean
   evidence: { verdict: string; exitCode: number | null; digest: string } | null
   auditVerdict: 'agree' | 'disagree' | null
@@ -99,12 +100,13 @@ interface LiveClauseRow {
   oracle_ref: string | null
   risk: 'low' | 'high'
   refs: string
+  reqs: string
 }
 
 const liveClause = (db: Database, target: ClauseTarget): LiveClauseRow | undefined =>
   db
     .prepare(
-      `SELECT c.revision, r.status, c.title, c.body, c.oracle_kind, c.oracle_ref, c.risk, c.refs
+      `SELECT c.revision, r.status, c.title, c.body, c.oracle_kind, c.oracle_ref, c.risk, c.refs, c.reqs
        FROM clauses c
        JOIN (
          SELECT spec_path, MAX(revision) AS revision
@@ -205,10 +207,11 @@ export const buildBrief = (db: Database, workspaceRoot: string, target: ClauseTa
   }
   const linkErrors = linkWorkspace(db).filter((error) => error.specPath === target.specPath)
   if (linkErrors.length > 0) {
+    const codes = [...new Set(linkErrors.map((error) => error.code))].join(', ')
     return {
       kind: 'refused',
       code: 'link_error',
-      message: `${target.specPath} has ${linkErrors.length} unresolved ref(s) — fix \`unknown_ref\` before adjudicating.`,
+      message: `${target.specPath} has ${linkErrors.length} unresolved link error(s) (${codes}) — fix the reported refs/reqs before adjudicating.`,
     }
   }
 
@@ -268,6 +271,9 @@ export const buildBrief = (db: Database, workspaceRoot: string, target: ClauseTa
   const refs = (JSON.parse(clause.refs) as { path: string; clauseId: string }[]).map(
     (ref) => `${ref.path}#${ref.clauseId}`
   )
+  const reqs = (JSON.parse(clause.reqs) as { path: string | null; reqId: string }[]).map(
+    (req) => (req.path === null ? req.reqId : `${req.path}#${req.reqId}`)
+  )
 
   const manifest: BriefManifest = {
     schema: 'urtext.brief/1',
@@ -280,6 +286,7 @@ export const buildBrief = (db: Database, workspaceRoot: string, target: ClauseTa
     oracleRef: clause.oracle_ref,
     risk: clause.risk,
     refs,
+    reqs,
     stale: evidenceRow ? evidenceRow.invalidated_at !== null : false,
     evidence: evidenceRow
       ? {
@@ -333,6 +340,7 @@ export const renderBriefText = (brief: Brief, history: BriefHistoryLine[] = []):
   lines.push(`${manifest.specPath}#${manifest.clauseId} ${manifest.title}${risk}`)
   lines.push(`  head: ${manifest.head?.slice(0, 7) ?? 'n/a'}  oracle: ${oracle}${manifest.stale ? '  STALE — re-verify required' : ''}`)
   if (manifest.refs.length > 0) lines.push(`  refs: ${manifest.refs.join(', ')}`)
+  if (manifest.reqs.length > 0) lines.push(`  req: ${manifest.reqs.join(', ')}`)
   if (manifest.body) {
     lines.push('')
     for (const bodyLine of manifest.body.split('\n')) lines.push(`  ${bodyLine}`)

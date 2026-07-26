@@ -32,6 +32,7 @@ const makeClause = (oracle: ParsedClause['oracle'], risk: 'low' | 'high' = 'low'
   oracle,
   risk,
   refs: [],
+  reqs: [],
   body: null,
   line: 0,
 })
@@ -70,7 +71,7 @@ describe('verifyWorkspace', () => {
     const root = mkdtempSync(join(tmpdir(), 'urtext-verify-'))
     tempDirs.push(root)
     mkdirSync(join(root, 'specs/x'), { recursive: true })
-    writeFileSync(join(root, 'specs/x/spec.md'), specContent)
+    writeFileSync(join(root, 'specs/x/spec.md'), `## FR001 test intent\n${specContent}`)
     scanWorkspace(db, root)
     return root
   }
@@ -78,9 +79,9 @@ describe('verifyWorkspace', () => {
   test('runs oracles for ready clauses, records evidence, aggregates pass rate', () => {
     const root = setupWorkspace(
       [
-        '## C001 Always true <!-- oracle:cmd:true -->',
-        '## C002 Always false <!-- oracle:cmd:false -->',
-        '## C003 Human check <!-- oracle:manual -->',
+        '## C001 Always true <!-- oracle:cmd:true req:FR001 -->',
+        '## C002 Always false <!-- oracle:cmd:false req:FR001 -->',
+        '## C003 Human check <!-- oracle:manual req:FR001 -->',
       ].join('\n')
     )
 
@@ -107,7 +108,7 @@ describe('verifyWorkspace', () => {
   })
 
   test('re-verification appends new evidence, never overwrites', () => {
-    const root = setupWorkspace('## C001 Always true <!-- oracle:cmd:true -->')
+    const root = setupWorkspace('## C001 Always true <!-- oracle:cmd:true req:FR001 -->')
     verifyWorkspace(db, root)
     verifyWorkspace(db, root)
     const count = db.prepare('SELECT COUNT(*) AS n FROM evidence').get() as { n: number }

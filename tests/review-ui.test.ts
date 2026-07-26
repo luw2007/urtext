@@ -32,7 +32,7 @@ const setupRepo = (extraClauseLine?: string): string => {
   git(root, 'config', 'user.email', 'test@urtext.dev')
   git(root, 'config', 'user.name', 'test')
   mkdirSync(join(root, 'specs/x'), { recursive: true })
-  const lines = ['## C001 design intent <!-- oracle:manual -->', '## C002 label <!-- oracle:cmd:true -->']
+  const lines = ['## FR001 test intent', '## C001 design intent <!-- oracle:manual req:FR001 -->', '## C002 label <!-- oracle:cmd:true req:FR001 -->']
   if (extraClauseLine) lines.push(extraClauseLine)
   writeFileSync(join(root, 'specs/x/spec.md'), lines.join('\n'))
   git(root, 'add', '-A')
@@ -114,7 +114,7 @@ describe('renderConsolePage', () => {
   })
 
   test('csrf token is embedded and a hostile title cannot break the markup', () => {
-    const root = setupRepo(`## C003 <script>'"&x <!-- oracle:manual -->`)
+    const root = setupRepo(`## C003 <script>'"&x <!-- oracle:manual req:FR001 -->`)
     const html = renderConsolePage(buildUiSnapshot(db, root), 'my-token')
     expect(html).toContain('<meta name="csrf-token" content="my-token">')
     expect(html).not.toContain('<script>\'"&x')
@@ -197,7 +197,7 @@ describe('operator console (v3)', () => {
   })
 
   test('brief api exposes a typed impact projection without inventing facts', () => {
-    const root = setupRepo('## C003 guarded path <!-- oracle:cmd:true risk:high refs:specs/x/spec.md#C002 -->')
+    const root = setupRepo('## C003 guarded path <!-- oracle:cmd:true risk:high refs:specs/x/spec.md#C002 req:FR001 -->')
     db.prepare('DELETE FROM evidence WHERE spec_path = ? AND clause_id = ?').run('specs/x/spec.md', 'C003')
     const result = handleBrief(db, root, 'specs/x/spec.md', 'C003')
     expect(result.status).toBe(200)
@@ -214,7 +214,7 @@ describe('operator console (v3)', () => {
   })
 
   test('brief page renders fresh and stale evidence as distinct states', () => {
-    const root = setupRepo('## C003 guarded path <!-- oracle:cmd:true risk:high -->')
+    const root = setupRepo('## C003 guarded path <!-- oracle:cmd:true risk:high req:FR001 -->')
     const fresh = handleBrief(db, root, 'specs/x/spec.md', 'C003')
     if (!('ok' in fresh.body)) throw new Error('expected a brief')
     const freshHtml = renderBriefPage({
@@ -246,7 +246,7 @@ describe('operator console (v3)', () => {
   })
 
   test('brief page lists dependent clauses as potential impact, not stale state', () => {
-    const root = setupRepo('## C003 dependent <!-- oracle:cmd:true refs:specs/x/spec.md#C002 -->')
+    const root = setupRepo('## C003 dependent <!-- oracle:cmd:true refs:specs/x/spec.md#C002 req:FR001 -->')
     const result = handleBrief(db, root, 'specs/x/spec.md', 'C002')
     if (!('ok' in result.body)) throw new Error('expected a brief')
     const html = renderBriefPage({
@@ -265,7 +265,7 @@ describe('operator console (v3)', () => {
   })
 
   test('brief page distinguishes risk, evidence, mappings, and potential impact', () => {
-    const root = setupRepo('## C003 guarded path <!-- oracle:cmd:true risk:high -->')
+    const root = setupRepo('## C003 guarded path <!-- oracle:cmd:true risk:high req:FR001 -->')
     db.prepare('DELETE FROM evidence WHERE spec_path = ? AND clause_id = ?').run('specs/x/spec.md', 'C003')
     const result = handleBrief(db, root, 'specs/x/spec.md', 'C003')
     if (!('ok' in result.body)) throw new Error('expected a brief')
@@ -296,7 +296,7 @@ describe('operator console (v3)', () => {
   })
 
   test('high-risk manual decide from the ui needs the brief-hash it can fetch', () => {
-    const root = setupRepo('## C003 ship gate <!-- oracle:manual risk:high -->')
+    const root = setupRepo('## C003 ship gate <!-- oracle:manual risk:high req:FR001 -->')
     const key = 'specs/x/spec.md#C003'
     expect(handleDecide(db, root, { key, verdict: 'pass', note: 'x' }, 'a').status).toBe(400)
     const brief = handleBrief(db, root, 'specs/x/spec.md', 'C003')
@@ -319,7 +319,7 @@ const setupReviewable = (): string => {
   git(root, 'config', 'user.email', 'test@urtext.dev')
   git(root, 'config', 'user.name', 'test')
   mkdirSync(join(root, 'specs/x'), { recursive: true })
-  writeFileSync(join(root, 'specs/x/spec.md'), '## C001 pay guard <!-- oracle:cmd:true risk:high -->')
+  writeFileSync(join(root, 'specs/x/spec.md'), '## FR001 test intent\n## C001 pay guard <!-- oracle:cmd:true risk:high req:FR001 -->')
   git(root, 'add', '-A')
   git(root, 'commit', '-q', '-m', 'baseline')
   scanWorkspace(db, root)

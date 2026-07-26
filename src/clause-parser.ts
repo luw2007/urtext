@@ -31,6 +31,27 @@ export interface ClauseRef {
   clauseId: string
 }
 
+export interface ClauseReq {
+  /** Workspace-relative spec path, or null for a unit-local bare `FR<n>`. */
+  path: string | null
+  reqId: string
+}
+
+/** Prose intent. Requirements are deliberately not decidable. */
+export interface ParsedRequirement {
+  /** Stable in-file id, e.g. `FR001`. Unique within the file. */
+  reqId: string
+  /** 1-based order of appearance among requirements. */
+  seq: number
+  title: string
+  /** Heading level 1-6, kept for round-tripping. */
+  level: number
+  /** Prose between this heading and the next heading; null when empty. */
+  body: string | null
+  /** 0-based line index of the heading, for error anchoring. */
+  line: number
+}
+
 export interface ParsedClause {
   /** Stable in-file id, e.g. `C001`. Unique within the file. */
   clauseId: string
@@ -42,6 +63,8 @@ export interface ParsedClause {
   oracle: ClauseOracle | null
   risk: 'low' | 'high'
   refs: ClauseRef[]
+  /** Requirements this clause defends. */
+  reqs: ClauseReq[]
   /** Prose between this heading and the next heading; null when empty. */
   body: string | null
   /** 0-based line index of the heading, for error anchoring. */
@@ -56,18 +79,28 @@ export interface ClauseParseError {
     | 'duplicate_clause_id'
     | 'malformed_anchor'
     | 'malformed_ref'
+    | 'missing_requirement'
+    | 'malformed_req'
+    | 'duplicate_req_id'
+    | 'oracle_on_requirement'
+    | 'risk_on_requirement'
   clauseId?: string
+  /** Set instead of `clauseId` for requirement-declaration errors. */
+  reqId?: string
   line: number
   message: string
 }
 
 export interface ParsedClauseFile {
   clauses: ParsedClause[]
+  requirements: ParsedRequirement[]
   errors: ClauseParseError[]
 }
 
 // `## C001 Title …` — capture heading depth, clause id, and the rest.
 const CLAUSE_LINE = /^(#{1,6})\s+(C\d+)\b\s*(.*)$/
+// `## FR001 Title …` — a requirement declaration.
+const REQUIREMENT_LINE = /^(#{1,6})\s+(FR\d+)\b\s*(.*)$/
 // Any heading terminates the previous clause body.
 const ANY_HEADING = /^#{1,6}\s+/
 const ANCHOR = /<!--\s*(.*?)\s*-->/
@@ -135,16 +168,129 @@ const parseRefs = (
   return { refs, errors }
 }
 
+const parseReqs = (
+  value: string | undefined,
+  line: number,
+  clauseId: string
+): { reqs: ClauseReq[]; errors: ClauseParseError[] } => {
+  if (value === undefined) {
+    return {
+      reqs: [],
+      errors: [{
+        code: 'missing_requirement',
+        clauseId,
+        line,
+        message: `Clause "${clauseId}" binds no requirement. A normative clause must declare which intent it defends: req:FR<n> or req:<path>#FR<n>.`,
+      }],
+    }
+  }
+
+  const reqs: ClauseReq[] = []
+  const errors: ClauseParseError[] = []
+  const seen = new Set<string>()
+  let sawToken = false
+  for (const entry of value.split(',')) {
+    const trimmed = entry.trim()
+    if (!trimmed) continue
+    sawToken = true
+    const hash = trimmed.lastIndexOf('#')
+    const path = hash === -1 ? null : trimmed.slice(0, hash)
+    const reqId = hash === -1 ? trimmed : trimmed.slice(hash + 1)
+    if ((hash !== -1 && !path) || !/^FR\d+$/.test(reqId)) {
+      errors.push({
+        code: 'malformed_req',
+        clauseId,
+        line,
+        message: `Clause "${clauseId}" req "${trimmed}" is not "FR<n>" or "<path>#FR<n>".`,
+      })
+      continue
+    }
+    const key = `${path ?? ''}#${reqId}`
+    if (!seen.has(key)) reqs.push({ path, reqId })
+    seen.add(key)
+  }
+  if (!sawToken) {
+    errors.push({
+      code: 'malformed_req',
+      clauseId,
+      line,
+      message: `Clause "${clauseId}" has an empty req value; expected "FR<n>" or "<path>#FR<n>".`,
+    })
+  }
+  return { reqs, errors }
+}
+
+/** Body = lines until the next heading (any level) or EOF. */
+const bodyAfter = (lines: string[], start: number): string | null => {
+  const bodyLines: string[] = []
+  for (let j = start + 1; j < lines.length; j++) {
+    const probe = lines[j]
+    if (probe === undefined || ANY_HEADING.test(probe)) break
+    bodyLines.push(probe)
+  }
+  return bodyLines.join('\n').trim() || null
+}
+
 export const parseClauseFile = (content: string): ParsedClauseFile => {
   const lines = content.split(/\r?\n/)
   const clauses: ParsedClause[] = []
+  const requirements: ParsedRequirement[] = []
   const errors: ClauseParseError[] = []
   const seenIds = new Set<string>()
+  const seenReqIds = new Set<string>()
   let seq = 0
+  let reqSeq = 0
 
   for (let i = 0; i < lines.length; i++) {
     const rawLine = lines[i]
     if (rawLine === undefined) continue
+
+    const reqMatch = rawLine.match(REQUIREMENT_LINE)
+    if (reqMatch) {
+      const [, hashes = '#', reqId = '', rest = ''] = reqMatch
+      const anchorMatch = rest.match(ANCHOR)
+      let fields: Record<string, string> = {}
+      if (anchorMatch?.[1] !== undefined) {
+        const parsed = parseAnchorFields(anchorMatch[1])
+        fields = parsed.fields
+        for (const issue of parsed.issues) errors.push(toAnchorError(issue, i, { reqId }))
+      }
+      if (fields.oracle !== undefined) {
+        errors.push({
+          code: 'oracle_on_requirement',
+          reqId,
+          line: i,
+          message: `Requirement "${reqId}" carries an oracle. Intent is not decidable — bind the oracle to a clause that declares req:${reqId}.`,
+        })
+      }
+      if (fields.risk !== undefined) {
+        errors.push({
+          code: 'risk_on_requirement',
+          reqId,
+          line: i,
+          message: `Requirement "${reqId}" carries a risk tier. Risk belongs to the clause that enforces the intent.`,
+        })
+      }
+      if (seenReqIds.has(reqId)) {
+        errors.push({
+          code: 'duplicate_req_id',
+          reqId,
+          line: i,
+          message: `Requirement id "${reqId}" is declared more than once.`,
+        })
+      }
+      seenReqIds.add(reqId)
+      requirements.push({
+        reqId,
+        seq: ++reqSeq,
+        title: rest.replace(ANCHOR, '').replace(/\s+/g, ' ').trim(),
+        level: hashes.length,
+        body: bodyAfter(lines, i),
+        line: i,
+      })
+      continue
+    }
+
     const match = rawLine.match(CLAUSE_LINE)
     if (!match) continue
 
@@ -155,7 +301,7 @@ export const parseClauseFile = (content: string): ParsedClauseFile => {
     if (anchorMatch?.[1] !== undefined) {
       const parsed = parseAnchorFields(anchorMatch[1])
       fields = parsed.fields
-      for (const issue of parsed.issues) errors.push(toAnchorError(issue, i, clauseId))
+      for (const issue of parsed.issues) errors.push(toAnchorError(issue, i, { clauseId }))
     }
     const title = rest.replace(ANCHOR, '').replace(/\s+/g, ' ').trim()
 
@@ -177,16 +323,8 @@ export const parseClauseFile = (content: string): ParsedClauseFile => {
     }
 
     const { refs, errors: refErrors } = parseRefs(fields.refs, i, clauseId)
-    errors.push(...refErrors)
-
-    // Body = lines until the next heading (any level) or EOF.
-    const bodyLines: string[] = []
-    for (let j = i + 1; j < lines.length; j++) {
-      const probe = lines[j]
-      if (probe === undefined || ANY_HEADING.test(probe)) break
-      bodyLines.push(probe)
-    }
-    const body = bodyLines.join('\n').trim() || null
+    const { reqs, errors: reqErrors } = parseReqs(fields.req, i, clauseId)
+    errors.push(...refErrors, ...reqErrors)
 
     if (seenIds.has(clauseId)) {
       errors.push({
@@ -206,21 +344,22 @@ export const parseClauseFile = (content: string): ParsedClauseFile => {
       oracle,
       risk,
       refs,
-      body,
+      reqs,
+      body: bodyAfter(lines, i),
       line: i,
     })
   }
 
-  return { clauses, errors }
+  return { clauses, requirements, errors }
 }
 
 const toAnchorError = (
   issue: AnchorParseIssue,
   line: number,
-  clauseId: string
+  owner: { clauseId: string } | { reqId: string }
 ): ClauseParseError => ({
   code: 'malformed_anchor',
-  clauseId,
+  ...owner,
   line,
-  message: `Clause "${clauseId}": ${issue.message}`,
+  message: `${'clauseId' in owner ? `Clause "${owner.clauseId}"` : `Requirement "${owner.reqId}"`}: ${issue.message}`,
 })

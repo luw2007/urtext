@@ -27,19 +27,21 @@ import {
 } from '../src/index.js'
 import { TRANSPORTS, type Transport } from './ui-agent-stub.js'
 
-const DEMO_SPEC = `## C001 low runnable base <!-- oracle:cmd:true risk:low -->
+const DEMO_SPEC = `## FR001 acceptance fixture intent
+
+## C001 low runnable base <!-- oracle:cmd:true risk:low req:FR001 -->
 Foundational demo clause with no dependencies; evidence and audit both agree.
 
-## C002 low dependent on base <!-- oracle:cmd:true risk:low refs:specs/demo/spec.md#C001 -->
+## C002 low dependent on base <!-- oracle:cmd:true risk:low refs:specs/demo/spec.md#C001 req:FR001 -->
 Depends on C001 remaining verified; evidence and audit both agree.
 
-## C003 low manual pending decision <!-- oracle:manual risk:low -->
+## C003 low manual pending decision <!-- oracle:manual risk:low req:FR001 -->
 Requires a human manual pass/fail; the fixture leaves it undecided.
 
-## C004 high review target <!-- oracle:cmd:true risk:high -->
+## C004 high review target <!-- oracle:cmd:true risk:high req:FR001 -->
 High-risk clause whose five implementation files carry real mapped diffs.
 
-## C005 low agent prerequisite <!-- oracle:cmd:true risk:low -->
+## C005 low agent prerequisite <!-- oracle:cmd:true risk:low req:FR001 -->
 Evidence exists but is never imported through the audit ledger, keeping it
 unaudited so the agent lane stays non-empty.
 `

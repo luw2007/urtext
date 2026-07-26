@@ -36,6 +36,7 @@ const EXPECTED_EXPORTS = [
   'linkWorkspace',
   'propagateStale',
   'impact',
+  'uncoveredRequirements',
   'runOracle',
   'verifyWorkspace',
   'ensureEvidenceLedger',

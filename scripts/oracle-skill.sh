@@ -12,6 +12,7 @@ case "${1:?usage: oracle-skill.sh <skill-name>}" in
     grep -q 'Mark every candidate `observed` or `inferred`' "$skill"
     grep -q 'evidence gap' "$skill"
     grep -q 'Status\*\*: Candidate — not canonical' "$template"
+    grep -q 'req:FR' "$template"
     ;;
   *)
     echo "unknown skill: $1" >&2

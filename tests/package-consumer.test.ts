@@ -116,7 +116,7 @@ describe('installed runtime consumer — package `.` export only', () => {
       git(root, 'config', 'user.email', 'test@urtext.dev')
       git(root, 'config', 'user.name', 'test')
       mkdirSync(join(root, 'specs/x'), { recursive: true })
-      writeFileSync(join(root, 'specs/x/spec.md'), '## C001 guarded <!-- oracle:cmd:true risk:high -->\\n')
+      writeFileSync(join(root, 'specs/x/spec.md'), '## FR001 test intent\\n## C001 guarded <!-- oracle:cmd:true risk:high req:FR001 -->\\n')
       git(root, 'add', '-A')
       git(root, 'commit', '-q', '-m', 'baseline')
 

@@ -1,4 +1,5 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -21,9 +22,101 @@ afterEach(() => {
   for (const dir of tempDirs.splice(0)) rmSync(dir, { force: true, recursive: true })
 })
 
-const VALID_CLAUSES = ['## C001 不可叠加 <!-- oracle:manual -->', 'body'].join('\n')
+const VALID_CLAUSES = ['## C001 不可叠加 <!-- oracle:manual req:FR001 -->', 'body'].join('\n')
 
 describe('registry revision chain', () => {
+  test('requirements, deduplicated req JSON, and normalized req edges share the revision', () => {
+    const outcome = indexClauseFile(db, {
+      specPath: 'specs/x/spec.md',
+      content: [
+        '## FR001 意图',
+        'why',
+        '## C001 锁 <!-- oracle:manual req:FR001,FR001,specs/y/spec.md#FR002, -->',
+      ].join('\n'),
+      timestamp: 1,
+    })
+    expect(outcome).toMatchObject({ kind: 'indexed', status: 'ready' })
+    expect(db.prepare('SELECT req_id, title FROM requirements').all()).toEqual([
+      { req_id: 'FR001', title: '意图' },
+    ])
+    expect(db.prepare('SELECT reqs FROM clauses').get()).toEqual({
+      reqs: JSON.stringify([
+        { path: null, reqId: 'FR001' },
+        { path: 'specs/y/spec.md', reqId: 'FR002' },
+      ]),
+    })
+    expect(
+      db.prepare('SELECT clause_id, to_spec, to_req FROM clause_reqs ORDER BY to_spec, to_req').all()
+    ).toEqual([
+      { clause_id: 'C001', to_spec: '', to_req: 'FR001' },
+      { clause_id: 'C001', to_spec: 'specs/y/spec.md', to_req: 'FR002' },
+    ])
+  })
+
+  test('FR text edits and removals are changedRequirements without clause text churn', () => {
+    const content = (body: string) =>
+      ['## FR001 意图', body, '## C001 锁 <!-- oracle:manual req:FR001 -->'].join('\n')
+    indexClauseFile(db, { specPath: 'specs/x/spec.md', content: content('v1'), timestamp: 1 })
+    const changed = indexClauseFile(db, {
+      specPath: 'specs/x/spec.md',
+      content: content('v2'),
+      timestamp: 2,
+    })
+    expect(changed.kind === 'indexed' && changed.changedRequirements).toEqual(['FR001'])
+    expect(changed.kind === 'indexed' && changed.changedClauses).toEqual([])
+
+    const removed = indexClauseFile(db, {
+      specPath: 'specs/x/spec.md',
+      content: '## C001 锁 <!-- oracle:manual req:FR001 -->',
+      timestamp: 3,
+    })
+    expect(removed.kind === 'indexed' && removed.changedRequirements).toEqual(['FR001'])
+  })
+
+  test('a grammar-v0 ready row is preserved and byte-identical content reparses at v1', () => {
+    const legacy = new DatabaseConstructor(':memory:')
+    const content = '## C001 old <!-- oracle:manual -->'
+    const contentHash = `sha256:${createHash('sha256').update(content, 'utf8').digest('hex')}`
+    legacy.exec(`
+      CREATE TABLE revisions (
+        spec_path TEXT NOT NULL, revision INTEGER NOT NULL, file_kind TEXT NOT NULL,
+        content_hash TEXT, status TEXT NOT NULL, created_at INTEGER NOT NULL,
+        PRIMARY KEY (spec_path, revision)
+      );
+      CREATE TABLE clauses (
+        spec_path TEXT NOT NULL, revision INTEGER NOT NULL, clause_id TEXT NOT NULL,
+        seq INTEGER NOT NULL, title TEXT NOT NULL, text_hash TEXT NOT NULL DEFAULT '',
+        oracle_kind TEXT, oracle_ref TEXT, risk TEXT NOT NULL DEFAULT 'low',
+        refs TEXT NOT NULL DEFAULT '[]', body TEXT, line INTEGER NOT NULL,
+        PRIMARY KEY (spec_path, revision, clause_id)
+      );
+    `)
+    legacy.prepare(
+      `INSERT INTO revisions VALUES ('specs/x/spec.md', 1, 'clauses', ?, 'ready', 1)`
+    ).run(contentHash)
+    legacy.prepare(
+      `INSERT INTO clauses VALUES ('specs/x/spec.md', 1, 'C001', 1, 'old', '', 'manual', NULL, 'low', '[]', NULL, 0)`
+    ).run()
+
+    openRegistry(legacy)
+    const outcome = indexClauseFile(legacy, {
+      specPath: 'specs/x/spec.md',
+      content,
+      timestamp: 2,
+    })
+    expect(outcome).toMatchObject({ kind: 'indexed', revision: 2, status: 'building' })
+    expect(outcome.kind === 'indexed' && outcome.errors).toEqual([
+      expect.objectContaining({ code: 'missing_requirement' }),
+    ])
+    expect(
+      legacy.prepare('SELECT revision, status, grammar_version FROM revisions ORDER BY revision').all()
+    ).toEqual([
+      { revision: 1, status: 'ready', grammar_version: 0 },
+      { revision: 2, status: 'building', grammar_version: 1 },
+    ])
+    legacy.close()
+  })
+
   test('same content is a no-op; new content appends an immutable revision', () => {
     const first = indexClauseFile(db, { specPath: 'specs/x/spec.md', content: VALID_CLAUSES, timestamp: 1 })
     expect(first).toMatchObject({ kind: 'indexed', revision: 1, status: 'ready' })
@@ -51,7 +144,7 @@ describe('registry revision chain', () => {
   test('a clause without an oracle keeps the revision at building (never activatable)', () => {
     const outcome = indexClauseFile(db, {
       specPath: 'specs/x/spec.md',
-      content: '## C001 无门禁子句',
+      content: '## C001 无门禁子句 <!-- req:FR001 -->',
       timestamp: 1,
     })
     expect(outcome).toMatchObject({ kind: 'indexed', status: 'building' })
@@ -96,13 +189,39 @@ describe('registry revision chain', () => {
 })
 
 describe('scanWorkspace', () => {
+  test('revision reconciliation rolls back when stale invalidation fails', () => {
+    const root = mkdtempSync(join(tmpdir(), 'urtext-scan-'))
+    tempDirs.push(root)
+    mkdirSync(join(root, 'specs/x'), { recursive: true })
+    const spec = (body: string) =>
+      ['## FR001 intent', body, '## C001 lock <!-- oracle:manual req:FR001 -->'].join('\n')
+    writeFileSync(join(root, 'specs/x/spec.md'), spec('v1'))
+    scanWorkspace(db, root)
+    db.prepare(
+      `INSERT INTO evidence
+         (spec_path, revision, clause_id, oracle_kind, verdict, output, created_at)
+       VALUES ('specs/x/spec.md', 1, 'C001', 'manual', 'pass', '', 1)`
+    ).run()
+    db.exec(`
+      CREATE TRIGGER fail_stale BEFORE UPDATE OF invalidated_at ON evidence
+      BEGIN SELECT RAISE(ABORT, 'forced stale failure'); END;
+    `)
+
+    writeFileSync(join(root, 'specs/x/spec.md'), spec('v2'))
+    expect(() => scanWorkspace(db, root)).toThrow('forced stale failure')
+    expect(
+      db.prepare(`SELECT MAX(revision) AS revision FROM revisions WHERE spec_path = 'specs/x/spec.md'`).get()
+    ).toEqual({ revision: 1 })
+    expect(db.prepare('SELECT invalidated_at FROM evidence').get()).toEqual({ invalidated_at: null })
+  })
+
   test('indexes clause files before the checklist so unit refs resolve', () => {
     const root = mkdtempSync(join(tmpdir(), 'urtext-scan-'))
     tempDirs.push(root)
     mkdirSync(join(root, 'specs/coupon'), { recursive: true })
     writeFileSync(
       join(root, 'specs/coupon/spec.md'),
-      ['## C001 不可叠加 <!-- oracle:test:tests/stack.test.ts -->', 'Given/When/Then'].join('\n')
+      ['## FR001 intent', '## C001 不可叠加 <!-- oracle:test:tests/stack.test.ts req:FR001 -->', 'Given/When/Then'].join('\n')
     )
     writeFileSync(
       join(root, 'specs/coupon/tasks.md'),

@@ -424,6 +424,14 @@ const run = (argv: string[]): number => {
           console.log(`      next: ${item.next}`)
         }
       }
+      if (report.uncoveredRequirements.length > 0) {
+        console.log(`\nuncovered intent (${report.uncoveredRequirements.length}):`)
+        for (const req of report.uncoveredRequirements) {
+          console.log(
+            `  ○ ${req.specPath}#${req.reqId} ${req.title} — no live clause defends this requirement`
+          )
+        }
+      }
       if (report.wip.exceeded) {
         console.log(
           `\nwarning: human queue ${report.counts.human} exceeds wip limit ${report.wip.limit} — scrutiny degrades on large batches; consider smaller changes`
@@ -752,7 +760,7 @@ const run = (argv: string[]): number => {
       }
       if (report.clauselessUnits.length > 0) {
         console.log(
-          `  ⚠ no executable clause: ${report.clauselessUnits.join(', ')} — spec prose binds no oracle (add a \`## C<n> … <!-- oracle:… -->\` clause or move it out of specs/)`
+          `  ⚠ no executable clause: ${report.clauselessUnits.join(', ')} — requirements/prose are valid, but this feature has no executable lock (add a \`## C<n> … <!-- oracle:… req:FR<n> -->\` clause)`
         )
       }
     }
@@ -796,6 +804,7 @@ const run = (argv: string[]): number => {
               line: error.line + 1,
               code: error.code,
               message: error.message,
+              ...(error.target !== undefined ? { target: error.target } : {}),
             })),
             stale: report.stale,
             clauselessUnits: report.clauselessUnits,

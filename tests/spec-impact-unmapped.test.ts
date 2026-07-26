@@ -28,7 +28,7 @@ beforeEach(() => {
   git('config', 'user.email', 'test@urtext.dev')
   git('config', 'user.name', 'test')
   mkdirSync(join(root, 'specs/x'), { recursive: true })
-  writeFileSync(join(root, 'specs/x/spec.md'), '## C001 intent <!-- oracle:manual -->')
+  writeFileSync(join(root, 'specs/x/spec.md'), '## FR001 test intent\n## C001 intent <!-- oracle:manual req:FR001 -->')
   writeFileSync(join(root, 'tracked.txt'), 'baseline')
   git('add', '-A')
   git('commit', '-q', '-m', 'baseline')

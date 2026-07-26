@@ -29,7 +29,10 @@ const makeRepo = (specLines: string[]): string => {
   git(root, 'config', 'user.email', 'test@urtext.dev')
   git(root, 'config', 'user.name', 'test')
   mkdirSync(join(root, 'specs/x'), { recursive: true })
-  writeFileSync(join(root, 'specs/x/spec.md'), specLines.join('\n'))
+  const lines = specLines.some((line) => /^#{1,6} FR\d+\b/.test(line))
+    ? specLines
+    : ['## FR001 test intent', '', ...specLines]
+  writeFileSync(join(root, 'specs/x/spec.md'), lines.join('\n'))
   git(root, 'add', '-A')
   git(root, 'commit', '-q', '-m', 'baseline')
   return root
@@ -54,8 +57,26 @@ afterEach(() => {
 })
 
 describe('buildStatus lanes', () => {
+  test('uncovered FRs are reported without entering queues, human counts, WIP, or exit state', () => {
+    const root = makeRepo([
+      '## FR001 covered',
+      '## FR002 uncovered',
+      '## C001 label <!-- oracle:cmd:true req:FR001 -->',
+    ])
+    scanWorkspace(db, root)
+    verifyWorkspace(db, root)
+    agreeAll()
+    const report = statusOf(root)
+    expect(report.uncoveredRequirements).toEqual([
+      { specPath: 'specs/x/spec.md', reqId: 'FR002', title: 'uncovered' },
+    ])
+    expect(report.items).toHaveLength(0)
+    expect(report.counts).toEqual({ agent: 0, human: 0, uncovered: 1, autoPass: 1 })
+    expect(report.wip).toEqual({ limit: 10, exceeded: false })
+  })
+
   test('unverified clause lands in the agent lane; review need stays secondary', () => {
-    const root = makeRepo(['## C001 pay guard <!-- oracle:cmd:true risk:high -->'])
+    const root = makeRepo(['## C001 pay guard <!-- oracle:cmd:true risk:high req:FR001 -->'])
     scanWorkspace(db, root)
     const report = statusOf(root)
     const item = report.items.find((entry) => entry.key === 'specs/x/spec.md#C001')
@@ -65,17 +86,17 @@ describe('buildStatus lanes', () => {
   })
 
   test('a green low-risk clause auto-passes and produces no item', () => {
-    const root = makeRepo(['## C001 label <!-- oracle:cmd:true -->'])
+    const root = makeRepo(['## C001 label <!-- oracle:cmd:true req:FR001 -->'])
     scanWorkspace(db, root)
     verifyWorkspace(db, root)
     agreeAll()
     const report = statusOf(root)
     expect(report.items).toHaveLength(0)
-    expect(report.counts).toEqual({ agent: 0, human: 0, autoPass: 1 })
+    expect(report.counts).toEqual({ agent: 0, human: 0, uncovered: 0, autoPass: 1 })
   })
 
   test('a green high-risk clause without review is the human queue', () => {
-    const root = makeRepo(['## C001 pay <!-- oracle:cmd:true risk:high -->'])
+    const root = makeRepo(['## C001 pay <!-- oracle:cmd:true risk:high req:FR001 -->'])
     scanWorkspace(db, root)
     verifyWorkspace(db, root)
     agreeAll()
@@ -85,7 +106,7 @@ describe('buildStatus lanes', () => {
   })
 
   test('manual clause: undecided is human; a pass decision at HEAD clears it', () => {
-    const root = makeRepo(['## C001 policy <!-- oracle:manual -->'])
+    const root = makeRepo(['## C001 policy <!-- oracle:manual req:FR001 -->'])
     scanWorkspace(db, root)
     verifyWorkspace(db, root)
     expect(statusOf(root).items[0]).toMatchObject({ lane: 'human', primary: 'manual_undecided' })
@@ -100,9 +121,9 @@ describe('buildStatus lanes', () => {
 
   test('an upstream text change routes the dependent to the agent lane as stale', () => {
     const spec = (body: string) => [
-      '## C001 base <!-- oracle:cmd:true -->',
+      '## C001 base <!-- oracle:cmd:true req:FR001 -->',
       body,
-      '## C002 dep <!-- oracle:cmd:true refs:specs/x/spec.md#C001 -->',
+      '## C002 dep <!-- oracle:cmd:true refs:specs/x/spec.md#C001 req:FR001 -->',
     ]
     const root = makeRepo(spec('v1 body'))
     scanWorkspace(db, root)
@@ -118,7 +139,7 @@ describe('buildStatus lanes', () => {
 
 describe('buildStatus unmapped + wip', () => {
   test('unmapped hunks head the human queue as their own items', () => {
-    const root = makeRepo(['## C001 label <!-- oracle:cmd:true -->'])
+    const root = makeRepo(['## C001 label <!-- oracle:cmd:true req:FR001 -->'])
     scanWorkspace(db, root)
     verifyWorkspace(db, root)
     agreeAll()
@@ -136,7 +157,7 @@ describe('buildStatus unmapped + wip', () => {
   })
 
   test('a clause appears once — item-keyed, not reason-keyed', () => {
-    const root = makeRepo(['## C001 pay <!-- oracle:cmd:true risk:high -->'])
+    const root = makeRepo(['## C001 pay <!-- oracle:cmd:true risk:high req:FR001 -->'])
     scanWorkspace(db, root)
     const report = statusOf(root)
     const keys = report.items.map((entry) => entry.key)
@@ -145,7 +166,7 @@ describe('buildStatus unmapped + wip', () => {
   })
 
   test('the wip limit flags an oversized human queue', () => {
-    const root = makeRepo(['## C001 label <!-- oracle:cmd:true -->'])
+    const root = makeRepo(['## C001 label <!-- oracle:cmd:true req:FR001 -->'])
     scanWorkspace(db, root)
     verifyWorkspace(db, root)
     agreeAll()
