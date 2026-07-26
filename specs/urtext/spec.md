@@ -213,3 +213,18 @@ stale，并继续沿 `clause_refs` 传播到它们的下游。FR 变更不铸出
 `revisions.grammar_version` 参与 clause-file no-op 判定。历史行保留 version 0 且绝不
 改写；FR 语法 parser 写 version 1。升级后即使文件字节未变，也必须追加新修订并
 重新执行 mandatory-req 校验，随后同 content + version 1 才可恢复 unchanged。
+
+## C025 FR 影响可机械查询 <!-- oracle:test:tests/fr-impact.test.ts risk:low req:FR013 -->
+
+`urtext impact <spec-path>#FR<n>` 必须列出所有唯一解析到该 FR 的直接守卫子句，
+并从这些子句沿 `clause_refs` 给出包含 direct 的反向影响闭包及其 checklist tasks；
+direct/transitive 必须可区分。不存在或 tombstoned FR 明确拒绝并退出 1，既有
+`impact <spec-path>#C<n>` 输出保持逐字兼容。
+
+## C026 UI 呈现需求绑定与未覆盖意图 <!-- oracle:test:tests/ui-req-observability.test.ts risk:high refs:specs/urtext/spec.md#C019,specs/urtext/spec.md#C023 req:FR012 -->
+
+`urtext ui` 的成功 clause detail 必须按声明顺序显示每条 resolved `req:` 的 FR key
+与 title；dangling/ambiguous binding 在 fail-closed 409 shell 中显式显示 broken，
+且不得获得可批准 hash 或操作控件。Your queue 必须从 `urtext.status/1` 的
+`uncoveredRequirements` 显示 Uncovered intent 列表与空态；这些 intent 不进入
+items、human/agent count、WIP 或退出码。

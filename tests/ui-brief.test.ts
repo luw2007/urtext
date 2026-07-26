@@ -15,6 +15,13 @@ const baseView = (overrides: Partial<SpecImpactView> = {}): SpecImpactView => ({
   risk: 'low',
   stale: false,
   hasEvidence: true,
+  requirementBindings: [
+    {
+      state: 'resolved',
+      rawTarget: 'FR001',
+      target: { specPath: 'specs/x/spec.md', reqId: 'FR001', title: 'base intent' },
+    },
+  ],
   mappings: [],
   impact: { source: { specPath: 'specs/x/spec.md', clauseId: 'C001' }, affectedClauses: [], affectedTasks: [] },
   dependents: [],

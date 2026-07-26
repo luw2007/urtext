@@ -5,7 +5,7 @@ import { join } from 'node:path'
 
 import { afterEach, describe, expect, test } from 'vitest'
 
-import { handleBrief } from '../src/index.js'
+import { buildStatus, handleBrief } from '../src/index.js'
 import {
   buildFixture,
   cleanupFixture,
@@ -86,6 +86,19 @@ describe('S4 acceptance fixture — setup/cleanup/repeatability', () => {
       cleanupFixture(handleB)
     }
   }, 15000)
+
+  test('fixture exposes exactly FR002 as uncovered intent', () => {
+    handle = setupFixture()
+    const status = buildStatus(handle.db, { head: null, unmapped: [] })
+    expect(status.counts.uncovered).toBe(1)
+    expect(status.uncoveredRequirements).toEqual([
+      {
+        specPath: 'specs/demo/spec.md',
+        reqId: 'FR002',
+        title: 'acceptance fixture uncovered intent',
+      },
+    ])
+  })
 })
 
 describe('S4 acceptance fixture — five real mapping diffs', () => {

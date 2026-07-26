@@ -61,6 +61,19 @@ export interface ClauseNavigation {
   next: ClauseTarget | null
 }
 
+export type RequirementBindingView =
+  | {
+      state: 'resolved'
+      rawTarget: string
+      target: { specPath: string; reqId: string; title: string }
+    }
+  | { state: 'dangling'; rawTarget: string }
+  | {
+      state: 'ambiguous'
+      rawTarget: string
+      candidates: { specPath: string; reqId: string; title: string }[]
+    }
+
 export interface SpecImpactView {
   schema: 'urtext.spec-impact/1'
   head: string | null
@@ -70,6 +83,7 @@ export interface SpecImpactView {
   risk: 'low' | 'high'
   stale: boolean
   hasEvidence: boolean
+  requirementBindings: RequirementBindingView[]
   mappings: BriefMapping[]
   impact: Brief['impact']
   dependents: ImpactDependent[]

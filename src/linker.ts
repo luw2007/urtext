@@ -53,6 +53,20 @@ export interface ImpactReport {
   affectedTasks: { specPath: string; fileId: string; title: string; clauseId: string }[]
 }
 
+export interface RequirementImpactReport {
+  source: RequirementKey
+  /** Live clauses whose `req:` edge uniquely resolves to `source`, sorted. */
+  directClauses: ClauseKey[]
+  /** Direct clauses followed by their reverse refs closure. */
+  affectedClauses: ClauseKey[]
+  /** Tasks citing any direct or transitive affected clause. */
+  affectedTasks: ImpactReport['affectedTasks']
+}
+
+export type RequirementImpactOutcome =
+  | { kind: 'found'; report: RequirementImpactReport }
+  | { kind: 'unknown_requirement'; target: RequirementKey }
+
 interface RefEdge {
   spec_path: string
   clause_id: string
@@ -152,6 +166,12 @@ const resolveReq = (graph: LiveGraph, edge: ReqEdge): RequirementKey[] => {
   return graph.unitReqs.get(keyOf(feature, edge.to_req)) ?? []
 }
 
+/** The single live requirement defended by an edge, or null when broken/ambiguous. */
+const uniquelyResolvedRequirement = (graph: LiveGraph, edge: ReqEdge): RequirementKey | null => {
+  const candidates = resolveReq(graph, edge)
+  return candidates.length === 1 ? (candidates[0] ?? null) : null
+}
+
 /**
  * Workspace-level ref validation (SYNTAX.md: `unknown_ref` is a check-stage
  * error). Runs against the current snapshot on every scan, so a ref dangling
@@ -198,6 +218,45 @@ export const linkWorkspace = (db: Database): LinkError[] => {
     })
   }
   return errors
+}
+
+/** Tasks citing any of `clauses`, preserving clause traversal and task sequence order. */
+const tasksCiting = (
+  db: Database,
+  clauses: readonly ClauseKey[]
+): ImpactReport['affectedTasks'] => {
+  const taskStmt = db.prepare(
+    `SELECT t.file_id, t.title, t.clauses
+     FROM tasks t
+     JOIN (
+       SELECT spec_path, MAX(revision) AS revision
+       FROM revisions WHERE file_kind = 'tasks' GROUP BY spec_path
+     ) latest ON latest.spec_path = t.spec_path AND latest.revision = t.revision
+     WHERE t.spec_path = ?
+     ORDER BY t.seq`
+  )
+  const affectedTasks: ImpactReport['affectedTasks'] = []
+  const seenTasks = new Set<string>()
+  for (const clause of clauses) {
+    const feature = featureOf(clause.specPath)
+    if (!feature) continue
+    const taskPath = `specs/${feature}/tasks.md`
+    const rows = taskStmt.all(taskPath) as { file_id: string; title: string; clauses: string }[]
+    for (const row of rows) {
+      const cited: unknown = JSON.parse(row.clauses)
+      if (!Array.isArray(cited) || !cited.includes(clause.clauseId)) continue
+      const dedupe = `${taskPath}#${row.file_id}#${clause.clauseId}`
+      if (seenTasks.has(dedupe)) continue
+      seenTasks.add(dedupe)
+      affectedTasks.push({
+        specPath: taskPath,
+        fileId: row.file_id,
+        title: row.title,
+        clauseId: clause.clauseId,
+      })
+    }
+  }
+  return affectedTasks
 }
 
 /** Reverse transitive closure (BFS) of `sources` over the live refs graph. */
@@ -290,42 +349,53 @@ export const propagateStale = (
 export const impact = (db: Database, source: ClauseKey): ImpactReport => {
   const { edges } = liveGraph(db)
   const affectedClauses = reverseClosure(edges, [source])
+  return {
+    source,
+    affectedClauses,
+    affectedTasks: tasksCiting(db, [source, ...affectedClauses]),
+  }
+}
 
-  // Tasks live in specs/<feature>/tasks.md and cite clause ids unit-locally.
-  const taskStmt = db.prepare(
-    `SELECT t.file_id, t.title, t.clauses
-     FROM tasks t
-     JOIN (
-       SELECT spec_path, MAX(revision) AS revision
-       FROM revisions WHERE file_kind = 'tasks' GROUP BY spec_path
-     ) latest ON latest.spec_path = t.spec_path AND latest.revision = t.revision
-     WHERE t.spec_path = ?
-     ORDER BY t.seq`
-  )
-
-  const affectedTasks: ImpactReport['affectedTasks'] = []
-  const seenTasks = new Set<string>()
-  for (const clause of [source, ...affectedClauses]) {
-    const feature = featureOf(clause.specPath)
-    if (!feature) continue
-    const taskPath = `specs/${feature}/tasks.md`
-    const rows = taskStmt.all(taskPath) as { file_id: string; title: string; clauses: string }[]
-    for (const row of rows) {
-      const cited: unknown = JSON.parse(row.clauses)
-      if (!Array.isArray(cited) || !cited.includes(clause.clauseId)) continue
-      const dedupe = `${taskPath}#${row.file_id}#${clause.clauseId}`
-      if (seenTasks.has(dedupe)) continue
-      seenTasks.add(dedupe)
-      affectedTasks.push({
-        specPath: taskPath,
-        fileId: row.file_id,
-        title: row.title,
-        clauseId: clause.clauseId,
-      })
-    }
+/** FR-direction impact over the same unique-binding truth used by coverage. */
+export const impactRequirement = (
+  db: Database,
+  source: RequirementKey
+): RequirementImpactOutcome => {
+  const graph = liveGraph(db)
+  if (!graph.declaredReqs.has(keyOf(source.specPath, source.reqId))) {
+    return { kind: 'unknown_requirement', target: source }
   }
 
-  return { source, affectedClauses, affectedTasks }
+  const directClauses: ClauseKey[] = []
+  const seen = new Set<string>()
+  for (const edge of graph.reqEdges) {
+    const resolved = uniquelyResolvedRequirement(graph, edge)
+    if (
+      resolved === null ||
+      resolved.specPath !== source.specPath ||
+      resolved.reqId !== source.reqId
+    ) {
+      continue
+    }
+    const key = keyOf(edge.spec_path, edge.clause_id)
+    if (seen.has(key)) continue
+    seen.add(key)
+    directClauses.push({ specPath: edge.spec_path, clauseId: edge.clause_id })
+  }
+  directClauses.sort(
+    (left, right) =>
+      left.specPath.localeCompare(right.specPath) || left.clauseId.localeCompare(right.clauseId)
+  )
+  const affectedClauses = [...directClauses, ...reverseClosure(graph.edges, directClauses)]
+  return {
+    kind: 'found',
+    report: {
+      source,
+      directClauses,
+      affectedClauses,
+      affectedTasks: tasksCiting(db, affectedClauses),
+    },
+  }
 }
 
 /** Live requirements with no uniquely resolved live clause binding. */
@@ -333,10 +403,8 @@ export const uncoveredRequirements = (db: Database): RequirementCoverage[] => {
   const graph = liveGraph(db)
   const covered = new Set<string>()
   for (const edge of graph.reqEdges) {
-    const candidates = resolveReq(graph, edge)
-    if (candidates.length !== 1) continue
-    const requirement = candidates[0]
-    if (requirement) covered.add(keyOf(requirement.specPath, requirement.reqId))
+    const requirement = uniquelyResolvedRequirement(graph, edge)
+    if (requirement !== null) covered.add(keyOf(requirement.specPath, requirement.reqId))
   }
 
   const stmt = db.prepare(

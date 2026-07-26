@@ -140,6 +140,7 @@ describe('console-family shell and route ownership', () => {
     expect(pages.queue).not.toContain('id="all-specs"')
     expect(pages.queue).not.toContain('id="decided-title"')
     expect(pages.queue).not.toContain('id="audit-runner"')
+    expect(pages.queue).toContain('id="uncovered-intent"')
     expect(pages.queue).toContain(
       `${snapshot.status.counts.human} for you, ${snapshot.status.counts.agent} for the agent, ${snapshot.status.counts.autoPass} auto-pass · ${snapshot.decided}/${snapshot.totalManual} manual decided`
     )
@@ -152,6 +153,7 @@ describe('console-family shell and route ownership', () => {
     expect(pages.agent).not.toContain(`${snapshot.status.counts.human} for you`)
     expect(pages.agent).not.toContain('data-banner="wip"')
     expect(pages.agent).not.toContain('urtext map &lt;spec&gt;')
+    expect(pages.agent).not.toContain('id="uncovered-intent"')
 
     expect(pages.specs).toContain('id="all-specs"')
     expect(pages.specs).not.toContain('id="your-queue-title"')
@@ -160,6 +162,7 @@ describe('console-family shell and route ownership', () => {
     expect(pages.specs).not.toContain('id="audit-runner"')
     expect(pages.specs).not.toContain('data-banner="wip"')
     expect(pages.specs).not.toContain('urtext map &lt;spec&gt;')
+    expect(pages.specs).not.toContain('id="uncovered-intent"')
 
     expect(pages.decisions).toContain('id="decided-title"')
     expect(pages.decisions).not.toContain('id="your-queue-title"')
@@ -168,6 +171,7 @@ describe('console-family shell and route ownership', () => {
     expect(pages.decisions).not.toContain('id="audit-runner"')
     expect(pages.decisions).not.toContain('data-banner="wip"')
     expect(pages.decisions).not.toContain('urtext map &lt;spec&gt;')
+    expect(pages.decisions).not.toContain('id="uncovered-intent"')
   })
 
   test('only interactive routes carry CSRF and the console script', () => {

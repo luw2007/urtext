@@ -29,6 +29,8 @@ import { TRANSPORTS, type Transport } from './ui-agent-stub.js'
 
 const DEMO_SPEC = `## FR001 acceptance fixture intent
 
+## FR002 acceptance fixture uncovered intent
+
 ## C001 low runnable base <!-- oracle:cmd:true risk:low req:FR001 -->
 Foundational demo clause with no dependencies; evidence and audit both agree.
 

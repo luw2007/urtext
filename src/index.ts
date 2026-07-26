@@ -33,6 +33,7 @@ export {
   linkWorkspace,
   propagateStale,
   impact,
+  impactRequirement,
   uncoveredRequirements,
   type LinkError,
   type ClauseKey,
@@ -40,6 +41,8 @@ export {
   type RequirementCoverage,
   type StaleReport,
   type ImpactReport,
+  type RequirementImpactReport,
+  type RequirementImpactOutcome,
 } from './linker.js'
 export { runOracle, type OracleResult, type Verdict } from './oracle-runner.js'
 export {
@@ -120,6 +123,7 @@ export {
   type ReviewFacts,
   type ImpactDependent,
   type ClauseNavigation,
+  type RequirementBindingView,
   type SpecImpactView,
 } from './review-ui.js'
 export { renderConsolePage } from './ui/render-console.js'

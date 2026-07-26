@@ -243,6 +243,29 @@ describe('ui server spec impact', () => {
     expect(await notReady.text()).toContain('[not_ready]')
   })
 
+  test('renders broken requirement diagnostics in the fail-closed 409 shell only', async () => {
+    writeFileSync(
+      join(root, 'specs/x/spec.md'),
+      [
+        '## FR001 test intent',
+        '## C001 guarded <!-- oracle:cmd:true risk:high req:FR999 -->',
+      ].join('\n')
+    )
+    const response = await fetch(
+      `${server.url}/brief?spec=specs%2Fx%2Fspec.md&clause=C001`
+    )
+    expect(response.status).toBe(409)
+    const html = await response.text()
+    expect(html).toContain('[link_error]')
+    expect(html).toContain('data-section="requirement-bindings"')
+    expect(html).toContain('data-state="req-dangling"')
+    expect(html).toContain('data-tone="danger"')
+    expect(html).toContain('<code>FR999</code>')
+    expect(html).not.toContain('data-state="req-resolved"')
+    expect(html).not.toContain('id="review-form"')
+    expect(html).not.toContain('id="decision-form-')
+  })
+
   test('preserves CSRF and same-origin write protections', async () => {
     const missingCsrf = await fetch(`${server.url}/api/decide`, {
       method: 'POST',

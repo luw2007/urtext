@@ -1,7 +1,7 @@
 {
   "schema": "urtext.ui-contrast-consumers/3",
-  "sourceContractSha256": "c5d5bf34ddc099af39f3a13408822aceabe530d335bf94f9630ac67870a75970",
-  "renderContractSha256": "7e158728e5c0349f0c0d4506aa702b8f6da412b59f8c190b7bbc27793f0eafe7",
+  "sourceContractSha256": "cd0a26bc24393420b6c65fc2a4f872201f7964a9e956db1dfff15aa3111b0dda",
+  "renderContractSha256": "a17e3d04e8ca5669856da398256dc8849bda68783ea0f706cab171b050ea3032",
   "fixtureMatrix": [
     {
       "id": "console-quiet",
@@ -9,7 +9,7 @@
       "route": "queue",
       "pageNumber": 1,
       "pageSize": 20,
-      "branches": ["console.route.queue", "console.pagination.single", "console.human.empty", "console.unmapped.clean", "console.wip.normal"],
+      "branches": ["console.route.queue", "console.pagination.single", "console.human.empty", "console.unmapped.clean", "console.wip.normal", "console.uncoveredIntent.empty"],
       "csrfToken": "csrf-token-1",
       "snapshot": {
         "head": "1111111111111111111111111111111111111111",
@@ -18,7 +18,8 @@
           "schema": "urtext.status/1",
           "head": "1111111111111111111111111111111111111111",
           "items": [],
-          "counts": { "agent": 0, "human": 0, "autoPass": 0 },
+          "counts": { "agent": 0, "human": 0, "autoPass": 0, "uncovered": 0 },
+          "uncoveredRequirements": [],
           "wip": { "limit": 10, "exceeded": false }
         },
         "clauses": [],
@@ -34,7 +35,7 @@
       "route": "queue",
       "pageNumber": 1,
       "pageSize": 20,
-      "branches": ["console.route.queue", "console.pagination.single", "console.human.nonEmpty", "console.unmapped.hunks", "console.wip.exceeded"],
+      "branches": ["console.route.queue", "console.pagination.single", "console.human.nonEmpty", "console.unmapped.hunks", "console.wip.exceeded", "console.uncoveredIntent.nonEmpty"],
       "csrfToken": "csrf-token-2",
       "snapshot": {
         "head": "2222222222222222222222222222222222222222",
@@ -68,7 +69,11 @@
               "risk": "low"
             }
           ],
-          "counts": { "agent": 1, "human": 1, "autoPass": 2 },
+          "counts": { "agent": 1, "human": 1, "autoPass": 2, "uncovered": 2 },
+          "uncoveredRequirements": [
+            { "specPath": "specs/a/spec.md", "reqId": "FR002", "title": "Uncovered <intent> & visibility" },
+            { "specPath": "specs/b/spec.md", "reqId": "FR007", "title": "Second uncovered intent" }
+          ],
           "wip": { "limit": 1, "exceeded": true }
         },
         "clauses": [],
@@ -93,7 +98,8 @@
           "schema": "urtext.status/1",
           "head": "3333333333333333333333333333333333333333",
           "items": [],
-          "counts": { "agent": 0, "human": 0, "autoPass": 0 },
+          "counts": { "agent": 0, "human": 0, "autoPass": 0, "uncovered": 0 },
+          "uncoveredRequirements": [],
           "wip": { "limit": 10, "exceeded": false }
         },
         "clauses": [],
@@ -156,7 +162,8 @@
               "risk": "low"
             }
           ],
-          "counts": { "agent": 3, "human": 0, "autoPass": 0 },
+          "counts": { "agent": 3, "human": 0, "autoPass": 0, "uncovered": 0 },
+          "uncoveredRequirements": [],
           "wip": { "limit": 10, "exceeded": false }
         },
         "clauses": [],
@@ -181,7 +188,8 @@
           "schema": "urtext.status/1",
           "head": "5555555555555555555555555555555555555555",
           "items": [],
-          "counts": { "agent": 0, "human": 0, "autoPass": 0 },
+          "counts": { "agent": 0, "human": 0, "autoPass": 0, "uncovered": 0 },
+          "uncoveredRequirements": [],
           "wip": { "limit": 10, "exceeded": false }
         },
         "clauses": [],
@@ -206,7 +214,8 @@
           "schema": "urtext.status/1",
           "head": "6666666666666666666666666666666666666666",
           "items": [],
-          "counts": { "agent": 0, "human": 0, "autoPass": 0 },
+          "counts": { "agent": 0, "human": 0, "autoPass": 0, "uncovered": 0 },
+          "uncoveredRequirements": [],
           "wip": { "limit": 10, "exceeded": false }
         },
         "clauses": [
@@ -237,7 +246,8 @@
           "schema": "urtext.status/1",
           "head": "7777777777777777777777777777777777777777",
           "items": [],
-          "counts": { "agent": 0, "human": 0, "autoPass": 0 },
+          "counts": { "agent": 0, "human": 0, "autoPass": 0, "uncovered": 0 },
+          "uncoveredRequirements": [],
           "wip": { "limit": 10, "exceeded": false }
         },
         "clauses": [],
@@ -262,7 +272,8 @@
           "schema": "urtext.status/1",
           "head": "8888888888888888888888888888888888888888",
           "items": [],
-          "counts": { "agent": 0, "human": 0, "autoPass": 0 },
+          "counts": { "agent": 0, "human": 0, "autoPass": 0, "uncovered": 0 },
+          "uncoveredRequirements": [],
           "wip": { "limit": 10, "exceeded": false }
         },
         "clauses": [
@@ -291,7 +302,8 @@
           "schema": "urtext.status/1",
           "head": "9999999999999999999999999999999999999999",
           "items": [],
-          "counts": { "agent": 0, "human": 0, "autoPass": 0 },
+          "counts": { "agent": 0, "human": 0, "autoPass": 0, "uncovered": 0 },
+          "uncoveredRequirements": [],
           "wip": { "limit": 10, "exceeded": false }
         },
         "clauses": [],
@@ -311,7 +323,8 @@
         "brief.mapping.normal",
         "brief.dependent.current",
         "brief.nav.prevPresent",
-        "brief.nav.nextPresent"
+        "brief.nav.nextPresent",
+        "brief.requirementBindings.resolved"
       ],
       "input": {
         "text": "raw brief text for C001",
@@ -329,6 +342,13 @@
           "risk": "high",
           "stale": false,
           "hasEvidence": true,
+          "requirementBindings": [
+            {
+              "state": "resolved",
+              "rawTarget": "FR001",
+              "target": { "specPath": "specs/a/spec.md", "reqId": "FR001", "title": "Widget intent" }
+            }
+          ],
           "mappings": [
             {
               "filePath": "src/foo.ts",
@@ -385,6 +405,13 @@
           "risk": "low",
           "stale": false,
           "hasEvidence": false,
+          "requirementBindings": [
+            {
+              "state": "resolved",
+              "rawTarget": "FR010",
+              "target": { "specPath": "specs/b/spec.md", "reqId": "FR010", "title": "Quiet intent" }
+            }
+          ],
           "mappings": [],
           "impact": {
             "source": { "specPath": "specs/b/spec.md", "clauseId": "C010" },
@@ -417,6 +444,13 @@
           "risk": "high",
           "stale": true,
           "hasEvidence": true,
+          "requirementBindings": [
+            {
+              "state": "resolved",
+              "rawTarget": "FR003",
+              "target": { "specPath": "specs/a/spec.md", "reqId": "FR003", "title": "Stale intent" }
+            }
+          ],
           "mappings": [
             {
               "filePath": "src/bar.ts",
@@ -462,6 +496,13 @@
           "risk": "low",
           "stale": false,
           "hasEvidence": true,
+          "requirementBindings": [
+            {
+              "state": "resolved",
+              "rawTarget": "FR006",
+              "target": { "specPath": "specs/a/spec.md", "reqId": "FR006", "title": "Truncated intent" }
+            }
+          ],
           "mappings": [
             {
               "filePath": "src/baz.ts",
@@ -490,6 +531,23 @@
       "page": "error",
       "branches": ["error.page"],
       "message": "未找到该条款"
+    },
+    {
+      "id": "error-broken-requirements",
+      "page": "error",
+      "branches": ["error.requirementBindings.dangling", "error.requirementBindings.ambiguous"],
+      "message": "[link_error] unresolved requirement bindings",
+      "requirementBindings": [
+        { "state": "dangling", "rawTarget": "specs/missing/spec.md#FR404" },
+        {
+          "state": "ambiguous",
+          "rawTarget": "FR007",
+          "candidates": [
+            { "specPath": "specs/a/spec.md", "reqId": "FR007", "title": "First candidate" },
+            { "specPath": "specs/b/spec.md", "reqId": "FR007", "title": "Second candidate" }
+          ]
+        }
+      ]
     }
   ],
   "consumers": [
@@ -523,6 +581,7 @@
     { "id": "e-a-focus", "page": "error", "fixture": "error-page", "selector": "a", "state": "focus-visible", "foregroundToken": "accent", "backgroundToken": "bg" },
     { "id": "e-skip-default", "page": "error", "fixture": "error-page", "selector": ".skip", "state": "default", "foregroundToken": "skip-fg", "backgroundToken": "skip-bg" },
     { "id": "e-skip-focus", "page": "error", "fixture": "error-page", "selector": ".skip", "state": "focus-visible", "foregroundToken": "skip-fg", "backgroundToken": "skip-bg" },
-    { "id": "e-alert-default", "page": "error", "fixture": "error-page", "selector": "[role=\"alert\"]", "state": "default", "foregroundToken": "danger", "backgroundToken": "danger-bg" }
+    { "id": "e-alert-default", "page": "error", "fixture": "error-page", "selector": "[role=\"alert\"]", "state": "default", "foregroundToken": "danger", "backgroundToken": "danger-bg" },
+    { "id": "e-danger-default", "page": "error", "fixture": "error-broken-requirements", "selector": "[data-tone=\"danger\"]", "state": "default", "foregroundToken": "danger", "backgroundToken": "danger-bg" }
   ]
 }

@@ -10,8 +10,8 @@
  *                         One item-keyed queue: human lane vs agent lane.
  *   urtext brief <spec-path>#<clause-id> | <file>:<line>[-<end>]
  *                         Full adjudication context + freshness hash (P2).
- *   urtext impact <spec-path>#<clause-id>
- *                         Reverse closure over the refs graph: affected clauses + tasks.
+ *   urtext impact <spec-path>#<clause-id> | <spec-path>#FR<n>
+ *                         Clause impact, or FR defenders + reverse closure + tasks.
  *   urtext map <spec-path>#<clause-id> <file>:<start>-<end> [note…]
  *                         Record a diff-verified clause→code mapping (D4).
  *   urtext ack <file>:<start>-<end> <reason…>
@@ -28,7 +28,8 @@
  */
 
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, readFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, realpathSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
 
 import DatabaseConstructor from 'better-sqlite3'
@@ -40,7 +41,7 @@ import { listDecisions, recordDecision } from './decision.js'
 import { baseline, baselineValidation, cluster, coverage as distillCoverage, discover, distillUsage, l2IntentReview, l2IntentReviewValidation, promote, runBaseline, validate } from './distill.js'
 import { blame, detectUnmapped, recordAck, recordMapping } from './dwarf.js'
 import { adjudicate } from './gate.js'
-import { impact } from './linker.js'
+import { impact, impactRequirement } from './linker.js'
 import { openRegistry } from './registry.js'
 import { scanWorkspace } from './scanner.js'
 import { buildStatus } from './status.js'
@@ -68,8 +69,10 @@ const USAGE = [
   '                   evidence, audit, impact — plus the brief-hash quoted back',
   '                   via `review`/`decide` --brief. Refuses building/link-broken',
   '                   revisions (no approvable hash, fail-closed).',
-  '  urtext impact <spec-path>#<clause-id>',
-  '                   List clauses and tasks affected if the clause changes.',
+  '  urtext impact <spec-path>#<clause-id> | <spec-path>#FR<n>',
+  '                   Clause target: list clauses and tasks affected if it changes.',
+  '                   FR target: list direct defenders, their reverse closure,',
+  '                   and tasks citing any affected clause.',
   '  urtext map <spec-path>#<clause-id> <file>:<start>-<end> [note…]',
   '                   Record a clause→code mapping, cross-verified against git diff.',
   '  urtext ack <file>:<start>-<end> <reason…>',
@@ -118,6 +121,17 @@ const parseClauseTarget = (target: string | undefined): { specPath: string; clau
   return /^C\d+$/.test(clauseId) ? { specPath, clauseId } : null
 }
 
+/** `<spec-path>#FR<n>` → parts, or null. Bare FR ids are not CLI targets. */
+const parseRequirementTarget = (
+  target: string | undefined
+): { specPath: string; reqId: string } | null => {
+  const hash = target?.lastIndexOf('#') ?? -1
+  if (!target || hash <= 0) return null
+  const specPath = target.slice(0, hash)
+  const reqId = target.slice(hash + 1)
+  return /^FR\d+$/.test(reqId) ? { specPath, reqId } : null
+}
+
 /** `<file>:<start>-<end>` (or `<file>:<line>`) → parts, or null. */
 const parseRangeTarget = (
   target: string | undefined
@@ -164,7 +178,7 @@ const openWorkspaceRegistry = (workspaceRoot: string) => {
   return db
 }
 
-const run = (argv: string[]): number => {
+export const run = (argv: string[]): number => {
   const command = argv[0]
   if (!command || command === '--help' || command === '-h') {
     console.log(USAGE)
@@ -646,26 +660,59 @@ const run = (argv: string[]): number => {
 
     if (command === 'impact') {
       const clause = parseClauseTarget(argv[1])
-      if (!clause) {
-        console.error(`Usage: urtext impact <spec-path>#<clause-id>\n\nGot: ${argv[1] ?? '(nothing)'}`)
+      const requirement = clause === null ? parseRequirementTarget(argv[1]) : null
+      if (clause === null && requirement === null) {
+        console.error(
+          `Usage: urtext impact <spec-path>#<clause-id> | <spec-path>#FR<n>\n\nGot: ${argv[1] ?? '(nothing)'}`
+        )
         return 1
       }
-      const { specPath, clauseId } = clause
       scanWorkspace(db, workspaceRoot)
-      const report = impact(db, { specPath, clauseId })
-      if (report.affectedClauses.length === 0 && report.affectedTasks.length === 0) {
-        console.log(`No clause refs ${specPath}#${clauseId} and no task cites it.`)
+      if (clause !== null) {
+        const { specPath, clauseId } = clause
+        const report = impact(db, { specPath, clauseId })
+        if (report.affectedClauses.length === 0 && report.affectedTasks.length === 0) {
+          console.log(`No clause refs ${specPath}#${clauseId} and no task cites it.`)
+          return 0
+        }
+        if (report.affectedClauses.length > 0) {
+          console.log('Affected clauses (reverse closure):')
+          for (const clause of report.affectedClauses) {
+            console.log(`  ${clause.specPath}#${clause.clauseId}`)
+          }
+        }
+        if (report.affectedTasks.length > 0) {
+          console.log('Affected tasks:')
+          for (const task of report.affectedTasks) {
+            console.log(`  ${task.specPath} ${task.fileId} ${task.title} (cites ${task.clauseId})`)
+          }
+        }
         return 0
       }
-      if (report.affectedClauses.length > 0) {
-        console.log('Affected clauses (reverse closure):')
-        for (const clause of report.affectedClauses) {
-          console.log(`  ${clause.specPath}#${clause.clauseId}`)
+
+      if (requirement === null) throw new Error('unreachable impact target')
+      const outcome = impactRequirement(db, requirement)
+      if (outcome.kind === 'unknown_requirement') {
+        console.error(
+          `No live requirement ${outcome.target.specPath}#${outcome.target.reqId} — undeclared, tombstoned, or the spec path is wrong.`
+        )
+        return 1
+      }
+      const direct = new Set(
+        outcome.report.directClauses.map((item) => `${item.specPath}#${item.clauseId}`)
+      )
+      if (outcome.report.affectedClauses.length === 0) {
+        console.log('Affected clauses (direct + reverse closure): none')
+      } else {
+        console.log('Affected clauses (direct + reverse closure):')
+        for (const affected of outcome.report.affectedClauses) {
+          const key = `${affected.specPath}#${affected.clauseId}`
+          console.log(`  [${direct.has(key) ? 'direct' : 'transitive'}] ${key}`)
         }
       }
-      if (report.affectedTasks.length > 0) {
+      if (outcome.report.affectedTasks.length > 0) {
         console.log('Affected tasks:')
-        for (const task of report.affectedTasks) {
+        for (const task of outcome.report.affectedTasks) {
           console.log(`  ${task.specPath} ${task.fileId} ${task.title} (cites ${task.clauseId})`)
         }
       }
@@ -897,8 +944,20 @@ const runUi = async (argv: string[]): Promise<number> => {
   return promise
 }
 
-if (process.argv[2] === 'ui') {
-  runUi(process.argv.slice(3)).then((code) => process.exit(code))
-} else {
-  process.exit(run(process.argv.slice(2)))
+const isMain = (): boolean => {
+  const entry = process.argv[1]
+  if (entry === undefined) return false
+  try {
+    return realpathSync(entry) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    return false
+  }
+}
+
+if (isMain()) {
+  if (process.argv[2] === 'ui') {
+    runUi(process.argv.slice(3)).then((code) => process.exit(code))
+  } else {
+    process.exit(run(process.argv.slice(2)))
+  }
 }

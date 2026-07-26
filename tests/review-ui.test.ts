@@ -208,6 +208,17 @@ describe('operator console (v3)', () => {
       risk: 'high',
       stale: false,
       hasEvidence: false,
+      requirementBindings: [
+        {
+          state: 'resolved',
+          rawTarget: 'FR001',
+          target: {
+            specPath: 'specs/x/spec.md',
+            reqId: 'FR001',
+            title: 'test intent',
+          },
+        },
+      ],
     })
     expect(result.body.view.impact.affectedClauses).toEqual([])
     expect(result.body.view.mappings).toEqual([])

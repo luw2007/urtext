@@ -22,7 +22,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import type { UiSnapshot } from '../src/review-ui.js'
-import type { BriefPageInput } from '../src/ui/contracts.js'
+import type { BriefPageInput, RequirementBindingView } from '../src/ui/contracts.js'
 import { renderBriefErrorPage, renderBriefPage } from '../src/ui/render-brief.js'
 import { renderConsoleFamilyPage, type ConsoleRoute } from '../src/ui/render-console.js'
 
@@ -93,7 +93,7 @@ export const checkContrastPairs = (pairs: ContrastPair[], threshold = CONTRAST_T
 type ContrastFixture =
   | { id: string; page: 'console'; route: ConsoleRoute; pageNumber: number; pageSize: number; snapshot: UiSnapshot; csrfToken: string; auditResult?: string }
   | { id: string; page: 'brief'; input: BriefPageInput }
-  | { id: string; page: 'error'; message: string }
+  | { id: string; page: 'error'; message: string; requirementBindings?: RequirementBindingView[] }
 
 interface ContrastManifest {
   schema: string
@@ -112,6 +112,7 @@ export interface ManifestVerification {
 const CONTRAST_SOURCE_FILES = [
   'src/ui/theme.ts',
   'src/ui/html.ts',
+  'src/ui/contracts.ts',
   'src/ui/pagination.ts',
   'src/ui/render-console.ts',
   'src/ui/render-brief.ts',
@@ -134,7 +135,7 @@ const renderContrastFixture = (fixture: ContrastFixture): string => {
     })
   }
   if (fixture.page === 'brief') return renderBriefPage(fixture.input)
-  return renderBriefErrorPage(fixture.message)
+  return renderBriefErrorPage(fixture.message, fixture.requirementBindings)
 }
 
 export const verifyContrastManifest = (manifestPath: string, sourceRoot: string): ManifestVerification => {
@@ -600,20 +601,32 @@ export interface PageSpecificExpectation {
 export const PAGE_SPECIFIC_SELECTORS: PageSpecificExpectation[] = [
   { page: 'console', selector: '#audit-runner', expectedCount: 0 },
   { page: 'console', selector: '#explain-btn', expectedCount: 0 },
+  { page: 'console', selector: '#uncovered-intent', expectedCount: 1 },
+  {
+    page: 'console',
+    selector: 'li[data-uncovered="specs/demo/spec.md#FR002"]',
+    expectedCount: 1,
+  },
   { page: 'agent', selector: '#audit-runner', expectedCount: 1 },
   { page: 'agent', selector: '#explain-btn', expectedCount: 0 },
+  { page: 'agent', selector: '#uncovered-intent', expectedCount: 0 },
   { page: 'specs', selector: 'nav[aria-label="分页"]', expectedCount: 1 },
   { page: 'specs', selector: 'a[rel="prev"]', expectedCount: 0 },
   { page: 'specs', selector: 'a[rel="next"]', expectedCount: 1 },
   { page: 'specs', selector: '#audit-runner', expectedCount: 0 },
+  { page: 'specs', selector: '#uncovered-intent', expectedCount: 0 },
   { page: 'specs-page-2', selector: 'nav[aria-label="分页"]', expectedCount: 1 },
   { page: 'specs-page-2', selector: 'a[rel="prev"]', expectedCount: 1 },
   { page: 'specs-page-2', selector: 'a[rel="next"]', expectedCount: 1 },
   { page: 'decisions', selector: '#audit-runner', expectedCount: 0 },
+  { page: 'decisions', selector: '#uncovered-intent', expectedCount: 0 },
   { page: 'brief', selector: '#explain-btn', expectedCount: 1 },
   { page: 'brief', selector: '#audit-runner', expectedCount: 0 },
+  { page: 'brief', selector: '[data-section="requirement-bindings"]', expectedCount: 1 },
+  { page: 'brief', selector: 'li[data-state="req-resolved"]', expectedCount: 1 },
   { page: 'error', selector: '#explain-btn', expectedCount: 0 },
   { page: 'error', selector: '#audit-runner', expectedCount: 0 },
+  { page: 'error', selector: '[data-section="requirement-bindings"]', expectedCount: 0 },
 ]
 
 /** Real per-selector element counts via a single `querySelectorAll` batch, parsed from the injected client's response. */
