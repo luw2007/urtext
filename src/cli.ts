@@ -57,9 +57,11 @@ const USAGE = [
   '                   Index, then report errors; exit 1 on any building revision',
   '                   or unknown cross-file ref. --diff also fails on unmapped',
   '                   working-tree changes.',
-  '  urtext verify [<spec-path>#<clause-id>]',
+  '  urtext verify [<spec-path>#<clause-id>] [--incremental]',
   '                   Index + check, then run every clause oracle (or just one)',
   '                   and record evidence; exit 1 on any failing clause.',
+  '                   --incremental reuses a passing test-oracle verdict only when',
+  '                   nothing git-visible changed since it was recorded.',
   '  urtext status [--json] [--wip-limit <n>]',
   '                   One item-keyed queue: human lane (adjudications whose',
   '                   prerequisites are met, unmapped changes) + agent lane',
@@ -878,7 +880,10 @@ export const run = (argv: string[]): number => {
       console.error('Usage: urtext verify [<spec-path>#<clause-id>]')
       return 1
     }
-    const verifyReport = verifyWorkspace(db, workspaceRoot, only ?? undefined)
+    const verifyStartedAt = Date.now()
+    const verifyReport = verifyWorkspace(db, workspaceRoot, only ?? undefined, {
+      incremental: argv.includes('--incremental'),
+    })
     if (verifyReport.verdicts.length === 0) {
       if (only) {
         console.error(`\nNo ready clause matches ${only.specPath}#${only.clauseId}.`)
@@ -893,8 +898,9 @@ export const run = (argv: string[]): number => {
         verdict.verdict === 'pass' ? '✓' : verdict.verdict === 'pending' ? '?' : '✗'
       const risk = verdict.risk === 'high' ? ' [high]' : ''
       const seconds = (verdict.durationMs / 1000).toFixed(verdict.durationMs < 10_000 ? 1 : 0)
+      const reused = verdict.source === 'reused' ? ', reused' : ''
       console.log(
-        `  ${marker} ${verdict.clauseId} ${verdict.title}${risk} (${verdict.oracleKind}, ${verdict.verdict}, ${seconds}s)`
+        `  ${marker} ${verdict.clauseId} ${verdict.title}${risk} (${verdict.oracleKind}, ${verdict.verdict}, ${seconds}s${reused})`
       )
       if (verdict.verdict === 'fail') {
         for (const line of verdict.output.split('\n').slice(0, 6)) {
@@ -905,8 +911,13 @@ export const run = (argv: string[]): number => {
     const { counts, passRate, manualShare } = verifyReport
     const rate = passRate === null ? 'n/a' : `${Math.round(passRate * 100)}%`
     const manual = manualShare === null ? 'n/a' : `${Math.round(manualShare * 100)}%`
+    // Wall time is printed separately from per-clause durations: batched
+    // oracles ran concurrently, so the per-clause column deliberately does
+    // NOT sum to the elapsed time.
+    const elapsed = ((Date.now() - verifyStartedAt) / 1000).toFixed(1)
+    const reuse = verifyReport.reusedCount > 0 ? `, ${verifyReport.reusedCount} reused` : ''
     console.log(
-      `\n${counts.pass} pass, ${counts.fail} fail, ${counts.pending} pending — pass rate ${rate}, manual share ${manual}`
+      `\n${counts.pass} pass, ${counts.fail} fail, ${counts.pending} pending${reuse} — pass rate ${rate}, manual share ${manual} (${elapsed}s)`
     )
     if (manualShare !== null && manualShare > 0.5) {
       console.log('warning: manual oracle share exceeds 50% — the load-bearing assumption is failing (VISION P9)')

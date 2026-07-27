@@ -228,3 +228,10 @@ direct/transitive 必须可区分。不存在或 tombstoned FR 明确拒绝并�
 且不得获得可批准 hash 或操作控件。Your queue 必须从 `urtext.status/1` 的
 `uncoveredRequirements` 显示 Uncovered intent 列表与空态；这些 intent 不进入
 items、human/agent count、WIP 或退出码。
+
+## C027 批量与增量验证不得软化证据 <!-- oracle:test:tests/verify-performance.test.ts risk:high refs:specs/urtext/spec.md#C004 req:FR002 -->
+
+批量 test oracle 必须保留 substring ref 语义，未匹配 ref 与批处理故障逐子句
+fail-closed；solo escape hatch 与批量结果等价。增量模式仅复用同 revision、未 stale、
+同 workspace input fingerprint 的最新 test pass，且复用不追加证据；工作树变化、
+非 test、fail 或 invalidated evidence 必须重新执行。
