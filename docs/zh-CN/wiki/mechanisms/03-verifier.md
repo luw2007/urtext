@@ -24,10 +24,9 @@ index → take each ready revision's clauses → run the oracle → record evide
 退出码：任何 `fail` → 1；`pending` 不阻塞（它的人工裁定是
 [决策账本](07-unsafe-lane.md)的工作）。证据行携带 `spec_path,
 revision, clause_id, oracle_kind, oracle_ref, verdict, exit_code, output,
-created_at`，外加一个可变的 `invalidated_at`。它在严格意义上是追加式的
-— 行永远不会被删除或重写 — 唯一例外是
-`invalidated_at`，由[链接器(linker)](04-linker-impact.md)盖章，用于在不抹除证据的情况下作废陈旧
-证据。
+created_at`，外加一枚逻辑作废戳：`invalidated_at` 与
+`invalidation_source` 由[链接器(linker)](04-linker-impact.md)同一次写入。
+行仍保持追加式；陈旧证据永不删除，历史 NULL source 保持未知且绝不回填。
 
 ## 自托管证明
 

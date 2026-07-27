@@ -24,10 +24,10 @@ The verdict table is small and total — there is no "skipped" that hides:
 Exit code: any `fail` → 1; `pending` does not block (its human adjudication is the
 [Decision ledger](07-unsafe-lane.md)'s job). The evidence row carries `spec_path,
 revision, clause_id, oracle_kind, oracle_ref, verdict, exit_code, output,
-created_at` plus a mutable `invalidated_at`. It is append-only in the strict
-sense — rows are never deleted or rewritten — with the single exception of
-`invalidated_at`, which the [linker](04-linker-impact.md) stamps to void stale
-evidence without erasing it.
+created_at` plus one logical invalidation stamp: `invalidated_at` and
+`invalidation_source`, written together by the [linker](04-linker-impact.md).
+Rows remain append-only; stale evidence is never erased, and legacy NULL source
+values remain unknown rather than being backfilled.
 
 ## The self-hosted proof
 

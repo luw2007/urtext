@@ -39,14 +39,16 @@ export interface RequirementCoverage {
 }
 
 export interface StaleReport {
-  /** Dependents (reverse transitive closure of the changed clauses). */
+  /** Direct FR defenders and reverse-ref dependents whose evidence is stale in this labelled traversal. */
   staleClauses: ClauseKey[]
-  /** Evidence rows stamped `invalidated_at` by this propagation. */
+  /** Evidence rows that received this event's two-column invalidation stamp. */
   invalidatedEvidence: number
 }
 
 export interface ImpactReport {
   source: ClauseKey
+  /** Clauses one reverse edge from `source`, in BFS traversal order. */
+  directClauses: ClauseKey[]
   /** Reverse transitive closure of `source`, BFS order, source excluded. */
   affectedClauses: ClauseKey[]
   /** Tasks citing the source or any affected clause, in their feature units. */
@@ -259,8 +261,33 @@ const tasksCiting = (
   return affectedTasks
 }
 
-/** Reverse transitive closure (BFS) of `sources` over the live refs graph. */
-const reverseClosure = (edges: RefEdge[], sources: ClauseKey[]): ClauseKey[] => {
+interface StaleSeed {
+  clause: ClauseKey
+  /** Originating `<path>#C<n>` or `<path>#FR<n>` key. */
+  source: string
+}
+
+interface LabelledTraversal {
+  stale: StaleSeed[]
+  sourceByClause: ReadonlyMap<string, string>
+}
+
+const firstSeedPerClause = (seeds: readonly StaleSeed[]): StaleSeed[] => {
+  const seen = new Set<string>()
+  return seeds.filter((seed) => {
+    const key = keyOf(seed.clause.specPath, seed.clause.clauseId)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+/** One labelled reverse traversal derives both stale targets and their first-writer causes. */
+const labelledReverseBfs = (
+  edges: readonly RefEdge[],
+  changedRoots: readonly StaleSeed[],
+  directRoots: readonly StaleSeed[] = []
+): LabelledTraversal => {
   const dependents = new Map<string, ClauseKey[]>()
   for (const edge of edges) {
     const target = keyOf(edge.to_spec, edge.to_clause)
@@ -269,27 +296,57 @@ const reverseClosure = (edges: RefEdge[], sources: ClauseKey[]): ClauseKey[] => 
     dependents.set(target, list)
   }
 
-  const visited = new Set(sources.map((s) => keyOf(s.specPath, s.clauseId)))
-  const queue = [...sources]
-  const closure: ClauseKey[] = []
-  for (let head = 0; head < queue.length; head++) {
-    const current = queue[head]
-    if (current === undefined) continue
-    for (const dependent of dependents.get(keyOf(current.specPath, current.clauseId)) ?? []) {
-      const key = keyOf(dependent.specPath, dependent.clauseId)
-      if (visited.has(key)) continue
-      visited.add(key)
-      closure.push(dependent)
-      queue.push(dependent)
+  const directStale = firstSeedPerClause(directRoots)
+  const seen = new Set(changedRoots.map((seed) => keyOf(seed.clause.specPath, seed.clause.clauseId)))
+  const sourceByClause = new Map<string, string>()
+  const descendants: StaleSeed[] = []
+  const queue = [...changedRoots]
+  const expand = (start: number): void => {
+    for (let index = start; index < queue.length; index += 1) {
+      const current = queue[index]
+      if (current === undefined) continue
+      const currentKey = keyOf(current.clause.specPath, current.clause.clauseId)
+      for (const dependent of dependents.get(currentKey) ?? []) {
+        const key = keyOf(dependent.specPath, dependent.clauseId)
+        if (seen.has(key)) continue
+        seen.add(key)
+        sourceByClause.set(key, current.source)
+        const next: StaleSeed = { clause: dependent, source: current.source }
+        descendants.push(next)
+        queue.push(next)
+      }
     }
   }
-  return closure
+
+  expand(0)
+  const directStart = queue.length
+  for (const seed of directStale) {
+    const key = keyOf(seed.clause.specPath, seed.clause.clauseId)
+    if (!seen.has(key)) {
+      seen.add(key)
+      sourceByClause.set(key, seed.source)
+      queue.push(seed)
+    } else if (!sourceByClause.has(key)) {
+      sourceByClause.set(key, seed.source)
+    }
+  }
+  expand(directStart)
+
+  const stale = firstSeedPerClause([...directStale, ...descendants])
+  return { stale, sourceByClause }
 }
+/** Key-only closure consumed by impact APIs; ordering remains unchanged. */
+const reverseClosure = (edges: readonly RefEdge[], sources: readonly ClauseKey[]): ClauseKey[] =>
+  labelledReverseBfs(
+    edges,
+    sources.map((clause) => ({ clause, source: '' }))
+  ).stale.map((seed) => seed.clause)
 
 /**
- * Mark every dependent of `changed` stale by stamping `invalidated_at` on its
- * live evidence. The changed clauses themselves need no stamp: their text
- * change already minted a new revision, so verify re-runs them regardless.
+ * Mark stale evidence with one two-column invalidation stamp. A clause directly
+ * hit by an FR change is attributed to that FR. When the same clause's text
+ * also changed, its downstream remains attributed to the clause text change:
+ * those dependents would be stale even without the FR change.
  */
 export const propagateStale = (
   db: Database,
@@ -302,43 +359,42 @@ export const propagateStale = (
   }
   ensureEvidenceLedger(db)
   const graph = liveGraph(db)
-  const uniqueClauses = (clauses: ClauseKey[]): ClauseKey[] => {
-    const seen = new Set<string>()
-    return clauses.filter((clause) => {
-      const key = keyOf(clause.specPath, clause.clauseId)
-      if (seen.has(key)) return false
-      seen.add(key)
-      return true
-    })
-  }
   const matchesChangedRequirement = (edge: ReqEdge, requirement: RequirementKey): boolean => {
     if (edge.to_req !== requirement.reqId) return false
     if (edge.to_spec !== '') return edge.to_spec === requirement.specPath
     const sourceFeature = featureOf(edge.spec_path)
     return sourceFeature !== null && sourceFeature === featureOf(requirement.specPath)
   }
-  const directRequirementDependents = uniqueClauses(
-    graph.reqEdges.flatMap((edge) =>
-      changedRequirements.some((requirement) => matchesChangedRequirement(edge, requirement))
-        ? [{ specPath: edge.spec_path, clauseId: edge.clause_id }]
-        : []
+  const directRequirementSeeds = firstSeedPerClause(
+    changedRequirements.flatMap((requirement) =>
+      graph.reqEdges.flatMap((edge) =>
+        matchesChangedRequirement(edge, requirement)
+          ? [{ clause: { specPath: edge.spec_path, clauseId: edge.clause_id }, source: keyOf(requirement.specPath, requirement.reqId) }]
+          : []
+      )
     )
   )
-  const roots = uniqueClauses([...changed, ...directRequirementDependents])
-  const downstream = reverseClosure(graph.edges, roots)
-  const staleClauses = uniqueClauses([...directRequirementDependents, ...downstream])
-
+  const changedClauseSeeds = firstSeedPerClause(
+    changed.map((clause) => ({ clause, source: keyOf(clause.specPath, clause.clauseId) }))
+  )
+  const traversal = labelledReverseBfs(graph.edges, changedClauseSeeds, directRequirementSeeds)
+  const stale = traversal.stale
   const invalidate = db.prepare(
-    `UPDATE evidence SET invalidated_at = ?
+    `UPDATE evidence SET invalidated_at = ?, invalidation_source = ?
      WHERE spec_path = ? AND clause_id = ? AND invalidated_at IS NULL`
   )
   let invalidatedEvidence = 0
   db.transaction(() => {
-    for (const clause of staleClauses) {
-      invalidatedEvidence += invalidate.run(timestamp, clause.specPath, clause.clauseId).changes
+    for (const seed of stale) {
+      invalidatedEvidence += invalidate.run(
+        timestamp,
+        traversal.sourceByClause.get(keyOf(seed.clause.specPath, seed.clause.clauseId))!,
+        seed.clause.specPath,
+        seed.clause.clauseId
+      ).changes
     }
   })()
-  return { staleClauses, invalidatedEvidence }
+  return { staleClauses: stale.map((seed) => seed.clause), invalidatedEvidence }
 }
 
 /**
@@ -349,8 +405,16 @@ export const propagateStale = (
 export const impact = (db: Database, source: ClauseKey): ImpactReport => {
   const { edges } = liveGraph(db)
   const affectedClauses = reverseClosure(edges, [source])
+  const directKeys = new Set(
+    edges
+      .filter((edge) => edge.to_spec === source.specPath && edge.to_clause === source.clauseId)
+      .map((edge) => keyOf(edge.spec_path, edge.clause_id))
+  )
   return {
     source,
+    directClauses: affectedClauses.filter((clause) =>
+      directKeys.has(keyOf(clause.specPath, clause.clauseId))
+    ),
     affectedClauses,
     affectedTasks: tasksCiting(db, [source, ...affectedClauses]),
   }

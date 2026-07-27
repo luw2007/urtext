@@ -138,8 +138,11 @@ These errors are evaluated over all latest live revisions by `urtext check`. The
 - Each clause also stores `text_hash = sha256(heading + body)`; anchor-metadata changes are not text changes.
 - Parsed `req` values are stored in `clauses.reqs` and normalized into `clause_reqs`; `to_spec = ''` marks a bare unit-local ID. Requirement declarations are stored in `requirements` on the same `(spec_path, revision)` chain, with `text_hash = sha256(title + body)`.
 - `refs` edges are stored in `clause_refs` and versioned with revisions. The linker resolves references against all latest active workspace revisions after each scan. `unknown_ref` is therefore a whole-workspace `check` error rather than a single-file revision-state change.
-- Changing an upstream clause `text_hash` invalidates existing evidence in the reverse dependency closure by setting `invalidated_at`. Evidence is never deleted.
-- Changing or removing an FR invalidates every clause whose raw `clause_reqs` edge targets its old key, then propagates through the ordinary `clause_refs` reverse closure. Reconciliation and invalidation commit in one SQLite transaction.
+- Changing an upstream clause `text_hash` invalidates existing evidence in the reverse dependency closure by writing
+  the one logical invalidation stamp (`invalidated_at` + `invalidation_source`) in the same UPDATE. Evidence is never
+  deleted; legacy NULL sources remain unknown and are never backfilled.
+- Changing or removing an FR invalidates every clause whose raw `clause_reqs` edge targets its old key, then propagates
+  through the ordinary `clause_refs` reverse closure. Reconciliation and invalidation commit in one SQLite transaction.
 - `urtext status` reports live FR declarations with zero uniquely resolved live clause bindings in `uncoveredRequirements` and `counts.uncovered`. This report is orthogonal to the adjudication queues: it does not enter `items`, `counts.human`, WIP, or the status exit code.
 
 ## DWARF: clause↔code mapping (`urtext map` / `ack` / `blame` / `check --diff`)

@@ -52,14 +52,14 @@ The graph is not just for queries — it drives invalidation. When a clause's
 `text_hash` changes (its title or body text — not its anchor metadata, so an
 `oracle`/`risk`/`refs` edit does not trip it), the linker walks the *reverse
 closure* and marks every dependent clause `stale`. Each stale clause's existing
-evidence is stamped with `invalidated_at`.
+evidence receives one logical invalidation stamp in the same UPDATE:
+`invalidated_at` plus `invalidation_source`.
 
-This is the concrete answer to *drift during iteration*. In conventional SDD, you
-change an upstream requirement and the downstream evidence quietly keeps its old
-green mark — it looks verified but is answering a question that no longer exists.
-Urtext refuses that: change the meaning of C004 and the evidence of everything
-that depends on C004 is automatically void until re-verified. The green is
-withdrawn the moment its premise moves.
+The source is the real changed clause or FR key. A directly FR-hit clause uses
+the FR source; if that clause also changed, its reverse-ref dependents retain the
+changed clause source because that is the causal path that staled them. The first
+stamp remains immutable, and historical NULL sources stay unknown rather than
+being backfilled. Evidence is never deleted: it is void until re-verified.
 
 ## Dangling references fail closed
 

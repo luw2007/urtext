@@ -148,6 +148,13 @@ describe('C018 decide hardening (high-risk manual only)', () => {
     expect(decide(root, 'C002', 'pass', hashOf(root, 'C002')).kind).toBe('recorded')
   })
 
+  test('a dirty worktree blocks a high-risk manual pass with the current brief', () => {
+    const root = setupRepo()
+    const hash = hashOf(root, 'C002')
+    writeFileSync(join(root, 'uncommitted.txt'), 'edit after brief')
+    expect(decide(root, 'C002', 'pass', hash)).toMatchObject({ kind: 'rejected', code: 'dirty_worktree' })
+  })
+
   test('failing a high-risk manual clause needs no brief (conservative)', () => {
     const root = setupRepo()
     expect(decide(root, 'C002', 'fail').kind).toBe('recorded')

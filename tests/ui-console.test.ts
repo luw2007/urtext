@@ -411,6 +411,102 @@ describe('spec and decision projections', () => {
   })
 })
 
+describe('C028 human-projection rendering', () => {
+  const staleItem = (source?: string): StatusItem => ({
+    key: 'specs/x/spec.md#C002',
+    kind: 'clause',
+    lane: 'agent',
+    primary: 'stale',
+    reasons: ['stale'],
+    next: 're-run verify',
+    specPath: 'specs/x/spec.md',
+    clauseId: 'C002',
+    title: 'dependent',
+    risk: 'low',
+    ...(source === undefined ? {} : { invalidationSource: source }),
+  })
+
+  test('renders sourced and legacy causal chains on the agent lane', () => {
+    const snapshot = buildUiSnapshot(db, setupRepo())
+    const html = render('agent', {
+      ...snapshot,
+      status: {
+        ...snapshot.status,
+        items: [staleItem('specs/x/spec.md#C001'), staleItem()],
+        counts: { ...snapshot.status.counts, agent: 2 },
+      },
+    })
+    expect(html).toContain('specs/x/spec.md#C001</code> 文本变更 → <code>specs/x/spec.md#C002</code> 证据作废')
+    expect(html).toContain('上游变更 → <code>specs/x/spec.md#C002</code> 证据作废')
+  })
+
+  test('renders one DOM feature-health target after alerts and excludes stale evidence from health denominators', () => {
+    const snapshot = buildUiSnapshot(db, setupRepo())
+    const html = render('queue', {
+      ...snapshot,
+      dirty: true,
+      unmapped: [{ filePath: 'src/unmapped.ts', lineStart: 1, lineEnd: 1 }],
+      status: {
+        ...snapshot.status,
+        items: [
+          {
+            key: 'src/unmapped.ts:1-1',
+            kind: 'unmapped',
+            lane: 'human',
+            primary: 'unmapped',
+            reasons: ['unmapped'],
+            next: 'map it',
+            filePath: 'src/unmapped.ts',
+            lineStart: 1,
+            lineEnd: 1,
+          },
+        ],
+        counts: { ...snapshot.status.counts, human: 1 },
+      },
+      clauses: [
+        {
+          specPath: 'specs/x/spec.md',
+          clauseId: 'C001',
+          title: 'stale pass',
+          risk: 'high',
+          decisionVerdict: 'n/a',
+          evidenceVerdict: 'pass',
+          auditVerdict: 'agree',
+          reviewStatus: 'approved',
+          stale: true,
+          actionable: false,
+        },
+      ],
+    })
+    expect((html.match(/<table>/g) ?? [])).toHaveLength(1)
+    expect(html.indexOf('data-banner="unmapped"')).toBeLessThan(html.indexOf('id="feature-health"'))
+    expect(html.indexOf('id="feature-health"')).toBeLessThan(html.indexOf('id="your-queue-rows"'))
+    expect((html.match(/\bid="feature-health"/g) ?? [])).toHaveLength(1)
+    expect(html).toContain('<section id="feature-health-section"')
+    expect(html).toContain('证据 <span data-tone="muted" data-state="health-unavailable">— n/a (0/0)</span>')
+    expect(html).toContain('元审计 <span data-tone="muted" data-state="health-unavailable">— n/a (0/0)</span>')
+    expect(html).toContain('高危已批准 <span data-tone="warn" data-state="health-incomplete">⚠ 0/1</span>')
+  })
+
+  test('gives every human row a distinct explain button/output pair and keeps agent rows control-free', () => {
+    const snapshot = buildUiSnapshot(db, setupRepo())
+    const humanRows: StatusItem[] = [
+      {
+        key: 'src/unmapped.ts:1-1', kind: 'unmapped', lane: 'human', primary: 'unmapped', reasons: ['unmapped'], next: 'map it', filePath: 'src/unmapped.ts', lineStart: 1, lineEnd: 1,
+      },
+      {
+        key: 'specs/x/spec.md#C001', kind: 'clause', lane: 'human', primary: 'manual_undecided', reasons: ['manual_undecided'], next: 'decide', specPath: 'specs/x/spec.md', clauseId: 'C001', title: 'manual', risk: 'low',
+      },
+    ]
+    const queue = render('queue', { ...snapshot, status: { ...snapshot.status, items: humanRows, counts: { ...snapshot.status.counts, human: 2 } } })
+    const agent = render('agent', { ...snapshot, status: { ...snapshot.status, items: [staleItem()], counts: { ...snapshot.status.counts, agent: 1 } } })
+    expect(queue).toContain('id="explain-item-btn-0" aria-controls="explain-item-out-0"')
+    expect(queue).toContain('id="explain-item-btn-1" aria-controls="explain-item-out-1"')
+    expect(queue).toContain('id="queue-explain-btn" aria-controls="queue-explain-out"')
+    expect(agent).not.toContain('data-explain-key=')
+  })
+})
+
 describe('public renderConsolePage wrapper', () => {
   test('keeps positional parameters, queue route defaults, and auditResult passthrough', () => {
     const snapshot = buildUiSnapshot(db, setupRepo())

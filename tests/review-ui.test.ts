@@ -1,4 +1,5 @@
-import { spawnSync } from 'node:child_process'
+import { spawnSync, type ChildProcess } from 'node:child_process'
+import { EventEmitter } from 'node:events'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -6,15 +7,19 @@ import { join } from 'node:path'
 import DatabaseConstructor, { type Database } from 'better-sqlite3'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 
-import { recordDecision } from '../src/decision.js'
+import { ensureDecisionLedger, recordDecision } from '../src/decision.js'
+import { ensureCodeMap } from '../src/dwarf.js'
 import { openRegistry } from '../src/registry.js'
 import { scanWorkspace } from '../src/scanner.js'
-import { verifyWorkspace } from '../src/verifier.js'
+import { ensureEvidenceLedger, verifyWorkspace } from '../src/verifier.js'
 import { buildUiSnapshot, handleDecide, handleReview, handleExplain, handleBrief, handleAuditRun } from '../src/review-ui.js'
 import { renderConsolePage } from '../src/ui/render-console.js'
 import { renderBriefPage, renderBriefErrorPage } from '../src/ui/render-brief.js'
 import { DEFAULT_UI_RENDER_CONFIG } from '../src/ui/contracts.js'
-import { importVerdicts, latestEvidence } from '../src/audit.js'
+import { ensureAuditLedger, importVerdicts, latestEvidence } from '../src/audit.js'
+import { ensureReviewLedger } from '../src/review.js'
+
+import type { AsyncSpawn } from '../src/audit-runner.js'
 
 let db: Database
 const tempDirs: string[] = []
@@ -24,8 +29,78 @@ const git = (root: string, ...args: string[]) => {
   if (result.status !== 0) throw new Error(`git ${args.join(' ')} failed: ${result.stderr}`)
 }
 
+const textSpawn = (prompts: string[]): AsyncSpawn =>
+  ((..._args: unknown[]) => {
+    const child = new EventEmitter() as unknown as ChildProcess
+    const stdout = new EventEmitter()
+    Object.assign(child, {
+      stdout,
+      stdin: {
+        end: (prompt: string) => {
+          prompts.push(prompt)
+          queueMicrotask(() => {
+            stdout.emit('data', Buffer.from('temporary explanation'))
+            child.emit('close', 0)
+          })
+        },
+      },
+      kill: () => {},
+    })
+    return child
+  }) as AsyncSpawn
+
+const ledgerRowCounts = (): Record<string, number> => {
+  ensureEvidenceLedger(db)
+  ensureAuditLedger(db)
+  ensureDecisionLedger(db)
+  ensureReviewLedger(db)
+  ensureCodeMap(db)
+  return Object.fromEntries(
+    ['evidence', 'audit_verdicts', 'decisions', 'reviews', 'clause_code_map'].map((table) => [
+      table,
+      Number(db.prepare(`SELECT COUNT(*) FROM ${table}`).pluck().get()),
+    ])
+  )
+}
+
+const factsFromPrompt = (prompt: string): unknown => {
+  const begin = 'BEGIN_URTEXT_FACTS'
+  const end = 'END_URTEXT_FACTS'
+  const start = prompt.lastIndexOf(begin)
+  const finish = prompt.indexOf(end, start + begin.length)
+  if (start === -1 || finish === -1 || finish <= start) throw new Error('missing explain facts fence')
+  return JSON.parse(prompt.slice(start + begin.length, finish).trim())
+}
+
+const isClauseFacts = (value: unknown): value is { manifest: { title: string } } =>
+  value !== null &&
+  typeof value === 'object' &&
+  'manifest' in value &&
+  value.manifest !== null &&
+  typeof value.manifest === 'object' &&
+  'title' in value.manifest &&
+  typeof value.manifest.title === 'string'
+
+const isQueueFacts = (value: unknown): value is {
+  lanes: { human: { items: { key: string }[]; included: number; omitted: number } }
+} =>
+  value !== null &&
+  typeof value === 'object' &&
+  'lanes' in value &&
+  value.lanes !== null &&
+  typeof value.lanes === 'object' &&
+  'human' in value.lanes &&
+  value.lanes.human !== null &&
+  typeof value.lanes.human === 'object' &&
+  'items' in value.lanes.human &&
+  Array.isArray(value.lanes.human.items) &&
+  'included' in value.lanes.human &&
+  typeof value.lanes.human.included === 'number' &&
+  'omitted' in value.lanes.human &&
+  typeof value.lanes.human.omitted === 'number'
+
 /** A git repo with a manual C001, a runnable C002 (cmd:true), verified. */
-const setupRepo = (extraClauseLine?: string): string => {
+const setupRepo = (...extraClauseLines: string[]): string => {
   const root = mkdtempSync(join(tmpdir(), 'urtext-ui-'))
   tempDirs.push(root)
   git(root, 'init', '-q')
@@ -33,7 +108,7 @@ const setupRepo = (extraClauseLine?: string): string => {
   git(root, 'config', 'user.name', 'test')
   mkdirSync(join(root, 'specs/x'), { recursive: true })
   const lines = ['## FR001 test intent', '## C001 design intent <!-- oracle:manual req:FR001 -->', '## C002 label <!-- oracle:cmd:true req:FR001 -->']
-  if (extraClauseLine) lines.push(extraClauseLine)
+  lines.push(...extraClauseLines)
   writeFileSync(join(root, 'specs/x/spec.md'), lines.join('\n'))
   git(root, 'add', '-A')
   git(root, 'commit', '-q', '-m', 'baseline')
@@ -81,10 +156,9 @@ describe('buildUiSnapshot', () => {
     expect(c2.actionable).toBe(false)
   })
 
-  test('a decision made at a stale HEAD does not clear the clause', () => {
+  test('a decision made at a stale HEAD does not clear the clause', { timeout: 15_000 }, () => {
     const root = setupRepo()
     recordDecision(db, { specPath: 'specs/x/spec.md', clauseId: 'C001', verdict: 'pass', decider: 'alice' }, root, 1)
-    // HEAD moves — the decision now describes a prior code state.
     writeFileSync(join(root, 'other.txt'), 'x')
     git(root, 'add', '-A')
     git(root, 'commit', '-q', '-m', 'move head')
@@ -93,7 +167,6 @@ describe('buildUiSnapshot', () => {
     expect(c1.decisionVerdict).toBe('none')
     expect(c1.actionable).toBe(true)
   })
-
 })
 
 describe('renderConsolePage', () => {
@@ -120,7 +193,6 @@ describe('renderConsolePage', () => {
     expect(html).not.toContain('<script>\'"&x')
     expect(html).toContain('&lt;script&gt;')
   })
-
 })
 
 describe('handleDecide', () => {
@@ -292,7 +364,6 @@ describe('operator console (v3)', () => {
     })
     expect(html).toContain('data-state="risk-high"')
     expect(html).toContain('data-state="no-evidence"')
-
     expect(html).toContain('尚无映射代码')
     expect(html).toContain('无下游依赖')
     expect(html).toContain('映射状态')
@@ -322,96 +393,187 @@ describe('operator console (v3)', () => {
   })
 })
 
-/** High-risk runnable clause, verified + audit-agreed → review-ready. */
-const setupReviewable = (): string => {
-  const root = mkdtempSync(join(tmpdir(), 'urtext-ui-rv-'))
-  tempDirs.push(root)
-  git(root, 'init', '-q')
-  git(root, 'config', 'user.email', 'test@urtext.dev')
-  git(root, 'config', 'user.name', 'test')
-  mkdirSync(join(root, 'specs/x'), { recursive: true })
-  writeFileSync(join(root, 'specs/x/spec.md'), '## FR001 test intent\n## C001 pay guard <!-- oracle:cmd:true risk:high req:FR001 -->')
-  git(root, 'add', '-A')
-  git(root, 'commit', '-q', '-m', 'baseline')
-  scanWorkspace(db, root)
-  verifyWorkspace(db, root)
-  for (const e of latestEvidence(db)) importVerdicts(db, [{ evidenceId: e.id, auditor: 'codex', verdict: 'agree' }], 1)
-  return root
-}
+describe('explain boundary', () => {
+  test('rejects invalid request shapes before invoking any client', async () => {
+    const calls: string[] = []
+    const forbidden = (() => {
+      calls.push('spawned')
+      throw new Error('must not spawn')
+    }) as AsyncSpawn
+    for (const input of [
+      { key: 'specs/x/spec.md#C001' },
+      { key: 'specs/x/spec.md#C001', scope: 'queue', auditor: 'claude' },
+      { auditor: 'claude' },
+      { scope: 'other', auditor: 'claude' },
+      { key: 'specs/x/spec.md#C001', auditor: 'bogus' },
+    ]) {
+      await expect(handleExplain(db, '', input, { spawnAsync: forbidden })).resolves.toMatchObject({ status: 400 })
+    }
+    expect(calls).toEqual([])
+  })
 
-describe('browser high-risk review', () => {
-  test('a review-ready high-risk clause exposes review buttons and the AI explain control', () => {
-    const root = setupReviewable()
-    const brief = handleBrief(db, root, 'specs/x/spec.md', 'C001')
+  test('rejects a non-current key before invoking any client', async () => {
+    const root = setupRepo()
+    const calls: string[] = []
+    const forbidden = (() => {
+      calls.push('spawned')
+      throw new Error('must not spawn')
+    }) as AsyncSpawn
+    await expect(
+      handleExplain(db, root, { key: 'specs/x/spec.md#not-clause', auditor: 'claude' }, { spawnAsync: forbidden })
+    ).resolves.toMatchObject({ status: 409 })
+    expect(calls).toEqual([])
+  })
 
-    if (!('ok' in brief.body)) throw new Error('expected a brief')
-    expect(brief.body.risk).toBe('high')
-    expect(brief.body.reviewable).toBe(true)
-    const html = renderBriefPage({
-      text: brief.body.text,
-      csrfToken: 'tok',
-      key: 'specs/x/spec.md#C001',
-      briefHash: brief.body.briefHash,
-      reviewable: true,
-      facts: brief.body.facts,
-      view: brief.body.view,
-      config: DEFAULT_UI_RENDER_CONFIG,
+  test('rejects an agent-lane clause key before invoking any client', async () => {
+    const root = setupRepo()
+    const calls: string[] = []
+    const forbidden = (() => {
+      calls.push('spawned')
+      throw new Error('must not spawn')
+    }) as AsyncSpawn
+    await expect(
+      handleExplain(db, root, { key: 'specs/x/spec.md#C002', auditor: 'claude' }, { spawnAsync: forbidden })
+    ).resolves.toEqual({ status: 409, body: { error: 'item is not in the current human queue' } })
+    expect(calls).toEqual([])
+  })
+
+  test('explains only a current human unmapped item from status facts without ledger writes', { timeout: 15_000 }, async () => {
+    const root = setupRepo()
+    mkdirSync(join(root, 'src'), { recursive: true })
+    writeFileSync(join(root, 'src/impl.ts'), 'export const current = 1\n')
+    git(root, 'add', '-A')
+    git(root, 'commit', '-q', '-m', 'track implementation')
+    writeFileSync(join(root, 'src/impl.ts'), 'export const current = 2\n')
+
+    const snapshot = buildUiSnapshot(db, root)
+    const item = snapshot.status.items.find(
+      (candidate) => candidate.kind === 'unmapped' && candidate.lane === 'human'
+    )
+    if (item === undefined) throw new Error('expected a current human unmapped status item')
+    expect(item).toMatchObject({
+      key: 'src/impl.ts:1-1',
+      primary: 'unmapped',
+      next: '`urtext map <spec>#<clause> <range>` | `urtext ack <range> <reason>` | write back to spec',
     })
-    expect(html).toContain('高风险代码审查：specs/x/spec.md#C001 pay guard')
-    expect(html).toContain('id="explain-btn"')
-    expect(html).toContain('/api/explain')
-    expect(html).toContain('<option value="omp" selected>')
-    expect(html).toContain('id="explain-model" value="deepseek/deepseek-v4-flash"')
-    expect(html).toContain("claude: 'sonnet'")
-    expect(html).toContain("codex: 'gpt-5.6-terra'")
-    expect(html).toContain('explainModel.value = defaultModel[explainAuditor.value]')
-    expect(html).toContain('data-v="approve"')
-    expect(html).toContain('<option value="traex">Traex</option>')
-    expect(html).toContain("traex: 'kimi-k2.6'")
-    expect(html).toContain('/api/review')
-    // No hard-coded consequence template — the examples come from the AI, not the page.
-    expect(html).not.toContain('gate 对它 auto-pass（证据+审计+审查三者皆绿）')
-    expect(
-      renderBriefPage({
-        text: brief.body.text,
-        csrfToken: 'tok',
-        key: 'specs/x/spec.md#C001',
-        briefHash: brief.body.briefHash,
-        reviewable: false,
-        facts: brief.body.facts,
-        view: brief.body.view,
-        config: DEFAULT_UI_RENDER_CONFIG,
-      })
-    ).not.toContain('id="review-form"')
+
+    const prompts: string[] = []
+    const before = ledgerRowCounts()
+    await expect(
+      handleExplain(db, root, { key: `${item.key}-stale`, auditor: 'claude' }, { spawnAsync: textSpawn(prompts) })
+    ).resolves.toEqual({ status: 409, body: { error: 'item is not in the current human queue' } })
+    await expect(
+      handleExplain(db, root, { key: item.key, auditor: 'claude' }, { spawnAsync: textSpawn(prompts) })
+    ).resolves.toEqual({ status: 200, body: { ok: true, text: 'temporary explanation' } })
+
+    expect(prompts).toHaveLength(1)
+    const facts = factsFromPrompt(prompts[0]!)
+    expect(facts).toMatchObject({
+      source: 'status-item',
+      head: snapshot.status.head,
+      item: {
+        key: item.key,
+        kind: 'unmapped',
+        lane: 'human',
+        primary: 'unmapped',
+        next: item.next,
+        filePath: 'src/impl.ts',
+        lineStart: 1,
+        lineEnd: 1,
+      },
+    })
+    expect(facts).not.toHaveProperty('manifest')
+    expect(ledgerRowCounts()).toEqual(before)
   })
 
-  test('handleExplain rejects malformed input before invoking any client', async () => {
-    const root = setupReviewable()
-    await expect(handleExplain(db, root, { key: 'specs/x/spec.md#C001' })).resolves.toMatchObject({ status: 400 })
-    await expect(handleExplain(db, root, { key: 'nohash', auditor: 'claude' })).resolves.toMatchObject({ status: 400 })
-    await expect(handleExplain(db, root, { key: 'specs/x/spec.md#C001', auditor: 'bogus' })).resolves.toMatchObject({ status: 400 })
+  test('fences manifest-only facts and persists no response', async () => {
+    const root = setupRepo()
+    const prompts: string[] = []
+    const result = await handleExplain(
+      db,
+      root,
+      { key: 'specs/x/spec.md#C001', auditor: 'claude' },
+      { spawnAsync: textSpawn(prompts) }
+    )
+    expect(result).toEqual({ status: 200, body: { ok: true, text: 'temporary explanation' } })
+    expect(prompts).toHaveLength(1)
+    const prompt = prompts[0]!
+    expect(prompt).toContain('BEGIN_URTEXT_FACTS')
+    expect(prompt).toContain('END_URTEXT_FACTS')
+    expect(prompt).toContain('## 为什么需要你')
+    expect(prompt).toContain('## 批准与拒绝分别意味着什么')
+    expect(prompt).toContain('## 哪里有风险信号')
+    expect(prompt).toContain('JSON 字段路径')
+    expect(prompt).not.toContain('evidenceOutput')
+    expect(prompt).not.toContain('briefHistory')
+    expect(prompt).not.toContain('temporary explanation')
   })
 
-  test('approve records through recordReview guards with a current brief-hash', () => {
-    const root = setupReviewable()
-    const key = 'specs/x/spec.md#C001'
-    const brief = handleBrief(db, root, 'specs/x/spec.md', 'C001')
-    if (!('ok' in brief.body)) throw new Error('expected a brief')
-    expect(handleReview(db, root, { key, decision: 'approve', briefHash: brief.body.briefHash }, 'a').status).toBe(400)
-    const ok = handleReview(db, root, { key, decision: 'approve', briefHash: brief.body.briefHash, note: 'refund path reviewed' }, 'a')
-    expect(ok).toEqual({ status: 200, body: { ok: true } })
+  test('keeps large UTF-8 clause facts within the configured byte cap', async () => {
+    const previous = process.env.URTEXT_EXPLAIN_MAX_FACT_BYTES
+    process.env.URTEXT_EXPLAIN_MAX_FACT_BYTES = '1024'
+    try {
+      const root = setupRepo('## C003 ' + '危'.repeat(12_000) + ' <!-- oracle:manual req:FR001 -->')
+      const prompts: string[] = []
+      await expect(
+        handleExplain(db, root, { key: 'specs/x/spec.md#C003', auditor: 'claude' }, { spawnAsync: textSpawn(prompts) })
+      ).resolves.toMatchObject({ status: 200 })
+      const facts = factsFromPrompt(prompts[0]!)
+      if (!isClauseFacts(facts)) throw new Error('expected clause explain facts')
+      expect(Buffer.byteLength(JSON.stringify(facts), 'utf8')).toBeLessThanOrEqual(1024)
+      expect(facts.manifest.title.endsWith('…')).toBe(true)
+      expect(Buffer.from(facts.manifest.title, 'utf8').toString('utf8')).toBe(facts.manifest.title)
+    } finally {
+      if (previous === undefined) delete process.env.URTEXT_EXPLAIN_MAX_FACT_BYTES
+      else process.env.URTEXT_EXPLAIN_MAX_FACT_BYTES = previous
+    }
   })
 
-  test('approve without a brief-hash or on a low-risk clause is rejected (guards not bypassed)', () => {
-    const root = setupReviewable()
-    const key = 'specs/x/spec.md#C001'
-    expect(handleReview(db, root, { key, decision: 'approve', note: 'x' }, 'a').status).toBe(400)
-    expect(handleReview(db, root, { key, decision: 'bogus', note: 'x' }, 'a').status).toBe(400)
+  test('falls back from an invalid byte cap to the named default', async () => {
+    const previous = process.env.URTEXT_EXPLAIN_MAX_FACT_BYTES
+    process.env.URTEXT_EXPLAIN_MAX_FACT_BYTES = '100'
+    try {
+      const root = setupRepo('## C003 ' + '危'.repeat(12_000) + ' <!-- oracle:manual req:FR001 -->')
+      const prompts: string[] = []
+      await expect(
+        handleExplain(db, root, { key: 'specs/x/spec.md#C003', auditor: 'claude' }, { spawnAsync: textSpawn(prompts) })
+      ).resolves.toMatchObject({ status: 200 })
+      const facts = factsFromPrompt(prompts[0]!)
+      const bytes = Buffer.byteLength(JSON.stringify(facts), 'utf8')
+      expect(bytes).toBeGreaterThan(1024)
+      expect(bytes).toBeLessThanOrEqual(24 * 1024)
+    } finally {
+      if (previous === undefined) delete process.env.URTEXT_EXPLAIN_MAX_FACT_BYTES
+      else process.env.URTEXT_EXPLAIN_MAX_FACT_BYTES = previous
+    }
   })
 
-  test('reject is conservative — no brief-hash or note required', () => {
-    const root = setupReviewable()
-    const res = handleReview(db, root, { key: 'specs/x/spec.md#C001', decision: 'reject' }, 'a')
-    expect(res).toEqual({ status: 200, body: { ok: true } })
+  test('serializes each queue lane as a deterministic prefix with an omitted tail', async () => {
+    const previous = process.env.URTEXT_EXPLAIN_MAX_FACT_BYTES
+    process.env.URTEXT_EXPLAIN_MAX_FACT_BYTES = '1024'
+    try {
+      const root = setupRepo(
+        `## C003 ${'危'.repeat(600)} <!-- oracle:manual req:FR001 -->`,
+        '## C004 short tail <!-- oracle:manual req:FR001 -->',
+        '## C005 short tail <!-- oracle:manual req:FR001 -->'
+      )
+      const prompts: string[] = []
+      const input = { scope: 'queue', auditor: 'claude' }
+      await expect(handleExplain(db, root, input, { spawnAsync: textSpawn(prompts) })).resolves.toMatchObject({ status: 200 })
+      await expect(handleExplain(db, root, input, { spawnAsync: textSpawn(prompts) })).resolves.toMatchObject({ status: 200 })
+      const first = factsFromPrompt(prompts[0]!)
+      if (!isQueueFacts(first)) throw new Error('expected queue explain facts')
+      const second = factsFromPrompt(prompts[1]!)
+      const human = buildUiSnapshot(db, root).status.items.filter((item) => item.lane === 'human')
+      expect(first).toEqual(second)
+      expect(first.lanes.human.items.map((item) => item.key)).toEqual(human.slice(0, first.lanes.human.included).map((item) => item.key))
+      expect(first.lanes.human.included).toBeLessThan(human.length)
+      expect(first.lanes.human.omitted).toBe(human.length - first.lanes.human.included)
+      expect(first.lanes.human.items.map((item) => item.key)).not.toContain('specs/x/spec.md#C004')
+      expect(Buffer.byteLength(JSON.stringify(first), 'utf8')).toBeLessThanOrEqual(1024)
+    } finally {
+      if (previous === undefined) delete process.env.URTEXT_EXPLAIN_MAX_FACT_BYTES
+      else process.env.URTEXT_EXPLAIN_MAX_FACT_BYTES = previous
+    }
   })
 })

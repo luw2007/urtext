@@ -274,6 +274,7 @@ const fakeClient = (responses: Record<string, unknown>): CdpClient => ({
     if (!(method in responses)) throw new Error(`unexpected CDP call ${method}`)
     return responses[method]
   }),
+  on: vi.fn(),
   close: vi.fn(),
 })
 
@@ -399,6 +400,7 @@ describe('captureFocusOrder', () => {
         if (method === 'Runtime.evaluate') return { result: { value: activeIds[call++] } }
         throw new Error(`unexpected ${method}`)
       }),
+      on: vi.fn(),
       close: vi.fn(),
     }
     const order = await captureFocusOrder(client, 2)
@@ -406,36 +408,54 @@ describe('captureFocusOrder', () => {
     expect(client.send).toHaveBeenCalledWith('Input.dispatchKeyEvent', expect.objectContaining({ key: 'Tab', type: 'keyDown' }))
   })
 
-  test('distinguishes separate focusable elements that have no id', async () => {
+  test('uses document order for focusable elements outside the primary selector', async () => {
     const client: CdpClient = {
       send: vi.fn(async (method: string) => {
         if (method === 'Input.dispatchKeyEvent') return {}
-        if (method === 'Runtime.evaluate') return { result: { value: 'a@17' } }
+        if (method === 'Runtime.evaluate') return { result: { value: 'summary@17' } }
         throw new Error(`unexpected ${method}`)
       }),
+      on: vi.fn(),
       close: vi.fn(),
     }
-    await expect(captureFocusOrder(client, 1)).resolves.toEqual(['a@17'])
+    await expect(captureFocusOrder(client, 1)).resolves.toEqual(['summary@17'])
     expect(client.send).toHaveBeenCalledWith(
       'Runtime.evaluate',
-      expect.objectContaining({ expression: expect.stringContaining('document.querySelectorAll') }),
+      expect.objectContaining({ expression: expect.stringContaining('querySelectorAll("*")') }),
     )
   })
 
-  test('stops after one complete tab cycle instead of reporting normal wraparound as duplication', async () => {
-    const activeIds = ['skip-link', 'a@10', 'skip-link']
+  test('stops at the natural ring wrap while preserving an earlier duplicate stop', async () => {
+    const activeIds = ['skip-link', 'a[1]', 'skip-link']
     let call = 0
-    const client: CdpClient = {
+    const wrappedClient: CdpClient = {
       send: vi.fn(async (method: string) => {
         if (method === 'Input.dispatchKeyEvent') return {}
         if (method === 'Runtime.evaluate') return { result: { value: activeIds[call++] } }
         throw new Error(`unexpected ${method}`)
       }),
+      on: vi.fn(),
       close: vi.fn(),
     }
-    await expect(captureFocusOrder(client, 3)).resolves.toEqual(['skip-link', 'a@10'])
+    await expect(captureFocusOrder(wrappedClient, 8)).resolves.toEqual(['skip-link', 'a[1]'])
+
+    const repeatedIds = ['skip-link', 'a[1]', 'a[1]', 'skip-link']
+    call = 0
+    const repeatedClient: CdpClient = {
+      send: vi.fn(async (method: string) => {
+        if (method === 'Input.dispatchKeyEvent') return {}
+        if (method === 'Runtime.evaluate') return { result: { value: repeatedIds[call++] } }
+        throw new Error(`unexpected ${method}`)
+      }),
+      on: vi.fn(),
+      close: vi.fn(),
+    }
+    await expect(captureFocusOrder(repeatedClient, 8)).resolves.toEqual(['skip-link', 'a[1]', 'a[1]'])
+    expect(validateFocusOrder(['skip-link', 'a[1]', 'a[2]'])).toEqual([])
+    expect(validateFocusOrder(['skip-link', 'a[1]', 'a[1]'])).toContain('duplicate focus stop a[1]')
   })
 })
+
 
 describe('waitForPageLoad', () => {
   test('polls document.readyState via the injected client until complete', async () => {
@@ -495,6 +515,7 @@ describe('runCheckAtViewport / buildAssertions / computeExitCode — full wiring
         }
         throw new Error(`unexpected CDP call ${method}`)
       }),
+      on: vi.fn(),
       close: vi.fn(),
     }
   }
@@ -742,10 +763,37 @@ describe('extractSelectorCounts / validatePageSpecificSelectors', () => {
           '#explain-btn': 0,
           '#uncovered-intent': 1,
           'li[data-uncovered="specs/demo/spec.md#FR002"]': 1,
+          '#feature-health': 1,
+          'li[data-feature="demo"]': 1,
+          '#queue-explain-btn': 1,
+          'button[data-explain-key]': 2,
+          '[data-state="approval-semantics"]': 1,
+          '[data-causal]': 0,
         },
         PAGE_SPECIFIC_SELECTORS
       )
     ).toEqual([])
+  })
+
+  test('a duplicate feature-health DOM count fails the console selector gate', () => {
+    expect(
+      validatePageSpecificSelectors(
+        'console',
+        {
+          '#audit-runner': 0,
+          '#explain-btn': 0,
+          '#uncovered-intent': 1,
+          'li[data-uncovered="specs/demo/spec.md#FR002"]': 1,
+          '#feature-health': 2,
+          'li[data-feature="demo"]': 1,
+          '#queue-explain-btn': 1,
+          'button[data-explain-key]': 2,
+          '[data-state="approval-semantics"]': 1,
+          '[data-causal]': 0,
+        },
+        PAGE_SPECIFIC_SELECTORS
+      )
+    ).toEqual(['console:#feature-health: expected count 1, got 2'])
   })
 
   test('an injected leaked explain button on the console page fails page-specific presence', () => {
@@ -757,6 +805,12 @@ describe('extractSelectorCounts / validatePageSpecificSelectors', () => {
           '#explain-btn': 1,
           '#uncovered-intent': 1,
           'li[data-uncovered="specs/demo/spec.md#FR002"]': 1,
+          '#feature-health': 1,
+          'li[data-feature="demo"]': 1,
+          '#queue-explain-btn': 1,
+          'button[data-explain-key]': 2,
+          '[data-state="approval-semantics"]': 1,
+          '[data-causal]': 0,
         },
         PAGE_SPECIFIC_SELECTORS
       )
@@ -764,13 +818,27 @@ describe('extractSelectorCounts / validatePageSpecificSelectors', () => {
   })
 
   test('an injected missing audit-runner on the agent page fails page-specific presence', () => {
-    expect(validatePageSpecificSelectors('agent', { '#audit-runner': 0, '#explain-btn': 0 }, PAGE_SPECIFIC_SELECTORS)).toEqual([
+    expect(validatePageSpecificSelectors('agent', {
+      '#audit-runner': 0,
+      '#explain-btn': 0,
+      '#uncovered-intent': 0,
+      '#feature-health': 0,
+      '#queue-explain-btn': 0,
+      'button[data-explain-key]': 0,
+      '[data-causal]': 1,
+    }, PAGE_SPECIFIC_SELECTORS)).toEqual([
       'agent:#audit-runner: expected count 1, got 0',
     ])
   })
 
   test('the error page has neither explain nor audit-runner', () => {
-    expect(validatePageSpecificSelectors('error', { '#audit-runner': 0, '#explain-btn': 0 }, PAGE_SPECIFIC_SELECTORS)).toEqual([])
+    expect(validatePageSpecificSelectors('error', {
+      '#audit-runner': 0,
+      '#explain-btn': 0,
+      '[data-section="requirement-bindings"]': 0,
+      '[data-section="neighborhood"]': 0,
+      '[data-state="approval-semantics"]': 0,
+    }, PAGE_SPECIFIC_SELECTORS)).toEqual([])
   })
 })
 
@@ -861,6 +929,7 @@ describe('verifyButtonDisablesDuringSubmit', () => {
         }
         throw new Error(`unexpected ${method}`)
       }),
+      on: vi.fn(),
       close: vi.fn(),
     }
   }
@@ -896,6 +965,7 @@ describe('verifyButtonDisablesDuringSubmit', () => {
         if (method === 'DOM.querySelector') return { nodeId: 0 }
         throw new Error(`unexpected ${method}`)
       }),
+      on: vi.fn(),
       close: vi.fn(),
     }
     await expect(verifyButtonDisablesDuringSubmit(client, '#missing')).rejects.toThrow(/selector not found in DOM/)

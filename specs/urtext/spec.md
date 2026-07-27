@@ -110,7 +110,7 @@ strict + exactOptionalPropertyTypes 下 `tsc --noEmit` 干净。
 ## C008 上游文本变更传播 stale 并作废证据 <!-- oracle:test:tests/linker.test.ts risk:high refs:specs/urtext/spec.md#C004 req:FR005,FR002 -->
 
 子句 text_hash（标题+正文）变更时，沿 `clause_refs` 反向闭包标记依赖子句 stale，
-其既有证据打上 `invalidated_at`——证据唯一可变列，作废不删除（审计保留）。
+其既有证据的作废戳（`invalidated_at` + `invalidation_source`）在同一事件中写入——证据唯一可变面，作废不删除（审计保留）。
 
 ## C009 clause→code 映射由真实 diff 交叉验证 <!-- oracle:test:tests/dwarf.test.ts risk:high req:FR006 -->
 
@@ -235,3 +235,17 @@ items、human/agent count、WIP 或退出码。
 fail-closed；solo escape hatch 与批量结果等价。增量模式仅复用同 revision、未 stale、
 同 workspace input fingerprint 的最新 test pass，且复用不追加证据；工作树变化、
 非 test、fail 或 invalidated evidence 必须重新执行。
+
+## C028 UI 呈现因果与健康投影 <!-- oracle:test:tests/ui-projection.test.ts risk:high refs:specs/urtext/spec.md#C008,specs/urtext/spec.md#C016,specs/urtext/spec.md#C019,specs/urtext/spec.md#C026 req:FR009,FR012 -->
+
+`urtext ui` 必须把七维裁决状态投影成人可直接判读的低维视图，且全部为渲染投影：
+不产生第二事实源，不进入 items、counts、WIP 或退出码。
+
+每条 stale 队列项渲染一句因果链——上游变更 key → 本条证据作废 → 重跑 verify 前不放行；
+来源取自与 `invalidated_at` 同一次写入的 `invalidation_source`（一枚印章两列），
+FR 直接命中的子句归因到该 FR 而非它自身，历史 NULL 行渲染无来源版本，绝不伪造来源。
+Your queue 按 feature 单元渲染证据/元审计/高危批准/未覆盖意图的只读健康行。
+clause detail 渲染 defended FR ← 本条 → refs 目标 → 直接依赖的一跳邻域（一跳，非闭包）。
+approve/decide 控件旁常驻绑定 HEAD 短 sha 与失效规则的静态说明。
+AI 解释对每个人车道条款项、unmapped 项与每个成功 clause detail 可用，只读、fail-closed，
+其文本永不进入任何账本（R4 红线）。

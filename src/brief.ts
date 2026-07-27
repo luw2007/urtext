@@ -62,6 +62,8 @@ export interface BriefManifest {
   refs: string[]
   reqs: string[]
   stale: boolean
+  /** Origin key for a stale stamp; absent for fresh and legacy rows. */
+  invalidationSource?: string
   evidence: { verdict: string; exitCode: number | null; digest: string } | null
   auditVerdict: 'agree' | 'disagree' | null
   mappings: BriefMapping[]
@@ -217,11 +219,19 @@ export const buildBrief = (db: Database, workspaceRoot: string, target: ClauseTa
 
   const evidenceRow = db
     .prepare(
-      `SELECT id, verdict, exit_code, oracle_ref, output, invalidated_at
+      `SELECT id, verdict, exit_code, oracle_ref, output, invalidated_at, invalidation_source
        FROM evidence WHERE spec_path = ? AND clause_id = ? ORDER BY id DESC LIMIT 1`
     )
     .get(target.specPath, target.clauseId) as
-    | { id: number; verdict: string; exit_code: number | null; oracle_ref: string | null; output: string; invalidated_at: number | null }
+    | {
+        id: number
+        verdict: string
+        exit_code: number | null
+        oracle_ref: string | null
+        output: string
+        invalidated_at: number | null
+        invalidation_source: string | null
+      }
     | undefined
 
   const auditRow = evidenceRow
@@ -288,6 +298,11 @@ export const buildBrief = (db: Database, workspaceRoot: string, target: ClauseTa
     refs,
     reqs,
     stale: evidenceRow ? evidenceRow.invalidated_at !== null : false,
+    ...(evidenceRow !== undefined &&
+    evidenceRow.invalidated_at !== null &&
+    evidenceRow.invalidation_source !== null
+      ? { invalidationSource: evidenceRow.invalidation_source }
+      : {}),
     evidence: evidenceRow
       ? {
           verdict: evidenceRow.verdict,

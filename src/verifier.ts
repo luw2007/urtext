@@ -29,14 +29,15 @@ CREATE TABLE IF NOT EXISTS evidence (
   created_at  INTEGER NOT NULL,
   duration_ms INTEGER,
   invalidated_at INTEGER,
-  input_fingerprint TEXT
+  input_fingerprint TEXT,
+  invalidation_source TEXT
 );
 `
 
 /**
- * Evidence is append-only except `invalidated_at` — the single mutable audit
- * column, set by the linker when an upstream clause's text changes (stale
- * propagation). Includes the additive migration for M1-era ledgers.
+ * Evidence is append-only except one logical invalidation stamp. The linker
+ * writes `invalidated_at` and `invalidation_source` together; legacy rows keep
+ * a NULL source, which callers render as unknown rather than infer or backfill.
  */
 export const ensureEvidenceLedger = (db: Database): void => {
   db.exec(EVIDENCE_SCHEMA)
@@ -51,6 +52,9 @@ export const ensureEvidenceLedger = (db: Database): void => {
   }
   if (!columns.some((column) => column.name === 'input_fingerprint')) {
     db.exec('ALTER TABLE evidence ADD COLUMN input_fingerprint TEXT')
+  }
+  if (!columns.some((column) => column.name === 'invalidation_source')) {
+    db.exec('ALTER TABLE evidence ADD COLUMN invalidation_source TEXT')
   }
 }
 

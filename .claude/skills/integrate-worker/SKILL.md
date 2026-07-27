@@ -54,6 +54,7 @@ worker 各自的测试看不到接缝；各自全绿的 worker 联合起来可�
 
 - commit message 引用 issue：`Fixes #NN` **每行一个**（逗号列表只会关闭第一个）。
 - 附 meta 中的 clause 映射；`unmapped` 列表非空时，逐条裁决：回写 spec 或显式 manual-ack（VISION P3）。
+  unmapped 非空且未裁决的 diff 不得合入。
 
 ### 7. 处理弹回
 

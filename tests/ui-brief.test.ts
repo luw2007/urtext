@@ -22,9 +22,11 @@ const baseView = (overrides: Partial<SpecImpactView> = {}): SpecImpactView => ({
       target: { specPath: 'specs/x/spec.md', reqId: 'FR001', title: 'base intent' },
     },
   ],
+  refs: [],
   mappings: [],
-  impact: { source: { specPath: 'specs/x/spec.md', clauseId: 'C001' }, affectedClauses: [], affectedTasks: [] },
+  impact: { source: { specPath: 'specs/x/spec.md', clauseId: 'C001' }, directClauses: [], affectedClauses: [], affectedTasks: [] },
   dependents: [],
+  oneHopDependents: [],
   navigation: { previous: null, next: null },
   ...overrides,
 })
@@ -276,11 +278,11 @@ describe('renderBriefPage: raw brief disclosure and review/explain form', () => 
     expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;')
   })
 
-  test('reviewable=false renders no review section, no explain controls, no inline script', () => {
+  test('reviewable=false keeps explain available but has no review form', () => {
     const html = renderBriefPage(baseInput({ reviewable: false }))
     expect(html).not.toContain('id="review-form"')
-    expect(html).not.toContain('id="explain-btn"')
-    expect(html).not.toContain('<script>')
+    expect(html).toContain('id="explain-btn"')
+    expect(html).toContain(`<script>${BRIEF_SCRIPT}</script>`)
   })
 
   test('reviewable=true renders the review form, explain controls, and the delegated script', () => {
@@ -298,12 +300,71 @@ describe('renderBriefPage: raw brief disclosure and review/explain form', () => 
     expect(html).toContain('data-v="approve"')
     expect(html).toContain('data-v="reject"')
     expect(html).toContain('id="review-msg" aria-live="polite"')
+    expect(html).toContain('data-state="approval-semantics"')
+    expect(html).toContain('本次批准绑定 HEAD abc1234；代码再动自动失效，需重审。')
     expect(html).toContain('id="explain-auditor"')
     expect(html).toContain('id="explain-model"')
     expect(html).toContain('id="explain-btn"')
     expect(html).toContain('id="explain-out" aria-live="polite"')
     expect(html).toContain(`<script>${BRIEF_SCRIPT}</script>`)
     expect(html).toContain('src/impl.ts')
+  })
+
+  test('one-hop neighborhood renders refs and direct dependents but not closure-only entries', () => {
+    const html = renderBriefPage(
+      baseInput({
+        view: baseView({
+          refs: [
+            { specPath: 'specs/core/spec.md', clauseId: 'C001', title: 'core', stale: false, evidenceVerdict: 'pass' },
+          ],
+          oneHopDependents: [
+            { specPath: 'specs/x/spec.md', clauseId: 'C002', title: 'direct', stale: true, evidenceVerdict: 'pass' },
+          ],
+          dependents: [
+            { specPath: 'specs/x/spec.md', clauseId: 'C002', title: 'direct', stale: true, evidenceVerdict: 'pass' },
+            { specPath: 'specs/x/spec.md', clauseId: 'C003', title: 'transitive only', stale: false, evidenceVerdict: 'pass' },
+          ],
+        }),
+      })
+    )
+    const neighborhood = html.match(/<section data-section="neighborhood"[\s\S]*?<\/section>/)?.[0] ?? ''
+    expect(neighborhood).toContain('specs/core/spec.md#C001')
+    expect(neighborhood).toContain('specs/x/spec.md#C002')
+    expect(neighborhood).not.toContain('specs/x/spec.md#C003')
+  })
+})
+
+describe('C028 detail projections', () => {
+  test('renders exactly one-hop neighborhood columns and flex-wrap layout', () => {
+    const html = renderBriefPage(
+      baseInput({
+        view: baseView({
+          refs: [
+            { specPath: 'specs/core/spec.md', clauseId: 'C001', title: 'direct ref', stale: false, evidenceVerdict: 'pass' },
+          ],
+          oneHopDependents: [
+            { specPath: 'specs/x/spec.md', clauseId: 'C002', title: 'direct dependent', stale: false, evidenceVerdict: 'pass' },
+          ],
+          dependents: [
+            { specPath: 'specs/x/spec.md', clauseId: 'C002', title: 'direct dependent', stale: false, evidenceVerdict: 'pass' },
+            { specPath: 'specs/x/spec.md', clauseId: 'C003', title: 'transitive only', stale: false, evidenceVerdict: 'pass' },
+          ],
+        }),
+      })
+    )
+    const neighborhood = html.match(/<section data-section="neighborhood"[\s\S]*?<\/section>/)?.[0] ?? ''
+    expect(neighborhood).toContain('specs/core/spec.md#C001')
+    expect(neighborhood).toContain('specs/x/spec.md#C002')
+    expect(neighborhood).not.toContain('specs/x/spec.md#C003')
+    expect(html).toContain('[data-neighborhood]{display:flex;flex-wrap:wrap')
+    expect(html).toContain('[data-neighbor]{flex:1 1 14rem')
+  })
+
+  test('places exact static approval semantics beside real review controls only', () => {
+    const reviewable = renderBriefPage(baseInput({ reviewable: true, view: baseView({ risk: 'high', head: 'abcdef012345' }) }))
+    const nonReviewable = renderBriefPage(baseInput({ reviewable: false }))
+    expect(reviewable).toContain('本次批准绑定 HEAD abcdef0；代码再动自动失效，需重审。')
+    expect(nonReviewable).not.toContain('data-state="approval-semantics"')
   })
 })
 

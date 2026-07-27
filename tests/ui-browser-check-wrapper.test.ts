@@ -5,6 +5,7 @@ import { join } from 'node:path'
 
 import { afterEach, describe, expect, test } from 'vitest'
 
+// @ts-expect-error The plain ESM wrapper intentionally has no TypeScript declarations.
 import { buildChromeArgs, parseDevToolsActivePort } from '../scripts/ui-browser-check-wrapper.mjs'
 
 const scratchDirs: string[] = []
@@ -29,7 +30,7 @@ describe('buildChromeArgs', () => {
 
   test('never requests a fixed/well-known debug port', () => {
     const args = buildChromeArgs('/tmp/x')
-    expect(args.some((a) => /^--remote-debugging-port=(?!0$)\d+$/.test(a))).toBe(false)
+    expect(args.some((arg: string) => /^--remote-debugging-port=(?!0$)\d+$/.test(arg))).toBe(false)
   })
 })
 

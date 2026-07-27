@@ -97,5 +97,8 @@ nav[aria-label="分页"] a{text-decoration:none;font-weight:600}
   #audit-runner button,.decide-form button,#review-form button{width:100%}
   nav[aria-label="分页"]{flex-wrap:wrap}
 }
+[data-neighborhood]{display:flex;flex-wrap:wrap;gap:var(--sp-3)}
+[data-neighbor]{flex:1 1 14rem;border:1px solid var(--outline-variant);padding:var(--sp-3);overflow-wrap:anywhere}
+[data-neighbor] h3{margin:0 0 var(--sp-2)}
 @media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}
 `

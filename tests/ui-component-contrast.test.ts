@@ -186,6 +186,25 @@ const CANONICAL_BRANCHES = [
   'console.decided.nonEmpty',
   'console.uncoveredIntent.empty',
   'console.uncoveredIntent.nonEmpty',
+  'console.featureHealth.empty',
+  'console.featureHealth.nonEmpty',
+  'console.featureHealth.evidenceUnavailable',
+  'console.featureHealth.evidenceComplete',
+  'console.featureHealth.evidenceIncomplete',
+  'console.featureHealth.auditUnavailable',
+  'console.featureHealth.auditComplete',
+  'console.featureHealth.auditIncomplete',
+  'console.featureHealth.highRiskNone',
+  'console.featureHealth.highRiskComplete',
+  'console.featureHealth.highRiskIncomplete',
+  'console.featureHealth.uncoveredNone',
+  'console.featureHealth.uncoveredPresent',
+  'console.causal.sourced',
+  'console.causal.legacy',
+  'console.explain.queue',
+  'console.explain.itemClause',
+  'console.explain.itemUnmapped',
+  'console.approvalSemantics',
   'brief.risk.low',
   'brief.risk.high',
   'brief.reviewable.false',
@@ -205,6 +224,13 @@ const CANONICAL_BRANCHES = [
   'brief.nav.nextPresent',
   'brief.nav.nextAbsent',
   'brief.requirementBindings.resolved',
+  'brief.neighborhood.requirements',
+  'brief.neighborhood.refsPresent',
+  'brief.neighborhood.refsEmpty',
+  'brief.neighborhood.directPresent',
+  'brief.neighborhood.directEmpty',
+  'brief.explain.generalized',
+  'brief.approvalSemantics',
   'error.page',
   'error.requirementBindings.dangling',
   'error.requirementBindings.ambiguous',
@@ -307,6 +333,7 @@ describe('ui contrast manifest — authored §5.2 token pairs', () => {
     for (const consumer of manifest.consumers) {
       const registered = REGISTERED_PAIRS[consumer.selector]
       expect(registered, `unregistered selector ${JSON.stringify(consumer.selector)} on consumer ${consumer.id}`).toBeDefined()
+      if (registered === undefined) throw new Error(`unregistered selector ${consumer.selector}`)
       expect(consumer.foregroundToken, `${consumer.id} foregroundToken`).toBe(registered.fg)
       expect(consumer.backgroundToken, `${consumer.id} backgroundToken`).toBe(registered.bg)
     }
@@ -323,17 +350,17 @@ const THEME_SOURCE = readFileSync(join(ROOT, 'src/ui/theme.ts'), 'utf8')
 
 const parseTokenBlock = (css: string): Record<string, string> => {
   const tokens: Record<string, string> = {}
-  for (const m of css.matchAll(/--([a-z-]+):\s*(#[0-9a-fA-F]{3,8})/g)) tokens[m[1]] = m[2]
+  for (const m of css.matchAll(/--([a-z-]+):\s*(#[0-9a-fA-F]{3,8})/g)) tokens[m[1]!] = m[2]!
   return tokens
 }
 
 const rootBlockMatch = THEME_SOURCE.match(/:root\{([^}]*)\}/)
 if (!rootBlockMatch) throw new Error('theme.ts: no :root block found — cannot resolve light tokens')
-const lightTokens = parseTokenBlock(rootBlockMatch[1])
+const lightTokens = parseTokenBlock(rootBlockMatch[1]!)
 
 const darkBlockMatch = THEME_SOURCE.match(/prefers-color-scheme: dark\)\{:root\{([^}]*)\}\}/)
 if (!darkBlockMatch) throw new Error('theme.ts: no dark :root override block found — cannot resolve dark tokens')
-const darkTokens = { ...lightTokens, ...parseTokenBlock(darkBlockMatch[1]) }
+const darkTokens = { ...lightTokens, ...parseTokenBlock(darkBlockMatch[1]!) }
 
 const hexToRgb = (hex: string): [number, number, number] => {
   const h = hex.slice(1)
@@ -393,6 +420,7 @@ describe('ui contrast manifest — bidirectional consumer enumeration', () => {
       const html = fixtureHtml.get(consumer.fixture)!
       const detect = SELECTOR_DETECTORS[consumer.selector]
       expect(detect, `no detector registered for selector ${consumer.selector}`).toBeDefined()
+      if (detect === undefined) throw new Error(`no detector registered for selector ${consumer.selector}`)
       expect(detect(html), `${consumer.id}: selector ${consumer.selector} not reachable in fixture ${consumer.fixture}`).toBe(true)
       if (consumer.state === 'focus-visible') {
         expect(

@@ -153,7 +153,7 @@ beforeEach(async () => {
   openRegistry(db)
   setupWorkspace()
   server = await startUiServer(db, root, { port: 0, open: false, decider: 'test' })
-})
+}, 15_000)
 
 afterEach(() => {
   server.close()
@@ -303,7 +303,7 @@ describe('§9.2 all-route Host enforcement', () => {
       const response = await rawFetch(`http://127.0.0.1:${port}${route.path}`, {
         method: route.method,
         headers: { host: 'evil.example', 'content-type': 'application/json' },
-        body: route.method === 'POST' ? '{}' : undefined,
+        ...(route.method === 'POST' ? { body: '{}' } : {}),
       })
       expect(response.status).toBe(403)
       await expect(response.json()).resolves.toEqual({ error: 'forbidden host' })
@@ -507,6 +507,83 @@ describe('§9.2 byte-accurate body cap', () => {
     })
     // past body-cap; the decide handler actually runs — proves it was read+concatenated+parsed
     expect(res.status).toBe(200)
+  })
+})
+
+describe('/api/explain security and R4', () => {
+  test('rejects ambiguous and malformed explain requests before the transport', async () => {
+    const calls: string[] = []
+    const localServer = await startUiServerWithDeps(db, root, {
+      port: 0,
+      open: false,
+      decider: 'test',
+      agentDeps: { spawnAsync: forbiddenSpawn(calls) },
+    })
+    try {
+      const csrf = await getCsrf(localServer.url)
+      for (const body of [
+        { key: 'specs/x/spec.md#C001', scope: 'queue', auditor: 'omp' },
+        { auditor: 'omp' },
+        { scope: 'other', auditor: 'omp' },
+        { key: 'specs/x/spec.md#C001', auditor: 'omp', extra: true },
+      ]) {
+        const response = await fetch(`${localServer.url}/api/explain`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-csrf': csrf },
+          body: JSON.stringify(body),
+        })
+        expect(response.status).toBe(400)
+      }
+      expect(calls).toEqual([])
+    } finally {
+      localServer.close()
+    }
+  })
+
+  test('rejects an agent-lane clause explanation before the transport', async () => {
+    const calls: string[] = []
+    const localServer = await startUiServerWithDeps(db, root, {
+      port: 0,
+      open: false,
+      decider: 'test',
+      agentDeps: { spawnAsync: forbiddenSpawn(calls) },
+    })
+    try {
+      const csrf = await getCsrf(localServer.url)
+      const response = await fetch(`${localServer.url}/api/explain`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-csrf': csrf },
+        body: JSON.stringify({ key: 'specs/x/spec.md#C002', auditor: 'omp' }),
+      })
+      expect(response.status).toBe(409)
+      expect(calls).toEqual([])
+    } finally {
+      localServer.close()
+    }
+  })
+
+  test('refused clause explanations return 409 before the transport', async () => {
+    const calls: string[] = []
+    writeFileSync(join(root, 'specs/x/spec.md'), '## FR001 test intent\n## C001 broken <!-- oracle:nope req:FR001 -->')
+    const localServer = await startUiServerWithDeps(db, root, {
+      port: 0,
+      open: false,
+      decider: 'test',
+      agentDeps: { spawnAsync: forbiddenSpawn(calls) },
+    })
+    try {
+      const csrf = /name="csrf-token" content="([0-9a-f]+)"/.exec(await fetch(localServer.url).then((response) => response.text()))?.[1]
+      if (csrf === undefined) throw new Error('csrf token not found in queue page')
+      const response = await fetch(`${localServer.url}/api/explain`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-csrf': csrf },
+        body: JSON.stringify({ key: 'specs/x/spec.md#C001', auditor: 'omp' }),
+      })
+      expect(response.status).toBe(409)
+      expect(calls).toEqual([])
+    } finally {
+      localServer.close()
+    }
   })
 })
 

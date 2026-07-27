@@ -64,6 +64,8 @@ export interface StatusItem {
   clauseId?: string
   title?: string
   risk?: 'low' | 'high'
+  /** Origin key for a stale stamp; absent for fresh and legacy rows. */
+  invalidationSource?: string
   filePath?: string
   lineStart?: number
   lineEnd?: number
@@ -136,6 +138,9 @@ const clauseItem = (decision: ClauseDecision, dirtyWorktree: boolean): StatusIte
     clauseId: decision.clauseId,
     title: decision.title,
     risk: decision.risk,
+    ...(decision.stale && decision.invalidationSource !== null
+      ? { invalidationSource: decision.invalidationSource }
+      : {}),
   }
 }
 

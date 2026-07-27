@@ -153,6 +153,36 @@ describe('registry revision chain', () => {
     ])
   })
 
+  test('a missing requirement keeps the clause revision building', () => {
+    const outcome = indexClauseFile(db, {
+      specPath: 'specs/x/spec.md',
+      content: '## C001 intent lock <!-- oracle:manual -->',
+      timestamp: 1,
+    })
+
+    expect(outcome).toMatchObject({ kind: 'indexed', status: 'building' })
+    expect(outcome.kind === 'indexed' && outcome.errors).toEqual([
+      expect.objectContaining({ code: 'missing_requirement', clauseId: 'C001' }),
+    ])
+  })
+
+  test('FR oracle and risk anchors keep the revision building with exact requirement errors', () => {
+    const outcome = indexClauseFile(db, {
+      specPath: 'specs/x/spec.md',
+      content: [
+        '## FR001 intent <!-- oracle:cmd:true risk:high -->',
+        '## C001 intent lock <!-- oracle:manual req:FR001 -->',
+      ].join('\n'),
+      timestamp: 1,
+    })
+
+    expect(outcome).toMatchObject({ kind: 'indexed', status: 'building' })
+    expect(outcome.kind === 'indexed' && outcome.errors).toEqual([
+      expect.objectContaining({ code: 'oracle_on_requirement', reqId: 'FR001' }),
+      expect.objectContaining({ code: 'risk_on_requirement', reqId: 'FR001' }),
+    ])
+  })
+
   test('a task citing an undeclared clause is unknown_clause (fail-closed)', () => {
     const outcome = indexTaskFile(db, {
       specPath: 'specs/x/tasks.md',

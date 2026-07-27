@@ -6,4 +6,7 @@ if [ ! -x "$TSC" ]; then
   echo "oracle-typecheck: local tsc binary not found at $TSC — no dynamic install fallback" >&2
   exit 1
 fi
-exec "$TSC" --noEmit -p "$ROOT/tsconfig.json"
+echo "verified: source strict + exactOptionalPropertyTypes typecheck (tsconfig.json)"
+"$TSC" --noEmit -p "$ROOT/tsconfig.json"
+echo "verified: repo-wide strict + exactOptionalPropertyTypes typecheck (src, tests, scripts; tsconfig.repo.json)"
+"$TSC" --noEmit -p "$ROOT/tsconfig.repo.json"

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -8,7 +8,8 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { runOracle } from '../src/oracle-runner.js'
 import { openRegistry } from '../src/registry.js'
 import { scanWorkspace } from '../src/scanner.js'
-import { verifyWorkspace } from '../src/verifier.js'
+import { ensureEvidenceLedger, verifyWorkspace } from '../src/verifier.js'
+import { run } from '../src/cli.js'
 import type { ParsedClause } from '../src/clause-parser.js'
 
 let db: Database
@@ -66,6 +67,54 @@ describe('runOracle', () => {
   })
 })
 
+interface ColumnRow {
+  name: string
+}
+
+interface LegacyEvidenceRow {
+  invalidated_at: number
+  input_fingerprint: string
+  invalidation_source: string | null
+}
+
+describe('ensureEvidenceLedger', () => {
+  test('appends invalidation_source after input_fingerprint without rewriting legacy rows', () => {
+    db.exec(`
+      CREATE TABLE evidence (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        spec_path TEXT NOT NULL,
+        revision INTEGER NOT NULL,
+        clause_id TEXT NOT NULL,
+        oracle_kind TEXT NOT NULL,
+        oracle_ref TEXT,
+        verdict TEXT NOT NULL,
+        exit_code INTEGER,
+        output TEXT NOT NULL DEFAULT '',
+        created_at INTEGER NOT NULL,
+        duration_ms INTEGER,
+        invalidated_at INTEGER,
+        input_fingerprint TEXT
+      )
+    `)
+    db.prepare(
+      `INSERT INTO evidence (spec_path, revision, clause_id, oracle_kind, verdict, output, created_at, invalidated_at, input_fingerprint)
+       VALUES ('specs/x/spec.md', 1, 'C001', 'cmd', 'pass', '', 1, 7, 'fingerprint')`
+    ).run()
+
+    ensureEvidenceLedger(db)
+    ensureEvidenceLedger(db)
+
+    const columns = db.prepare(`SELECT name FROM pragma_table_info('evidence')`).all() as ColumnRow[]
+    expect(columns.map((column) => column.name)).toEqual(
+      expect.arrayContaining(['input_fingerprint', 'invalidation_source'])
+    )
+    const legacy = db.prepare(
+      'SELECT invalidated_at, input_fingerprint, invalidation_source FROM evidence'
+    ).get() as LegacyEvidenceRow
+    expect(legacy).toEqual({ invalidated_at: 7, input_fingerprint: 'fingerprint', invalidation_source: null })
+  })
+})
+
 describe('verifyWorkspace', () => {
   const setupWorkspace = (specContent: string): string => {
     const root = mkdtempSync(join(tmpdir(), 'urtext-verify-'))
@@ -113,5 +162,41 @@ describe('verifyWorkspace', () => {
     verifyWorkspace(db, root)
     const count = db.prepare('SELECT COUNT(*) AS n FROM evidence').get() as { n: number }
     expect(count.n).toBe(2)
+  })
+  test('importable CLI returns 1 when a ready test oracle fails and appends evidence', () => {
+    const root = mkdtempSync(join(tmpdir(), 'urtext-cli-verify-'))
+    tempDirs.push(root)
+    const sourceNodeModules = join(process.cwd(), 'node_modules')
+    mkdirSync(join(root, 'specs/x'), { recursive: true })
+    mkdirSync(join(root, 'tests'), { recursive: true })
+    symlinkSync(sourceNodeModules, join(root, 'node_modules'), 'dir')
+    writeFileSync(
+      join(root, 'specs/x/spec.md'),
+      '## FR001 test intent\n## C001 failing test <!-- oracle:test:tests/failing.test.ts req:FR001 -->'
+    )
+    writeFileSync(
+      join(root, 'tests/failing.test.ts'),
+      "import { expect, test } from 'vitest'\n\ntest('ready test oracle fails', () => {\n  expect(true).toBe(false)\n})\n"
+    )
+
+    const previous = process.cwd()
+    try {
+      process.chdir(root)
+      expect(run(['verify'])).toBe(1)
+    } finally {
+      process.chdir(previous)
+    }
+
+    const workspaceDb = new DatabaseConstructor(join(root, '.urtext/registry.sqlite'))
+    try {
+      const evidence = workspaceDb
+        .prepare('SELECT clause_id, verdict, exit_code, output FROM evidence ORDER BY id')
+        .all() as { clause_id: string; verdict: string; exit_code: number; output: string }[]
+      expect(evidence).toHaveLength(1)
+      expect(evidence[0]).toMatchObject({ clause_id: 'C001', verdict: 'fail', exit_code: 1 })
+      expect(evidence[0]?.output).toContain('ready test oracle fails')
+    } finally {
+      workspaceDb.close()
+    }
   })
 })

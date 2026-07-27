@@ -6,7 +6,7 @@ import type { UiClause, UiSnapshot } from '../review-ui.js'
 import type { StatusItem } from '../status.js'
 
 import { CONSOLE_SCRIPT } from './console-script.js'
-import { briefHref, esc, pageShell, riskBadge, statusChip } from './html.js'
+import { approvalSemantics, briefHref, esc, pageShell, riskBadge, statusChip } from './html.js'
 import { DEFAULT_PAGE_SIZE, pageHref, pageWindow, paginationNav, type PageWindow } from './pagination.js'
 
 export type ConsoleRoute = 'queue' | 'agent' | 'specs' | 'decisions'
@@ -76,6 +76,122 @@ const uncoveredIntentSection = (snapshot: UiSnapshot): string => {
   return `<section id="uncovered-intent" aria-labelledby="uncovered-intent-title"><h2 id="uncovered-intent-title">Uncovered intent (${requirements.length})</h2>${content}<p><small>意图缺锁不是阻断项：不进队列、不计入 wip、不改变退出码。</small></p></section>`
 }
 
+const FEATURE_PATH = /^specs\/([^/]+)\//
+
+const featureOf = (specPath: string): string => specPath.match(FEATURE_PATH)?.[1] ?? specPath
+
+interface FeatureHealthRow {
+  feature: string
+  total: number
+  evidencePass: number
+  evidenceTotal: number
+  auditAgree: number
+  auditTotal: number
+  highRiskApproved: number
+  highRiskTotal: number
+  uncovered: number
+}
+
+/** P2 is intentionally renderer-owned: fixtures provide raw clause facts. */
+const featureHealthRows = (snapshot: UiSnapshot): FeatureHealthRow[] => {
+  const rows = new Map<string, FeatureHealthRow>()
+  const rowFor = (specPath: string): FeatureHealthRow => {
+    const feature = featureOf(specPath)
+    const current = rows.get(feature)
+    if (current !== undefined) return current
+    const created: FeatureHealthRow = {
+      feature,
+      total: 0,
+      evidencePass: 0,
+      evidenceTotal: 0,
+      auditAgree: 0,
+      auditTotal: 0,
+      highRiskApproved: 0,
+      highRiskTotal: 0,
+      uncovered: 0,
+    }
+    rows.set(feature, created)
+    return created
+  }
+  for (const clause of snapshot.clauses) {
+    const row = rowFor(clause.specPath)
+    row.total += 1
+    if (clause.decisionVerdict === 'n/a' && !clause.stale) {
+      row.evidenceTotal += 1
+      row.auditTotal += 1
+      if (clause.evidenceVerdict === 'pass') row.evidencePass += 1
+      if (clause.auditVerdict === 'agree') row.auditAgree += 1
+    }
+    if (clause.risk === 'high') {
+      row.highRiskTotal += 1
+      if (
+        clause.reviewStatus === 'approved' &&
+        !snapshot.dirty &&
+        !clause.stale &&
+        (clause.decisionVerdict !== 'n/a' ||
+          (clause.evidenceVerdict === 'pass' && clause.auditVerdict === 'agree'))
+      ) {
+        row.highRiskApproved += 1
+      }
+    }
+  }
+  for (const requirement of snapshot.status.uncoveredRequirements) {
+    rowFor(requirement.specPath).uncovered += 1
+  }
+  return [...rows.values()].sort((left, right) => left.feature.localeCompare(right.feature))
+}
+
+const healthCell = (label: string, numerator: number, denominator: number): string => {
+  if (denominator === 0) {
+    return `${esc(label)} ${statusChip('muted', '—', `n/a (${numerator}/${denominator})`, 'health-unavailable')}`
+  }
+  const complete = numerator === denominator
+  return `${esc(label)} ${statusChip(
+    complete ? 'ok' : 'warn',
+    complete ? '✓' : '⚠',
+    `${numerator}/${denominator}`,
+    complete ? 'health-complete' : 'health-incomplete'
+  )}`
+}
+
+const featureHealthSection = (snapshot: UiSnapshot): string => {
+  const rows = featureHealthRows(snapshot)
+  const body =
+    rows.length === 0
+      ? `<p data-state="feature-health-empty">${statusChip('muted', '○', '暂无活跃条款')}</p>`
+      : `<ul id="feature-health">${rows
+          .map(
+            (row) =>
+              `<li data-feature="${esc(row.feature)}"><a href="/specs">${esc(row.feature)}</a> <small>(${row.total} 条)</small> ${healthCell(
+                '证据',
+                row.evidencePass,
+                row.evidenceTotal
+              )} ${healthCell('元审计', row.auditAgree, row.auditTotal)} ${healthCell(
+                '高危已批准',
+                row.highRiskApproved,
+                row.highRiskTotal
+              )} 未覆盖意图 ${
+                row.uncovered === 0
+                  ? statusChip('ok', '✓', '0', 'health-uncovered-none')
+                  : statusChip('warn', '⚠', String(row.uncovered), 'health-uncovered')
+              }</li>`
+          )
+          .join('')}</ul>`
+  return `<section id="feature-health-section" aria-labelledby="feature-health-title"><h2 id="feature-health-title">Feature health (${rows.length})</h2>${body}<p><small>只读投影：不进入队列、WIP 或退出码。</small></p></section>`
+}
+
+const explainControls = (): string =>
+  `<section id="queue-explain" aria-labelledby="queue-explain-title">
+<h2 id="queue-explain-title">AI 解释</h2>
+<label for="queue-explain-auditor">客户端</label>
+<select id="queue-explain-auditor"><option value="omp" selected>OMP</option><option value="claude">Claude Code</option><option value="codex">Codex</option><option value="traex">Traex</option></select>
+<label for="queue-explain-model">模型</label>
+<input id="queue-explain-model" value="deepseek/deepseek-v4-flash">
+<button type="button" id="queue-explain-btn" aria-controls="queue-explain-out">AI 总结当前队列</button>
+<output id="queue-explain-out" aria-live="polite"></output>
+<p><small>只读：解释不写任何账本；每条待办右侧也有单项解释入口。</small></p>
+</section>`
+
 const workspaceAlert = (snapshot: UiSnapshot, route: ConsoleRoute): string => {
   if (snapshot.unmappedError !== null) {
     const action = route === 'queue' ? '' : ' — <a href="/">在 Your queue 查看</a>'
@@ -93,28 +209,57 @@ const workspaceAlert = (snapshot: UiSnapshot, route: ConsoleRoute): string => {
 const caption = (route: ConsoleRoute, w: PageWindow): string =>
   `${ROUTE_TITLE[route]} (共 ${w.total} 条 · 第 ${w.page}/${w.pageCount} 页)`
 
-const queueRow = (item: StatusItem, decideForm: boolean, index: number): string => {
+const causalLine = (item: StatusItem): string => {
+  if (!item.reasons.includes('stale')) return ''
+  const culprit =
+    item.invalidationSource === undefined
+      ? '上游变更'
+      : `<code>${esc(item.invalidationSource)}</code> 文本变更`
+  return `<p data-causal="${esc(item.key)}">${statusChip('warn', '⚠', '因果链', 'causal')} ${culprit} → <code>${esc(
+    item.key
+  )}</code> 证据作废 → 重跑 <code>urtext verify</code> 前不放行</p>`
+}
+
+interface QueueRowOptions {
+  decideForm: boolean
+  explainForItem: boolean
+  head: string | null
+}
+
+const itemExplainControl = (item: StatusItem, index: number): string =>
+  ` <button type="button" id="explain-item-btn-${index}" aria-controls="explain-item-out-${index}" data-explain-key="${esc(
+    item.key
+  )}">AI 解释</button> <output id="explain-item-out-${index}" aria-live="polite"></output>`
+
+const queueRow = (item: StatusItem, options: QueueRowOptions, index: number): string => {
   const risk = item.risk === 'high' ? ` ${riskBadge('high')}` : ''
   const secondary = item.reasons.length > 1 ? ` <small>(+${esc(item.reasons.slice(1).join(', '))})</small>` : ''
   const title = item.title ? ` ${esc(item.title)}` : ''
   let action: string
   if (item.kind === 'unmapped') {
     const range = esc(item.key)
-    action = `<small>映射：<code>urtext map &lt;spec&gt;#&lt;clause&gt; ${range}</code><br>确认例外：<code>urtext ack ${range} &lt;reason&gt;</code><br>或先修改对应 spec，再刷新状态。</small>`
+    action = `<small>映射：<code>urtext map &lt;spec&gt;#&lt;clause&gt; ${range}</code><br>确认例外：<code>urtext ack ${range} &lt;reason&gt;</code><br>或先修改对应 spec，再刷新状态。</small>${
+      options.explainForItem ? itemExplainControl(item, index) : ''
+    }`
   } else {
     const key = `${item.specPath}#${item.clauseId}`
     const brief = `<a href="${esc(briefHref(item.specPath!, item.clauseId!))}">brief</a>`
-    if (decideForm && item.reasons.includes('manual_undecided')) {
+    if (options.decideForm && item.reasons.includes('manual_undecided')) {
       action = `${brief} <details><summary>Decide</summary><form class="decide-form" data-key="${esc(
         key
-      )}" id="decision-form-${index}"><label for="decision-note-${index}">Reason</label><textarea id="decision-note-${index}" name="note"></textarea><button type="submit" data-v="pass">✓ pass</button><button type="submit" data-v="fail">✗ fail</button></form><output class="decision-msg" aria-live="polite" for="decision-form-${index}"></output></details>`
-    } else if (decideForm) {
+      )}" id="decision-form-${index}"><label for="decision-note-${index}">Reason</label><textarea id="decision-note-${index}" name="note"></textarea><p data-state="approval-semantics"><small>${esc(
+        approvalSemantics(options.head)
+      )}</small></p><button type="submit" data-v="pass">✓ pass</button><button type="submit" data-v="fail">✗ fail</button></form><output class="decision-msg" aria-live="polite" for="decision-form-${index}"></output></details>`
+    } else if (options.decideForm) {
       action = `${brief} <small>${esc(item.next)}</small>`
     } else {
       action = brief
     }
+    if (options.explainForItem) action += itemExplainControl(item, index)
   }
-  return `<tr data-row="${esc(item.key)}"><td>${esc(item.key)}${title}${risk}</td><td>${esc(item.primary)}${secondary}</td><td>${action}</td></tr>`
+  return `<tr data-row="${esc(item.key)}"><td>${esc(item.key)}${title}${risk}</td><td>${esc(
+    item.primary
+  )}${secondary}${causalLine(item)}</td><td>${action}</td></tr>`
 }
 
 const queueTable = (id: string, tableCaption: string, rows: string, emptyText: string): string =>
@@ -122,8 +267,10 @@ const queueTable = (id: string, tableCaption: string, rows: string, emptyText: s
     id
   )}">${rows || `<tr><td colspan="3">${esc(emptyText)}</td></tr>`}</tbody></table>`
 
-const queueSection = (items: readonly StatusItem[], w: PageWindow): string => {
-  const rows = items.map((item, index) => queueRow(item, true, index)).join('')
+const queueSection = (items: readonly StatusItem[], w: PageWindow, head: string | null): string => {
+  const rows = items
+    .map((item, index) => queueRow(item, { decideForm: true, explainForItem: true, head }, index))
+    .join('')
   return `<section aria-labelledby="your-queue-title"><h2 id="your-queue-title">Your queue (${w.total})</h2>${queueTable(
     'your-queue-rows',
     caption('queue', w),
@@ -145,7 +292,11 @@ const auditControls = (items: readonly StatusItem[]): string => {
 const agentSection = (pageItems: readonly StatusItem[], all: readonly StatusItem[], w: PageWindow): string => {
   const hints = [...new Set(pageItems.map((item) => item.next))]
   const hintList = hints.length > 0 ? `<ul>${hints.map((hint) => `<li>${esc(hint)}</li>`).join('')}</ul>` : ''
-  const rows = pageItems.map((item, index) => queueRow(item, false, index)).join('')
+  const rows = pageItems
+    .map((item, index) =>
+      queueRow(item, { decideForm: false, explainForItem: false, head: null }, index)
+    )
+    .join('')
   return `${auditControls(all)}<section aria-labelledby="agent-lane-title"><h2 id="agent-lane-title">Agent lane (${w.total})</h2>${hintList}${queueTable(
     'agent-lane-rows',
     caption('agent', w),
@@ -223,7 +374,7 @@ export const renderConsoleFamilyPage = (input: ConsolePageInput): string => {
   if (route === 'queue') {
     const items = snapshot.status.items.filter((item) => item.lane === 'human')
     w = win(items.length)
-    body = queueSection(items.slice(w.start, w.end), w)
+    body = queueSection(items.slice(w.start, w.end), w, snapshot.head)
   } else if (route === 'agent') {
     const items = snapshot.status.items.filter((item) => item.lane === 'agent')
     w = win(items.length)
@@ -240,7 +391,9 @@ export const renderConsoleFamilyPage = (input: ConsolePageInput): string => {
   const main = `<main id="main">${route === 'queue' ? summary(snapshot) : ''}${workspaceAlert(
     snapshot,
     route
-  )}${notice}${body}${paginationNav(ROUTE_PATH[route], w)}${
+  )}${route === 'queue' ? featureHealthSection(snapshot) : ''}${
+    route === 'queue' ? explainControls() : ''
+  }${notice}${body}${paginationNav(ROUTE_PATH[route], w)}${
     route === 'queue' ? uncoveredIntentSection(snapshot) : ''
   }</main>`
   return pageShell({

@@ -99,6 +99,7 @@ export interface FixtureTargets {
   reviewable: string
   dependentSource: string
   dependent: string
+  stale: string
   unmappedFile: string
 }
 
@@ -115,6 +116,7 @@ const FIXTURE_TARGETS: FixtureTargets = {
   reviewable: 'specs/demo/spec.md#C004',
   dependentSource: 'specs/demo/spec.md#C001',
   dependent: 'specs/demo/spec.md#C002',
+  stale: 'specs/demo/spec.md#C002',
   unmappedFile: 'unmapped.txt',
 }
 
@@ -179,6 +181,38 @@ export const buildFixture = (root: string): FixtureHandle => {
 
   runGit(root, ['add', '-A'])
   runGitCommit(root, 'implementation: update demo mapping ranges')
+  // A third deterministic commit exercises the complete P1 chain in the real
+  // browser fixture: scanner -> linker stamp -> gate/status -> agent renderer.
+  writeFileSync(
+    join(root, 'specs/demo/spec.md'),
+    DEMO_SPEC.replace(
+      'Foundational demo clause with no dependencies; evidence and audit both agree.',
+      'Foundational demo clause reworded after verification; evidence and audit both agree.'
+    )
+  )
+  runGit(root, ['add', 'specs/demo/spec.md'])
+  runGitCommit(root, 'spec: reword C001 to exercise stale propagation')
+  const staleScan = scanWorkspace(db, root)
+  if (!staleScan.stale.staleClauses.some((clause) => clause.specPath === 'specs/demo/spec.md' && clause.clauseId === 'C002')) {
+    db.close()
+    throw new Error('fixture scan did not mark C002 stale after C001 changed')
+  }
+  const staleEvidence = db
+    .prepare(
+      `SELECT invalidated_at, invalidation_source
+       FROM evidence WHERE spec_path = ? AND clause_id = ? ORDER BY id DESC LIMIT 1`
+    )
+    .get('specs/demo/spec.md', 'C002') as
+    | { invalidated_at: number | null; invalidation_source: string | null }
+    | undefined
+  if (
+    staleEvidence?.invalidated_at === null ||
+    staleEvidence?.invalidated_at === undefined ||
+    staleEvidence.invalidation_source !== 'specs/demo/spec.md#C001'
+  ) {
+    db.close()
+    throw new Error(`fixture C002 has an invalid stale stamp: ${JSON.stringify(staleEvidence)}`)
+  }
   const implementationSha = runGit(root, ['rev-parse', 'HEAD'])
 
   if (worktreeDirty(root) !== false) {
