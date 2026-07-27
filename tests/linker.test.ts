@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -6,12 +7,18 @@ import DatabaseConstructor, { type Database } from 'better-sqlite3'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 
 import { impact, linkWorkspace, propagateStale, uncoveredRequirements } from '../src/linker.js'
+import { run } from '../src/cli.js'
 import { indexClauseFile, indexTaskFile, openRegistry } from '../src/registry.js'
 import { scanWorkspace } from '../src/scanner.js'
 import { ensureEvidenceLedger } from '../src/verifier.js'
 
 let db: Database
 const tempDirs: string[] = []
+
+const git = (root: string, ...args: string[]) => {
+  const result = spawnSync('git', args, { cwd: root, encoding: 'utf8' })
+  if (result.status !== 0) throw new Error(`git ${args.join(' ')} failed: ${result.stderr}`)
+}
 
 beforeEach(() => {
   db = new DatabaseConstructor(':memory:')
@@ -457,6 +464,43 @@ describe('scanWorkspace link pass', () => {
     expect(report.linkErrors).toEqual([
       expect.objectContaining({ code: 'unknown_ref', specPath: 'specs/coupon/spec.md' }),
     ])
+  })
+})
+
+describe('C007/C021 CLI check link-error exits', () => {
+  test('a ready workspace with unknown_ref and unknown_req exits 1 in text and JSON modes', () => {
+    const root = mkdtempSync(join(tmpdir(), 'urtext-link-check-'))
+    tempDirs.push(root)
+    git(root, 'init', '-q')
+    git(root, 'config', 'user.email', 'test@urtext.dev')
+    git(root, 'config', 'user.name', 'test')
+    mkdirSync(join(root, 'specs/x'), { recursive: true })
+    writeFileSync(
+      join(root, 'specs/x/spec.md'),
+      [
+        '# X',
+        '',
+        '### FR001 intent',
+        'why.',
+        '',
+        '## C001 a <!-- oracle:manual refs:specs/x/spec.md#C999 req:FR001 -->',
+        'body a.',
+        '',
+        '## C002 b <!-- oracle:manual req:FR999 -->',
+        'body b.',
+      ].join('\n')
+    )
+    git(root, 'add', '-A')
+    git(root, 'commit', '-q', '-m', 'baseline')
+
+    const previous = process.cwd()
+    try {
+      process.chdir(root)
+      expect(run(['check'])).toBe(1)
+      expect(run(['check', '--json'])).toBe(1)
+    } finally {
+      process.chdir(previous)
+    }
   })
 })
 
