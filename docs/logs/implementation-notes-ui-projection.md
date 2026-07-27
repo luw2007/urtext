@@ -14,6 +14,13 @@
 - Final labelled-BFS correction: stale targets and their selected first-writer sources now come from the same labelled traversal. Direct FR defenders retain the FR stamp; simultaneous changed-defender descendants retain the clause label without a post-traversal source override. Focused linker coverage now pins multi-root ordering, second-event no-overwrite, and legacy-NULL preservation.
 - Final explain correction: the current human/unmapped status-item path is positively covered with an injected transport; it accepts only the exact current key, fences status-item facts (including current `next`), performs one transport call, and leaves evidence/audit/decision/review/mapping ledger row counts unchanged.
 
+### C028 dedicated oracle recovery (2026-07-27)
+
+- Replaced the two smoke assertions in `tests/ui-projection.test.ts` with named behavioral C028 P1–P5/R4 cases. The oracle creates isolated git workspaces and SQLite registries, drives stale provenance through `propagateStale()`, renders console and successful/refused detail paths, invokes `handleExplain()` through injected fake transport, snapshots evidence/audit/decision/review/mapping ledgers, and calls the importable `status --json` handler for projection-only exit semantics.
+- C028 recovery-audit completion adds exact agent-lane 409 guarding, a ready human-lane dangling-ref `buildBrief` refusal, FR/legacy/clause-key stale causality with the complete `重跑 urtext verify 前不放行` sentence, current human key-scoped explain success, key-XOR-scope 400, and injected transport-error 422. Every R4 assertion snapshots initialized nonempty evidence and confirms byte-identical ledger state.
+- `node_modules/.bin/vitest run tests/ui-projection.test.ts` — 12 passed, exit 0.
+- `node_modules/.bin/tsc --noEmit -p tsconfig.json` — passed.
+
 ## Focused verification observed
 
 - `node_modules/.bin/vitest run tests/ui-acceptance-fixture.test.ts` — 14 passed, exit 0.
