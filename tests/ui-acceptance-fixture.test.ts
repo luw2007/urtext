@@ -41,7 +41,8 @@ afterEach(() => {
 })
 
 describe('S4 acceptance fixture — setup/cleanup/repeatability', () => {
-  test('builds a self-contained repo + registry from an arbitrary process cwd', () => {
+  // Fixture setup runs git init + scan (~4.3s solo); the 5s default flakes under load.
+  test('builds a self-contained repo + registry from an arbitrary process cwd', { timeout: 30_000 }, () => {
     const originalCwd = process.cwd()
     process.chdir(tmpdir())
     try {

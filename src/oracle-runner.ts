@@ -25,6 +25,13 @@ export interface OracleResult {
 /** A batched verdict carries the oracle's own cost: batch wall time is shared. */
 export interface BatchedOracleResult extends OracleResult {
   durationMs: number
+  /**
+   * True when the batch process exited non-zero. A pass from a red batch keeps
+   * its per-clause attribution but must never be reusable: the exit code may
+   * be explained by a sibling's failure OR by an unattributable leak — the two
+   * are indistinguishable from the JSON report.
+   */
+  tainted: boolean
 }
 
 /**
@@ -84,7 +91,7 @@ const attribute = (
   ref: string,
   report: VitestJsonReport,
   workspaceRoot: string
-): BatchedOracleResult => {
+): Omit<BatchedOracleResult, 'tainted'> => {
   // Lowercase both sides like vitest does (cli-api matchers), so a case-
   // mismatched ref never reports "no test file matched" for a file that ran.
   const needle = ref.toLocaleLowerCase()
@@ -147,6 +154,7 @@ export const runTestBatch = (
         exitCode: null,
         output: `local vitest binary not found at ${vitestBin} — no dynamic install fallback`,
         durationMs: 0,
+        tainted: true,
       })
     }
     return results
@@ -174,6 +182,7 @@ export const runTestBatch = (
           exitCode: run.status,
           output: `vitest batch produced no JSON report\n${diagnostics}`,
           durationMs: 0,
+          tainted: true,
         })
       }
       return results
@@ -192,11 +201,13 @@ export const runTestBatch = (
           exitCode: run.status,
           output: `vitest batch exited ${run.status} without an attributable file failure\n${diagnostics}`,
           durationMs: 0,
+          tainted: true,
         })
       }
       return results
     }
-    for (const ref of refs) results.set(ref, attribute(ref, report, workspaceRoot))
+    const tainted = run.error !== undefined || run.status !== 0
+    for (const ref of refs) results.set(ref, { ...attribute(ref, report, workspaceRoot), tainted })
     return results
   } finally {
     rmSync(reportDir, { force: true, recursive: true })

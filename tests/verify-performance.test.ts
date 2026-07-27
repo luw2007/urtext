@@ -217,6 +217,45 @@ test('passes but leaks', async () => {
     expect(report.verdicts[0]!.verdict).toBe('fail')
     expect(report.verdicts[0]!.output).toContain('without an attributable file failure')
   })
+  test('a pass attributed out of a red batch is never stamped reusable', () => {
+    const root = makeWorkspace({
+      clauses: [
+        '## C001 leaky <!-- oracle:test:tests/leaky.test.ts req:FR001 -->',
+        '## C002 broken <!-- oracle:test:tests/broken.test.ts req:FR001 -->',
+      ],
+      tests: {
+        'tests/leaky.test.ts': `
+import { expect, test } from 'vitest'
+
+setTimeout(() => Promise.reject(new Error('boom')), 30)
+
+test('passes but leaks', async () => {
+  await new Promise((resolve) => setTimeout(resolve, 150))
+  expect(true).toBe(true)
+})
+`,
+        'tests/broken.test.ts': failingTest('really fails'),
+      },
+      git: true,
+    })
+
+    const report = verifyWorkspace(db, root)
+
+    // The sibling's real failure explains the exit code, so per-clause
+    // attribution keeps the leaky file green — but its row must carry a NULL
+    // fingerprint so incremental can never serve the potentially-lying pass.
+    expect(report.verdicts.map(({ clauseId, verdict }) => ({ clauseId, verdict }))).toEqual([
+      { clauseId: 'C001', verdict: 'pass' },
+      { clauseId: 'C002', verdict: 'fail' },
+    ])
+    const fingerprints = db
+      .prepare('SELECT clause_id AS clauseId, input_fingerprint AS fp FROM evidence ORDER BY clause_id')
+      .all() as { clauseId: string; fp: string | null }[]
+    expect(fingerprints.every(({ fp }) => fp === null)).toBe(true)
+
+    const incremental = verifyWorkspace(db, root, undefined, { incremental: true })
+    expect(incremental.reusedCount).toBe(0)
+  })
 })
 
 describe('incremental evidence reuse', () => {

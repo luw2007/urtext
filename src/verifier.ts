@@ -337,7 +337,9 @@ export const verifyWorkspace = (
       result.output,
       Date.now(),
       durationMs,
-      stampFingerprint
+      // A pass attributed out of a red batch may be riding an unattributable
+      // leak; it keeps its verdict but must never become reusable.
+      batched?.tainted === true ? null : stampFingerprint
     )
 
     counts[result.verdict]++
