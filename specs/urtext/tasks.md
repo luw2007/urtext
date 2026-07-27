@@ -34,3 +34,6 @@
     FR direct+refs closure 查询、CLI C/FR target 分派、detail req resolved/broken 状态、queue uncovered intent、contrast manifest 与真实 browser acceptance。
 - [ ] T018 verify 批量与增量性能 <!-- role:coder depends:T017 gate:true clauses:C027 -->
     单 vitest 批量执行去重 test oracle；workspace fingerprint 增量复用（--incremental，opt-in）；fail-closed 归因与 batch≡solo 等价测试；全量 ~600s→~50s。
+- [ ] T019 UI 人类投影：因果链、feature 健康、一跳邻域、AI 解释泛化 <!-- role:coder depends:T018 gate:true clauses:C028 -->
+    evidence.invalidation_source 迁移与归因传播、queue 因果句、feature health 只读行、brief 一跳邻域、
+    /api/explain queue scope 与全 human-lane 控件、批准语义文案、contrast manifest 与真实 browser acceptance。

@@ -84,9 +84,13 @@ export interface SpecImpactView {
   stale: boolean
   hasEvidence: boolean
   requirementBindings: RequirementBindingView[]
+  /** Outgoing refs targets in manifest declaration order. */
+  refs: ImpactDependent[]
   mappings: BriefMapping[]
   impact: Brief['impact']
   dependents: ImpactDependent[]
+  /** Reverse refs exactly one edge from the target. */
+  oneHopDependents: ImpactDependent[]
   navigation: ClauseNavigation
 }
 

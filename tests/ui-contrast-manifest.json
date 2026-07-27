@@ -1,7 +1,7 @@
 {
   "schema": "urtext.ui-contrast-consumers/3",
-  "sourceContractSha256": "cd0a26bc24393420b6c65fc2a4f872201f7964a9e956db1dfff15aa3111b0dda",
-  "renderContractSha256": "a17e3d04e8ca5669856da398256dc8849bda68783ea0f706cab171b050ea3032",
+  "sourceContractSha256": "4e41dae181416ccb3b8a991b5aedc17e764aa43a1834d399a84d32aeb46d7392",
+  "renderContractSha256": "d050221e125b971474ad943f5f6c23f196ad44908272ee8676cc8ab2d31ad744",
   "fixtureMatrix": [
     {
       "id": "console-quiet",
@@ -9,7 +9,7 @@
       "route": "queue",
       "pageNumber": 1,
       "pageSize": 20,
-      "branches": ["console.route.queue", "console.pagination.single", "console.human.empty", "console.unmapped.clean", "console.wip.normal", "console.uncoveredIntent.empty"],
+      "branches": ["console.route.queue", "console.pagination.single", "console.human.empty", "console.unmapped.clean", "console.wip.normal", "console.uncoveredIntent.empty", "console.featureHealth.empty", "console.explain.queue"],
       "csrfToken": "csrf-token-1",
       "snapshot": {
         "head": "1111111111111111111111111111111111111111",
@@ -35,7 +35,7 @@
       "route": "queue",
       "pageNumber": 1,
       "pageSize": 20,
-      "branches": ["console.route.queue", "console.pagination.single", "console.human.nonEmpty", "console.unmapped.hunks", "console.wip.exceeded", "console.uncoveredIntent.nonEmpty"],
+      "branches": ["console.route.queue", "console.pagination.single", "console.human.nonEmpty", "console.unmapped.hunks", "console.wip.exceeded", "console.uncoveredIntent.nonEmpty", "console.featureHealth.nonEmpty", "console.featureHealth.evidenceUnavailable", "console.featureHealth.evidenceIncomplete", "console.featureHealth.auditUnavailable", "console.featureHealth.auditIncomplete", "console.featureHealth.highRiskNone", "console.featureHealth.highRiskIncomplete", "console.featureHealth.uncoveredNone", "console.featureHealth.uncoveredPresent", "console.explain.queue", "console.explain.itemClause", "console.explain.itemUnmapped", "console.approvalSemantics"],
       "csrfToken": "csrf-token-2",
       "snapshot": {
         "head": "2222222222222222222222222222222222222222",
@@ -44,6 +44,17 @@
           "schema": "urtext.status/1",
           "head": "2222222222222222222222222222222222222222",
           "items": [
+            {
+              "key": "src/foo.ts:10-20",
+              "kind": "unmapped",
+              "lane": "human",
+              "primary": "unmapped",
+              "reasons": ["unmapped"],
+              "next": "map, ack, or write back to spec",
+              "filePath": "src/foo.ts",
+              "lineStart": 10,
+              "lineEnd": 20
+            },
             {
               "key": "specs/a/spec.md#C001",
               "kind": "clause",
@@ -69,14 +80,20 @@
               "risk": "low"
             }
           ],
-          "counts": { "agent": 1, "human": 1, "autoPass": 2, "uncovered": 2 },
+          "counts": { "agent": 1, "human": 2, "autoPass": 2, "uncovered": 2 },
           "uncoveredRequirements": [
             { "specPath": "specs/a/spec.md", "reqId": "FR002", "title": "Uncovered <intent> & visibility" },
             { "specPath": "specs/b/spec.md", "reqId": "FR007", "title": "Second uncovered intent" }
           ],
           "wip": { "limit": 1, "exceeded": true }
         },
-        "clauses": [],
+        "clauses": [
+          { "specPath": "specs/a/spec.md", "clauseId": "C001", "title": "Widget contrast", "risk": "high", "decisionVerdict": "n/a", "evidenceVerdict": "pass", "auditVerdict": "agree", "reviewStatus": "approved", "stale": false, "actionable": false },
+          { "specPath": "specs/a/spec.md", "clauseId": "C002", "title": "Widget stale", "risk": "low", "decisionVerdict": "n/a", "evidenceVerdict": "pass", "auditVerdict": "disagree", "reviewStatus": "n/a", "stale": true, "actionable": false },
+          { "specPath": "specs/a/spec.md", "clauseId": "C003", "title": "Widget failing", "risk": "low", "decisionVerdict": "n/a", "evidenceVerdict": "fail", "auditVerdict": "unaudited", "reviewStatus": "n/a", "stale": false, "actionable": false },
+          { "specPath": "specs/b/spec.md", "clauseId": "C001", "title": "Manual pending", "risk": "low", "decisionVerdict": "none", "evidenceVerdict": "pending", "auditVerdict": "unaudited", "reviewStatus": "n/a", "stale": false, "actionable": true },
+          { "specPath": "specs/c/spec.md", "clauseId": "C001", "title": "Healthy", "risk": "low", "decisionVerdict": "n/a", "evidenceVerdict": "pass", "auditVerdict": "agree", "reviewStatus": "n/a", "stale": false, "actionable": false }
+        ],
         "decided": 2,
         "totalManual": 4,
         "unmapped": [{ "filePath": "src/foo.ts", "lineStart": 10, "lineEnd": 20 }],
@@ -89,7 +106,7 @@
       "route": "queue",
       "pageNumber": 1,
       "pageSize": 20,
-      "branches": ["console.route.queue", "console.pagination.single", "console.unmapped.error"],
+      "branches": ["console.route.queue", "console.pagination.single", "console.unmapped.error", "console.featureHealth.nonEmpty", "console.featureHealth.evidenceComplete", "console.featureHealth.auditComplete", "console.featureHealth.highRiskComplete", "console.featureHealth.uncoveredNone", "console.explain.queue"],
       "csrfToken": "csrf-token-3",
       "snapshot": {
         "head": "3333333333333333333333333333333333333333",
@@ -102,7 +119,9 @@
           "uncoveredRequirements": [],
           "wip": { "limit": 10, "exceeded": false }
         },
-        "clauses": [],
+        "clauses": [
+          { "specPath": "specs/healthy/spec.md", "clauseId": "C001", "title": "Healthy high risk", "risk": "high", "decisionVerdict": "n/a", "evidenceVerdict": "pass", "auditVerdict": "agree", "reviewStatus": "approved", "stale": false, "actionable": false }
+        ],
         "decided": 0,
         "totalManual": 0,
         "unmapped": [],
@@ -174,6 +193,58 @@
       }
     },
     {
+      "id": "agent-stale",
+      "page": "console",
+      "route": "agent",
+      "pageNumber": 1,
+      "pageSize": 20,
+      "branches": ["console.route.agent", "console.pagination.single", "console.auditRunner.disabled", "console.audit.absent", "console.causal.sourced", "console.causal.legacy"],
+      "csrfToken": "csrf-token-stale",
+      "snapshot": {
+        "head": "4545454545454545454545454545454545454545",
+        "dirty": false,
+        "status": {
+          "schema": "urtext.status/1",
+          "head": "4545454545454545454545454545454545454545",
+          "items": [
+            {
+              "key": "specs/a/spec.md#C004",
+              "kind": "clause",
+              "lane": "agent",
+              "primary": "stale",
+              "reasons": ["stale"],
+              "next": "re-run verify",
+              "specPath": "specs/a/spec.md",
+              "clauseId": "C004",
+              "title": "Sourced stale",
+              "risk": "low",
+              "invalidationSource": "specs/a/spec.md#FR001"
+            },
+            {
+              "key": "specs/a/spec.md#C005",
+              "kind": "clause",
+              "lane": "agent",
+              "primary": "stale",
+              "reasons": ["stale"],
+              "next": "re-run verify",
+              "specPath": "specs/a/spec.md",
+              "clauseId": "C005",
+              "title": "Legacy stale",
+              "risk": "low"
+            }
+          ],
+          "counts": { "agent": 2, "human": 0, "autoPass": 0, "uncovered": 0 },
+          "uncoveredRequirements": [],
+          "wip": { "limit": 10, "exceeded": false }
+        },
+        "clauses": [],
+        "decided": 0,
+        "totalManual": 0,
+        "unmapped": [],
+        "unmappedError": null
+      }
+    },
+    {
       "id": "agent-zero",
       "page": "console",
       "route": "agent",
@@ -219,11 +290,11 @@
           "wip": { "limit": 10, "exceeded": false }
         },
         "clauses": [
-          { "specPath": "specs/a/spec.md", "clauseId": "C001", "title": "Widget alpha", "risk": "high", "decisionVerdict": "pass", "evidenceVerdict": "pass", "stale": false, "actionable": false },
-          { "specPath": "specs/a/spec.md", "clauseId": "C002", "title": "Widget beta", "risk": "low", "decisionVerdict": "none", "evidenceVerdict": "pending", "stale": false, "actionable": true },
-          { "specPath": "specs/a/spec.md", "clauseId": "C003", "title": "Widget gamma", "risk": "low", "decisionVerdict": "none", "evidenceVerdict": "pass", "stale": false, "actionable": false },
-          { "specPath": "specs/b/spec.md", "clauseId": "C001", "title": "Widget delta", "risk": "high", "decisionVerdict": "none", "evidenceVerdict": "pending", "stale": false, "actionable": true },
-          { "specPath": "specs/b/spec.md", "clauseId": "C002", "title": "Widget epsilon", "risk": "low", "decisionVerdict": "fail", "evidenceVerdict": "fail", "stale": true, "actionable": false }
+          { "specPath": "specs/a/spec.md", "clauseId": "C001", "title": "Widget alpha", "risk": "high", "decisionVerdict": "pass", "evidenceVerdict": "pass", "auditVerdict": "agree", "reviewStatus": "approved", "stale": false, "actionable": false },
+          { "specPath": "specs/a/spec.md", "clauseId": "C002", "title": "Widget beta", "risk": "low", "decisionVerdict": "none", "evidenceVerdict": "pending", "auditVerdict": "unaudited", "reviewStatus": "n/a", "stale": false, "actionable": true },
+          { "specPath": "specs/a/spec.md", "clauseId": "C003", "title": "Widget gamma", "risk": "low", "decisionVerdict": "none", "evidenceVerdict": "pass", "auditVerdict": "agree", "reviewStatus": "n/a", "stale": false, "actionable": false },
+          { "specPath": "specs/b/spec.md", "clauseId": "C001", "title": "Widget delta", "risk": "high", "decisionVerdict": "none", "evidenceVerdict": "pending", "auditVerdict": "unaudited", "reviewStatus": "none", "stale": false, "actionable": true },
+          { "specPath": "specs/b/spec.md", "clauseId": "C002", "title": "Widget epsilon", "risk": "low", "decisionVerdict": "fail", "evidenceVerdict": "fail", "auditVerdict": "disagree", "reviewStatus": "n/a", "stale": true, "actionable": false }
         ],
         "decided": 0,
         "totalManual": 5,
@@ -277,9 +348,9 @@
           "wip": { "limit": 10, "exceeded": false }
         },
         "clauses": [
-          { "specPath": "specs/a/spec.md", "clauseId": "C005", "title": "Widget decided pass", "risk": "low", "decisionVerdict": "pass", "evidenceVerdict": "pass", "stale": false, "actionable": false },
-          { "specPath": "specs/a/spec.md", "clauseId": "C006", "title": "Widget decided fail", "risk": "high", "decisionVerdict": "fail", "evidenceVerdict": "fail", "stale": false, "actionable": false },
-          { "specPath": "specs/a/spec.md", "clauseId": "C007", "title": "Widget undecided", "risk": "low", "decisionVerdict": "none", "evidenceVerdict": "pending", "stale": false, "actionable": true }
+          { "specPath": "specs/a/spec.md", "clauseId": "C005", "title": "Widget decided pass", "risk": "low", "decisionVerdict": "pass", "evidenceVerdict": "pass", "auditVerdict": "agree", "reviewStatus": "n/a", "stale": false, "actionable": false },
+          { "specPath": "specs/a/spec.md", "clauseId": "C006", "title": "Widget decided fail", "risk": "high", "decisionVerdict": "fail", "evidenceVerdict": "fail", "auditVerdict": "disagree", "reviewStatus": "rejected", "stale": false, "actionable": false },
+          { "specPath": "specs/a/spec.md", "clauseId": "C007", "title": "Widget undecided", "risk": "low", "decisionVerdict": "none", "evidenceVerdict": "pending", "auditVerdict": "unaudited", "reviewStatus": "n/a", "stale": false, "actionable": true }
         ],
         "decided": 2,
         "totalManual": 3,
@@ -324,7 +395,12 @@
         "brief.dependent.current",
         "brief.nav.prevPresent",
         "brief.nav.nextPresent",
-        "brief.requirementBindings.resolved"
+        "brief.requirementBindings.resolved",
+        "brief.neighborhood.requirements",
+        "brief.neighborhood.refsPresent",
+        "brief.neighborhood.directPresent",
+        "brief.explain.generalized",
+        "brief.approvalSemantics"
       ],
       "input": {
         "text": "raw brief text for C001",
@@ -349,6 +425,9 @@
               "target": { "specPath": "specs/a/spec.md", "reqId": "FR001", "title": "Widget intent" }
             }
           ],
+          "refs": [
+            { "specPath": "specs/core/spec.md", "clauseId": "C010", "title": "Referenced clause", "stale": false, "evidenceVerdict": "pass" }
+          ],
           "mappings": [
             {
               "filePath": "src/foo.ts",
@@ -363,10 +442,14 @@
           ],
           "impact": {
             "source": { "specPath": "specs/a/spec.md", "clauseId": "C001" },
+            "directClauses": [{ "specPath": "specs/a/spec.md", "clauseId": "C002" }],
             "affectedClauses": [{ "specPath": "specs/a/spec.md", "clauseId": "C002" }],
             "affectedTasks": [{ "specPath": "specs/a/tasks.md", "fileId": "T1", "title": "Task one", "clauseId": "C001" }]
           },
           "dependents": [
+            { "specPath": "specs/a/spec.md", "clauseId": "C002", "title": "Dependent clause", "stale": false, "evidenceVerdict": "pass" }
+          ],
+          "oneHopDependents": [
             { "specPath": "specs/a/spec.md", "clauseId": "C002", "title": "Dependent clause", "stale": false, "evidenceVerdict": "pass" }
           ],
           "navigation": {
@@ -387,7 +470,11 @@
         "brief.mapping.empty",
         "brief.dependent.empty",
         "brief.nav.prevAbsent",
-        "brief.nav.nextAbsent"
+        "brief.nav.nextAbsent",
+        "brief.neighborhood.requirements",
+        "brief.neighborhood.refsEmpty",
+        "brief.neighborhood.directEmpty",
+        "brief.explain.generalized"
       ],
       "input": {
         "text": "raw brief text for C010",
@@ -412,13 +499,16 @@
               "target": { "specPath": "specs/b/spec.md", "reqId": "FR010", "title": "Quiet intent" }
             }
           ],
+          "refs": [],
           "mappings": [],
           "impact": {
             "source": { "specPath": "specs/b/spec.md", "clauseId": "C010" },
+            "directClauses": [],
             "affectedClauses": [],
             "affectedTasks": []
           },
           "dependents": [],
+          "oneHopDependents": [],
           "navigation": { "previous": null, "next": null }
         },
         "config": { "diffOpenMaxLines": 80, "diffDisplayMaxLines": 2000 }
@@ -427,7 +517,7 @@
     {
       "id": "brief-stale",
       "page": "brief",
-      "branches": ["brief.evidence.stale", "brief.mapping.error", "brief.dependent.stale"],
+      "branches": ["brief.evidence.stale", "brief.mapping.error", "brief.dependent.stale", "brief.neighborhood.requirements", "brief.neighborhood.refsEmpty", "brief.neighborhood.directPresent", "brief.explain.generalized", "brief.approvalSemantics"],
       "input": {
         "text": "raw brief text for C003",
         "csrfToken": "csrf-token-b3",
@@ -451,6 +541,7 @@
               "target": { "specPath": "specs/a/spec.md", "reqId": "FR003", "title": "Stale intent" }
             }
           ],
+          "refs": [],
           "mappings": [
             {
               "filePath": "src/bar.ts",
@@ -465,10 +556,14 @@
           ],
           "impact": {
             "source": { "specPath": "specs/a/spec.md", "clauseId": "C003" },
+            "directClauses": [{ "specPath": "specs/a/spec.md", "clauseId": "C004" }],
             "affectedClauses": [],
             "affectedTasks": []
           },
           "dependents": [
+            { "specPath": "specs/a/spec.md", "clauseId": "C004", "title": "Stale dependent", "stale": true, "evidenceVerdict": "fail" }
+          ],
+          "oneHopDependents": [
             { "specPath": "specs/a/spec.md", "clauseId": "C004", "title": "Stale dependent", "stale": true, "evidenceVerdict": "fail" }
           ],
           "navigation": { "previous": null, "next": { "specPath": "specs/a/spec.md", "clauseId": "C005" } }
@@ -503,6 +598,7 @@
               "target": { "specPath": "specs/a/spec.md", "reqId": "FR006", "title": "Truncated intent" }
             }
           ],
+          "refs": [],
           "mappings": [
             {
               "filePath": "src/baz.ts",
@@ -517,10 +613,12 @@
           ],
           "impact": {
             "source": { "specPath": "specs/a/spec.md", "clauseId": "C006" },
+            "directClauses": [],
             "affectedClauses": [],
             "affectedTasks": []
           },
           "dependents": [],
+          "oneHopDependents": [],
           "navigation": { "previous": null, "next": null }
         },
         "config": { "diffOpenMaxLines": 80, "diffDisplayMaxLines": 3 }

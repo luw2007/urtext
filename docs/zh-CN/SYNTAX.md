@@ -105,8 +105,9 @@ GFM 任务列表 + anchor 元数据，`clauses` 为多值字段：
 - `refs` 边落 `clause_refs` 表（随修订链版本化）；linker 在每次 scan 后对
   **全 workspace 最新活跃修订**解析引用（`unknown_ref` 属 check 阶段错误，
   不改单文件修订状态——目标被删而引用方未变的悬空引用只有全量校验能捕获）。
-- 上游子句 text_hash 变更 → 反向闭包内依赖子句的既有证据打 `invalidated_at`
-  （evidence 唯一可变列；作废不删除）。
+- 上游子句 text_hash 变更 → 反向闭包内依赖子句的既有证据在同一 UPDATE 中写入
+  `invalidated_at` + `invalidation_source` 这一枚逻辑作废戳（证据唯一可变面；作废不删除）。
+  旧账本行的 source 保持 `NULL`，不回填也不猜测来源。
 
 ## DWARF：clause↔code 映射（`urtext map` / `ack` / `blame` / `check --diff`）
 

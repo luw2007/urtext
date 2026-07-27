@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { runOracle } from '../src/oracle-runner.js'
 import { openRegistry } from '../src/registry.js'
 import { scanWorkspace } from '../src/scanner.js'
-import { verifyWorkspace } from '../src/verifier.js'
+import { ensureEvidenceLedger, verifyWorkspace } from '../src/verifier.js'
 import type { ParsedClause } from '../src/clause-parser.js'
 
 let db: Database
@@ -63,6 +63,54 @@ describe('runOracle', () => {
     for (const kind of ['test', 'cmd', 'diff-scope'] as const) {
       expect(runOracle(makeClause({ kind, ref: null }), '/tmp').verdict).toBe('fail')
     }
+  })
+})
+
+interface ColumnRow {
+  name: string
+}
+
+interface LegacyEvidenceRow {
+  invalidated_at: number
+  input_fingerprint: string
+  invalidation_source: string | null
+}
+
+describe('ensureEvidenceLedger', () => {
+  test('appends invalidation_source after input_fingerprint without rewriting legacy rows', () => {
+    db.exec(`
+      CREATE TABLE evidence (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        spec_path TEXT NOT NULL,
+        revision INTEGER NOT NULL,
+        clause_id TEXT NOT NULL,
+        oracle_kind TEXT NOT NULL,
+        oracle_ref TEXT,
+        verdict TEXT NOT NULL,
+        exit_code INTEGER,
+        output TEXT NOT NULL DEFAULT '',
+        created_at INTEGER NOT NULL,
+        duration_ms INTEGER,
+        invalidated_at INTEGER,
+        input_fingerprint TEXT
+      )
+    `)
+    db.prepare(
+      `INSERT INTO evidence (spec_path, revision, clause_id, oracle_kind, verdict, output, created_at, invalidated_at, input_fingerprint)
+       VALUES ('specs/x/spec.md', 1, 'C001', 'cmd', 'pass', '', 1, 7, 'fingerprint')`
+    ).run()
+
+    ensureEvidenceLedger(db)
+    ensureEvidenceLedger(db)
+
+    const columns = db.prepare(`SELECT name FROM pragma_table_info('evidence')`).all() as ColumnRow[]
+    expect(columns.map((column) => column.name)).toEqual(
+      expect.arrayContaining(['input_fingerprint', 'invalidation_source'])
+    )
+    const legacy = db.prepare(
+      'SELECT invalidated_at, input_fingerprint, invalidation_source FROM evidence'
+    ).get() as LegacyEvidenceRow
+    expect(legacy).toEqual({ invalidated_at: 7, input_fingerprint: 'fingerprint', invalidation_source: null })
   })
 })
 

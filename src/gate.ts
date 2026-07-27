@@ -32,6 +32,8 @@ export interface ClauseDecision {
   evidenceVerdict: 'pass' | 'fail' | 'pending' | 'missing'
   auditVerdict: 'agree' | 'disagree' | 'unaudited'
   stale: boolean
+  /** Origin key for a stale stamp; null for fresh or legacy unattributed rows. */
+  invalidationSource: string | null
   /** Human code-review status for high-risk clauses at the current HEAD. */
   reviewStatus: 'approved' | 'rejected' | 'none' | 'n/a'
   /** Human decision for manual-oracle clauses at the current HEAD. */
@@ -76,26 +78,34 @@ const liveClauses = (db: Database): LiveClauseRow[] =>
 interface EvidenceState {
   verdict: 'pass' | 'fail' | 'pending'
   stale: boolean
+  invalidationSource: string | null
 }
 
-/** Latest evidence verdict + stale flag per clause (highest evidence id). */
+/** Latest evidence verdict + stale stamp facts per clause (highest evidence id). */
 const evidenceByClause = (db: Database): Map<string, EvidenceState> => {
   ensureEvidenceLedger(db)
   const rows = db
     .prepare(
-      `SELECT e.spec_path, e.clause_id, e.verdict, e.invalidated_at
+      `SELECT e.spec_path, e.clause_id, e.verdict, e.invalidated_at, e.invalidation_source
        FROM evidence e
        JOIN (
          SELECT spec_path, clause_id, MAX(id) AS id
          FROM evidence GROUP BY spec_path, clause_id
        ) latest ON latest.id = e.id`
     )
-    .all() as { spec_path: string; clause_id: string; verdict: 'pass' | 'fail' | 'pending'; invalidated_at: number | null }[]
+    .all() as {
+      spec_path: string
+      clause_id: string
+      verdict: 'pass' | 'fail' | 'pending'
+      invalidated_at: number | null
+      invalidation_source: string | null
+    }[]
   const map = new Map<string, EvidenceState>()
   for (const row of rows) {
     map.set(`${row.spec_path}#${row.clause_id}`, {
       verdict: row.verdict,
       stale: row.invalidated_at !== null,
+      invalidationSource: row.invalidated_at === null ? null : row.invalidation_source,
     })
   }
   return map
@@ -131,6 +141,7 @@ export const adjudicate = (
     const state = evidence.get(key)
     const evidenceVerdict = state?.verdict ?? 'missing'
     const stale = state?.stale ?? false
+    const invalidationSource = state?.invalidationSource ?? null
     const auditVerdict = auditByClause.get(key) ?? 'unaudited'
     const isManual = clause.oracle_kind === 'manual'
 
@@ -180,6 +191,7 @@ export const adjudicate = (
       evidenceVerdict,
       auditVerdict,
       stale,
+      invalidationSource,
       reviewStatus,
       decisionVerdict,
       decision: reasons.length === 0 ? 'auto-pass' : 'human',

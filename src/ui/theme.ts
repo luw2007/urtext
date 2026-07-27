@@ -38,6 +38,9 @@ th,td{border-bottom:1px solid var(--border);padding:var(--sp-2) var(--sp-3);text
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 button[disabled]{color:var(--muted);background:var(--bg);border:1px solid var(--border)}
 pre{overflow-x:auto;white-space:pre}
+[data-neighborhood]{display:flex;flex-wrap:wrap;gap:var(--sp-3)}
+[data-neighbor]{flex:1 1 14rem;border:1px solid var(--border);padding:var(--sp-3);overflow-wrap:anywhere}
+[data-neighbor] h3{margin:0 0 var(--sp-2)}
 @media (min-width:720px){nav{flex-wrap:nowrap}table{display:table}}
 @media (max-width:719px){nav{flex-wrap:wrap}table{display:block;overflow-x:auto}}
 @media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}

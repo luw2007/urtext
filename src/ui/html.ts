@@ -11,6 +11,10 @@ export const esc = (s: unknown): string =>
 export const briefHref = (specPath: string, clauseId: string): string =>
   `/brief?spec=${encodeURIComponent(specPath)}&clause=${encodeURIComponent(clauseId)}`
 
+/** Static P5 copy beside every approve/decide control. */
+export const approvalSemantics = (head: string | null): string =>
+  `本次批准绑定 HEAD ${head?.slice(0, 7) ?? 'n/a'}；代码再动自动失效，需重审。`
+
 export interface ShellInput {
   title: string
   csrfToken?: string

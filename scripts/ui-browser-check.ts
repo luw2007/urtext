@@ -551,12 +551,12 @@ export const accessibleNameSource = (node: AxNode): string => (node.name.trim().
 
 
 export const PAGE_AX_LINK_SELECTORS: Record<string, string[]> = {
-  console: ['.skip', 'header', 'nav[aria-label="页面导航"]', 'main', 'h1', 'table', 'th[scope="col"]'],
+  console: ['.skip', 'header', 'nav[aria-label="页面导航"]', 'main', 'h1', '#feature-health', '#queue-explain-btn', 'button[data-explain-key]', 'table', 'th[scope="col"]'],
   agent: ['.skip', 'header', 'nav[aria-label="页面导航"]', 'main', 'h1', '#audit-runner', 'table', 'th[scope="col"]'],
   specs: ['.skip', 'header', 'nav[aria-label="页面导航"]', 'main', 'h1', 'table', 'th[scope="col"]', 'nav[aria-label="分页"]'],
   'specs-page-2': ['.skip', 'header', 'nav[aria-label="页面导航"]', 'main', 'h1', 'table', 'th[scope="col"]', 'nav[aria-label="分页"]'],
   decisions: ['.skip', 'header', 'nav[aria-label="页面导航"]', 'main', 'h1', 'table', 'th[scope="col"]'],
-  brief: ['.skip', 'header', 'nav[aria-label="页面导航"]', 'main', 'h1', 'details[data-section="blame-diff"]', '#raw-brief-title', '#review-form', '#explain-btn'],
+  brief: ['.skip', 'header', 'nav[aria-label="页面导航"]', 'main', 'h1', '[data-section="neighborhood"]', 'details[data-section="blame-diff"]', '#raw-brief-title', '#review-form', '#explain-btn'],
   error: ['.skip', 'header', 'nav[aria-label="页面导航"]', 'main', 'h1', '[role="alert"]'],
 }
 
@@ -602,6 +602,12 @@ export const PAGE_SPECIFIC_SELECTORS: PageSpecificExpectation[] = [
   { page: 'console', selector: '#audit-runner', expectedCount: 0 },
   { page: 'console', selector: '#explain-btn', expectedCount: 0 },
   { page: 'console', selector: '#uncovered-intent', expectedCount: 1 },
+  { page: 'console', selector: '#feature-health', expectedCount: 1 },
+  { page: 'console', selector: 'li[data-feature="demo"]', expectedCount: 1 },
+  { page: 'console', selector: '#queue-explain-btn', expectedCount: 1 },
+  { page: 'console', selector: 'button[data-explain-key]', expectedCount: 2 },
+  { page: 'console', selector: '[data-state="approval-semantics"]', expectedCount: 1 },
+  { page: 'console', selector: '[data-causal]', expectedCount: 0 },
   {
     page: 'console',
     selector: 'li[data-uncovered="specs/demo/spec.md#FR002"]',
@@ -610,23 +616,35 @@ export const PAGE_SPECIFIC_SELECTORS: PageSpecificExpectation[] = [
   { page: 'agent', selector: '#audit-runner', expectedCount: 1 },
   { page: 'agent', selector: '#explain-btn', expectedCount: 0 },
   { page: 'agent', selector: '#uncovered-intent', expectedCount: 0 },
+  { page: 'agent', selector: '#feature-health', expectedCount: 0 },
+  { page: 'agent', selector: '#queue-explain-btn', expectedCount: 0 },
+  { page: 'agent', selector: 'button[data-explain-key]', expectedCount: 0 },
+  { page: 'agent', selector: '[data-causal]', expectedCount: 1 },
   { page: 'specs', selector: 'nav[aria-label="分页"]', expectedCount: 1 },
   { page: 'specs', selector: 'a[rel="prev"]', expectedCount: 0 },
   { page: 'specs', selector: 'a[rel="next"]', expectedCount: 1 },
   { page: 'specs', selector: '#audit-runner', expectedCount: 0 },
   { page: 'specs', selector: '#uncovered-intent', expectedCount: 0 },
+  { page: 'specs', selector: '#feature-health', expectedCount: 0 },
   { page: 'specs-page-2', selector: 'nav[aria-label="分页"]', expectedCount: 1 },
   { page: 'specs-page-2', selector: 'a[rel="prev"]', expectedCount: 1 },
   { page: 'specs-page-2', selector: 'a[rel="next"]', expectedCount: 1 },
+  { page: 'specs-page-2', selector: '#feature-health', expectedCount: 0 },
   { page: 'decisions', selector: '#audit-runner', expectedCount: 0 },
   { page: 'decisions', selector: '#uncovered-intent', expectedCount: 0 },
+  { page: 'decisions', selector: '#feature-health', expectedCount: 0 },
   { page: 'brief', selector: '#explain-btn', expectedCount: 1 },
   { page: 'brief', selector: '#audit-runner', expectedCount: 0 },
   { page: 'brief', selector: '[data-section="requirement-bindings"]', expectedCount: 1 },
   { page: 'brief', selector: 'li[data-state="req-resolved"]', expectedCount: 1 },
+  { page: 'brief', selector: '[data-section="neighborhood"]', expectedCount: 1 },
+  { page: 'brief', selector: '[data-state="approval-semantics"]', expectedCount: 1 },
+  { page: 'brief', selector: '#queue-explain-btn', expectedCount: 0 },
   { page: 'error', selector: '#explain-btn', expectedCount: 0 },
   { page: 'error', selector: '#audit-runner', expectedCount: 0 },
   { page: 'error', selector: '[data-section="requirement-bindings"]', expectedCount: 0 },
+  { page: 'error', selector: '[data-section="neighborhood"]', expectedCount: 0 },
+  { page: 'error', selector: '[data-state="approval-semantics"]', expectedCount: 0 },
 ]
 
 /** Real per-selector element counts via a single `querySelectorAll` batch, parsed from the injected client's response. */
@@ -755,11 +773,13 @@ export const captureFocusOrder = async (client: CdpClient, steps: number): Promi
     await client.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 })
     const res = await client.send('Runtime.evaluate', {
       expression:
-        '(()=>{const e=document.activeElement;if(!e||e===document.body)return "";if(e.classList&&e.classList.contains("skip"))return "skip-link";return e.id||e.tagName.toLowerCase();})()',
+        '(()=>{const e=document.activeElement;if(!e||e===document.body)return "";if(e.classList&&e.classList.contains("skip"))return "skip-link";if(e.id)return e.id;const all=[...document.querySelectorAll("a[href],button,input,select,textarea,[tabindex]")];const i=all.indexOf(e);return e.tagName.toLowerCase()+"["+(i>=0?i:"?")+"]";})()',
       returnByValue: true,
     })
     const id = String(res.result.value)
-    if (id !== '') order.push(id)
+    if (id === '') continue
+    if (order.length > 0 && id === order[0]) break
+    order.push(id)
   }
   return order
 }
@@ -803,6 +823,8 @@ export interface CheckSummary {
   axLinkErrors: string[]
   externalRequestCount: number
   disabledCheck: DisabledCheckResult | null
+  /** Additional real-click explain interactions beyond the legacy single check. */
+  interactionChecks?: DisabledCheckResult[] | undefined
 }
 
 export interface RunCheckConfig {
@@ -812,6 +834,7 @@ export interface RunCheckConfig {
   guardCases: HttpGuardCase[]
   pageSpecificExpectations?: PageSpecificExpectation[] | undefined
   disabledButtonSelector?: string | undefined
+  disabledButtonSelectors?: string[] | undefined
   axLinkSelectors?: Record<string, string[]> | undefined
 }
 
@@ -853,8 +876,14 @@ export const runCheckAtViewport = async (
     ? { links: [], errors: [] }
     : await collectPageAxLinks(client, page, axNodes, config.axLinkSelectors)
 
-  const disabledCheck =
-    config.disabledButtonSelector !== undefined ? await verifyButtonDisablesDuringSubmit(client, config.disabledButtonSelector) : null
+  const interactionSelectors =
+    config.disabledButtonSelectors ??
+    (config.disabledButtonSelector !== undefined ? [config.disabledButtonSelector] : [])
+  const interactionChecks: DisabledCheckResult[] = []
+  for (const selector of interactionSelectors) {
+    interactionChecks.push(await verifyButtonDisablesDuringSubmit(client, selector))
+  }
+  const disabledCheck = interactionChecks[0] ?? null
 
   return {
     page,
@@ -876,6 +905,7 @@ export const runCheckAtViewport = async (
     axLinks: axLinkage.links,
     axLinkErrors: axLinkage.errors,
     disabledCheck,
+    ...(interactionChecks.length > 1 ? { interactionChecks: interactionChecks.slice(1) } : {}),
   }
 }
 
@@ -907,6 +937,12 @@ export const buildAssertions = (summary: CheckSummary): Assertion[] => {
     ...(summary.disabledCheck !== null
       ? [{ name: `${prefix}:disabled-during-submit:${summary.disabledCheck.selector}`, expected: true, actual: summary.disabledCheck.pass, pass: summary.disabledCheck.pass }]
       : []),
+    ...(summary.interactionChecks ?? []).map((check) => ({
+      name: `${prefix}:disabled-during-submit:${check.selector}`,
+      expected: true,
+      actual: check.pass,
+      pass: check.pass,
+    })),
   ]
 }
 
@@ -990,9 +1026,10 @@ if (isMain()) {
   const pageNameErrors = validatePageNames(pages)
   if (pageNameErrors.length > 0) throw new Error(pageNameErrors.join('; '))
 
-  const DISABLED_BUTTON_SELECTORS: Record<string, string> = {
-    brief: '#explain-btn',
-    agent: '#audit-runner button[type="submit"]',
+  const DISABLED_BUTTON_SELECTORS: Record<string, string[]> = {
+    console: ['#queue-explain-btn', '#explain-item-btn-0'],
+    brief: ['#explain-btn'],
+    agent: ['#audit-runner button[type="submit"]'],
   }
 
   const config: RunCheckConfig = {
@@ -1035,7 +1072,7 @@ if (isMain()) {
               ...config,
               disclosureExpectations: pageName === 'brief' ? disclosureExpectations : [],
               expectedDiffCount: pageName === 'brief' ? expectedDiffCount : 0,
-              disabledButtonSelector: viewport === 1440 ? DISABLED_BUTTON_SELECTORS[pageName] : undefined,
+              disabledButtonSelectors: viewport === 1440 ? DISABLED_BUTTON_SELECTORS[pageName] : undefined,
             },
             networkGuard.getRecords(),
           )

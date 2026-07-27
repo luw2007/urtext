@@ -3,7 +3,8 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { afterEach, describe, expect, test } from 'vitest'
+import DatabaseConstructor from 'better-sqlite3'
+import { afterAll, afterEach, beforeAll, describe, expect, test } from 'vitest'
 
 import { buildStatus, handleBrief } from '../src/index.js'
 import {
@@ -30,67 +31,72 @@ const worktreeDirty = (root: string): boolean => {
   return result.stdout.trim().length > 0
 }
 
-let handle: FixtureHandle | undefined
+let repeatHandleA: FixtureHandle | undefined
+let repeatHandleB: FixtureHandle | undefined
+let fixtureBaseline: FixtureHandle | undefined
+
+beforeAll(() => {
+  const originalCwd = process.cwd()
+  process.chdir(tmpdir())
+  try {
+    fixtureBaseline = setupFixture()
+  } finally {
+    process.chdir(originalCwd)
+  }
+  repeatHandleA = buildFixture(mkdtempSync(join(tmpdir(), 'urtext-ui-acceptance-a-')))
+  repeatHandleB = buildFixture(mkdtempSync(join(tmpdir(), 'urtext-ui-acceptance-b-')))
+}, 30_000)
+
+afterAll(() => {
+  for (const fixture of [fixtureBaseline, repeatHandleA, repeatHandleB]) {
+    if (fixture) cleanupFixture(fixture)
+  }
+})
 
 afterEach(() => {
-  if (handle) {
-    cleanupFixture(handle)
-    handle = undefined
-  }
   for (const dir of scratchDirs.splice(0)) rmSync(dir, { recursive: true, force: true })
 })
 
+const baselineFixture = (): FixtureHandle => {
+  if (fixtureBaseline === undefined) throw new Error('baseline fixture was not built')
+  return fixtureBaseline
+}
+
 describe('S4 acceptance fixture — setup/cleanup/repeatability', () => {
-  // Fixture setup runs git init + scan (~4.3s solo); the 5s default flakes under load.
-  test('builds a self-contained repo + registry from an arbitrary process cwd', { timeout: 30_000 }, () => {
-    const originalCwd = process.cwd()
-    process.chdir(tmpdir())
-    try {
-      handle = setupFixture()
-    } finally {
-      process.chdir(originalCwd)
-    }
-    expect(existsSync(join(handle.root, '.git'))).toBe(true)
-    expect(existsSync(join(handle.root, '.urtext/registry.sqlite'))).toBe(true)
-    expect(handle.targets).toEqual({
+  test('baseline fixture is self-contained and stable from an arbitrary process cwd', () => {
+    const fixture = baselineFixture()
+    expect(existsSync(join(fixture.root, '.git'))).toBe(true)
+    expect(existsSync(join(fixture.root, '.urtext/registry.sqlite'))).toBe(true)
+    expect(fixture.targets).toEqual({
       manual: 'specs/demo/spec.md#C003',
       reviewable: 'specs/demo/spec.md#C004',
       dependentSource: 'specs/demo/spec.md#C001',
       dependent: 'specs/demo/spec.md#C002',
+      stale: 'specs/demo/spec.md#C002',
       unmappedFile: 'unmapped.txt',
     })
-    expect(worktreeDirty(handle.root)).toBe(false)
+    expect(worktreeDirty(fixture.root)).toBe(false)
   })
 
-  test('cleanup deletes the root and is safe to call twice', () => {
-    handle = setupFixture()
-    const root = handle.root
-    cleanupFixture(handle)
-    handle = undefined
+  test('cleanup deletes an isolated root and remains idempotent', () => {
+    const root = mkdtempSync(join(tmpdir(), 'urtext-ui-acceptance-cleanup-'))
+    const db = new DatabaseConstructor(join(root, 'registry.sqlite'))
+    cleanupFixture({ root, db })
     expect(existsSync(root)).toBe(false)
-    // Idempotent: a second removal of an already-gone root must not throw.
     expect(() => rmSync(root, { recursive: true, force: true })).not.toThrow()
   })
 
-  test('two independent roots build byte-identical shas and target keys', () => {
-    const rootA = scratch('urtext-ui-acceptance-a-')
-    const rootB = scratch('urtext-ui-acceptance-b-')
-    const handleA = buildFixture(rootA)
-    const handleB = buildFixture(rootB)
-    try {
-      expect(handleA.mappingBaselineSha).toBe(handleB.mappingBaselineSha)
-      expect(handleA.implementationSha).toBe(handleB.implementationSha)
-      expect(handleA.targets).toEqual(handleB.targets)
-      expect(handleA.root).not.toBe(handleB.root)
-    } finally {
-      cleanupFixture(handleA)
-      cleanupFixture(handleB)
-    }
-  }, 15000)
+  test('independent roots produce byte-identical shas and target keys', () => {
+    if (repeatHandleA === undefined || repeatHandleB === undefined) throw new Error('repeatability fixtures were not built')
+    expect(repeatHandleA.mappingBaselineSha).toBe(repeatHandleB.mappingBaselineSha)
+    expect(repeatHandleA.implementationSha).toBe(repeatHandleB.implementationSha)
+    expect(repeatHandleA.targets).toEqual(repeatHandleB.targets)
+    expect(repeatHandleA.root).not.toBe(repeatHandleB.root)
+  })
 
   test('fixture exposes exactly FR002 as uncovered intent', () => {
-    handle = setupFixture()
-    const status = buildStatus(handle.db, { head: null, unmapped: [] })
+    const fixture = baselineFixture()
+    const status = buildStatus(fixture.db, { head: null, unmapped: [] })
     expect(status.counts.uncovered).toBe(1)
     expect(status.uncoveredRequirements).toEqual([
       {
@@ -104,7 +110,7 @@ describe('S4 acceptance fixture — setup/cleanup/repeatability', () => {
 
 describe('S4 acceptance fixture — five real mapping diffs', () => {
   test('C004 brief shows exactly five clean ASCII old/new diffs on a clean HEAD', () => {
-    handle = setupFixture()
+    const handle = baselineFixture()
     const result = handleBrief(handle.db, handle.root, 'specs/demo/spec.md', 'C004')
     expect(result.status).toBe(200)
     if (!('ok' in result.body) || !result.body.ok) throw new Error('expected an ok brief body')
@@ -123,21 +129,35 @@ describe('S4 acceptance fixture — five real mapping diffs', () => {
   })
 
   test('dependent/dependentSource/manual targets resolve to the expected clauses', () => {
-    handle = setupFixture()
+    const handle = baselineFixture()
     const dependentSource = handleBrief(handle.db, handle.root, 'specs/demo/spec.md', 'C001')
     const dependent = handleBrief(handle.db, handle.root, 'specs/demo/spec.md', 'C002')
     const manual = handleBrief(handle.db, handle.root, 'specs/demo/spec.md', 'C003')
     for (const result of [dependentSource, dependent, manual]) {
       if (!('ok' in result.body) || !result.body.ok) throw new Error('expected an ok brief body')
     }
-    expect((manual.body as { risk: string }).risk).toBe('low')
-    expect((manual.body as { reviewable: boolean }).reviewable).toBe(false)
+    if (!('risk' in manual.body) || !('reviewable' in manual.body)) throw new Error('expected manual brief facts')
+    expect(manual.body.risk).toBe('low')
+    expect(manual.body.reviewable).toBe(false)
+  })
+
+  test('C002 carries the real C001 invalidation source after the third commit', () => {
+    const handle = baselineFixture()
+    const row = handle.db
+      .prepare(
+        `SELECT invalidated_at, invalidation_source FROM evidence
+         WHERE spec_path = 'specs/demo/spec.md' AND clause_id = 'C002'
+         ORDER BY id DESC LIMIT 1`
+      )
+      .get() as { invalidated_at: number | null; invalidation_source: string | null }
+    expect(row.invalidated_at).not.toBeNull()
+    expect(row.invalidation_source).toBe('specs/demo/spec.md#C001')
   })
 })
 
 describe('S4 acceptance fixture — unmapped hunk toggle stays clean-tree provable', () => {
-  test('mutating and restoring unmapped.txt round-trips worktreeDirty exactly', () => {
-    handle = setupFixture()
+  test('mutating and restoring the baseline unmapped file round-trips worktreeDirty exactly', () => {
+    const handle = baselineFixture()
     expect(worktreeDirty(handle.root)).toBe(false)
     mutateUnmappedFile(handle.root)
     expect(worktreeDirty(handle.root)).toBe(true)

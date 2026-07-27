@@ -11,7 +11,7 @@ import type {
   SpecImpactView,
   UiRenderConfig,
 } from './contracts.js'
-import { briefHref, esc, pageShell, riskBadge, statusChip } from './html.js'
+import { approvalSemantics, briefHref, esc, pageShell, riskBadge, statusChip } from './html.js'
 
 const clauseKey = (target: { specPath: string; clauseId: string }): string => `${target.specPath}#${target.clauseId}`
 
@@ -86,6 +86,54 @@ const dependentsHtml = (view: SpecImpactView): string =>
         })
         .join('')}</ul>`
 
+const neighborItem = (neighbor: SpecImpactView['refs'][number]): string => {
+  const state = neighbor.stale ? 'neighbor-stale' : 'neighbor-current'
+  const label = neighbor.stale ? 'stale' : neighbor.evidenceVerdict
+  return `<li data-state="${state}"><a href="${esc(
+    briefHref(neighbor.specPath, neighbor.clauseId)
+  )}">${esc(clauseKey(neighbor))}</a> ${esc(neighbor.title)} — ${esc(label)}</li>`
+}
+
+const neighborColumn = (slot: string, heading: string, items: string[], empty: string): string =>
+  `<div data-neighbor="${esc(slot)}"><h3>${esc(heading)}</h3>${
+    items.length === 0 ? `<p data-state="neighborhood-empty">${esc(empty)}</p>` : `<ul>${items.join('')}</ul>`
+  }</div>`
+
+const neighborhoodSection = (view: SpecImpactView): string => {
+  const defended = view.requirementBindings
+    .filter(
+      (binding): binding is Extract<RequirementBindingView, { state: 'resolved' }> =>
+        binding.state === 'resolved'
+    )
+    .map(
+      (binding) =>
+        `<li data-state="neighbor-req"><code>${esc(
+          `${binding.target.specPath}#${binding.target.reqId}`
+        )}</code> ${esc(binding.target.title)}</li>`
+    )
+  const self = `<div data-neighbor="self"><h3>本条</h3><p><code>${esc(
+    clauseKey(view.target)
+  )}</code> ${riskBadge(view.risk)}</p></div>`
+  return `<section data-section="neighborhood" aria-labelledby="neighborhood-title"><h2 id="neighborhood-title">One-hop neighbourhood / 一跳邻域</h2><div data-neighborhood>${neighborColumn(
+    'reqs',
+    '守护的意图 →',
+    defended,
+    '（无）'
+  )}${self}${neighborColumn(
+    'refs',
+    '→ 本条依赖',
+    view.refs.map(neighborItem),
+    '本条不依赖任何子句'
+  )}${neighborColumn(
+    'dependents',
+    '→ 直接依赖本条',
+    view.oneHopDependents.map(neighborItem),
+    '无直接依赖方'
+  )}</div><p><small>只显示一跳；完整传递闭包见下方 Stale Dependencies（${
+    view.dependents.length
+  } 条）。</small></p></section>`
+}
+
 /** Classifies one raw (unescaped) diff line by its leading ASCII marker
  * before it is escaped for display (§3.2 pt.5). */
 const classifyDiffLine = (line: string): 'diff-hunk' | 'diff-add' | 'diff-del' | null =>
@@ -141,24 +189,29 @@ const reviewSection = (input: BriefPageInput): string => {
   const fileList = input.facts.files.length > 0 ? input.facts.files.join('、') : '（该条款尚无映射代码）'
   return `<section aria-labelledby="review-title">
 <h3 id="review-title">高风险代码审查：${esc(input.facts.title)}</h3>
-<p>映射代码：<code>${esc(fileList)}</code>　下游依赖条款：${input.facts.dependents} 个。证据已通过、元审计已同意，只差人工看代码。判定绑定当前 HEAD。</p>
-<div>
-<label for="explain-auditor">审查客户端</label>
-<select id="explain-auditor"><option value="omp" selected>OMP</option><option value="claude">Claude Code</option><option value="codex">Codex</option><option value="traex">Traex</option></select>
-<label for="explain-model">模型</label>
-<input id="explain-model" value="deepseek/deepseek-v4-flash" />
-<button type="button" id="explain-btn">生成实例说明</button>
-<output id="explain-out" aria-live="polite"></output>
-</div>
+<p>映射代码：<code>${esc(fileList)}</code>　下游依赖条款：${input.facts.dependents} 个。证据已通过、元审计已同意，只差人工看代码。</p>
 <form id="review-form" data-key="${esc(input.key)}" data-brief="${esc(input.briefHash)}">
 <label for="review-note">批准/拒绝理由（批准必填）</label>
 <textarea id="review-note" name="note"></textarea>
+<p data-state="approval-semantics"><small>${esc(approvalSemantics(input.view.head))}</small></p>
 <button type="submit" data-v="approve">✓ 批准</button>
 <button type="submit" data-v="reject">✗ 拒绝</button>
 <output id="review-msg" aria-live="polite"></output>
 </form>
 </section>`
 }
+
+const explainSection = (input: BriefPageInput): string =>
+  `<section id="explain" aria-labelledby="explain-title" data-explain-key="${esc(input.key)}">
+<h2 id="explain-title">AI 解释</h2>
+<label for="explain-auditor">审查客户端</label>
+<select id="explain-auditor"><option value="omp" selected>OMP</option><option value="claude">Claude Code</option><option value="codex">Codex</option><option value="traex">Traex</option></select>
+<label for="explain-model">模型</label>
+<input id="explain-model" value="deepseek/deepseek-v4-flash">
+<button type="button" id="explain-btn">AI 解释这条</button>
+<output id="explain-out" aria-live="polite"></output>
+<p><small>只读：不写任何账本，说明不会进入注册表。</small></p>
+</section>`
 
 const briefNav = (view: SpecImpactView): string => {
   const previous = view.navigation.previous
@@ -190,12 +243,14 @@ ${oracleMeta(view)}
 <section id="spec-impact" aria-label="Spec impact">
 <p>${evidenceChip(view)}</p>
 ${resolvedRequirementBindingsHtml(view.requirementBindings)}
+${neighborhoodSection(view)}
 <section data-section="mappings" aria-labelledby="mappings-title"><h2 id="mappings-title">映射状态</h2><p>${mappedStatus(view)}</p></section>
 <section data-section="stale-dependencies" aria-labelledby="stale-dependencies-title"><h2 id="stale-dependencies-title">Stale Dependencies / 下游依赖</h2>${dependentsHtml(view)}<p>${view.impact.affectedTasks.length} 个关联任务</p></section>
 ${view.mappings.length > 0 ? '<h2>Code Blame Diff</h2>' : ''}
 ${view.mappings.map((mapping, index) => renderMappingDiff(mapping, index, view.risk, input.config)).join('')}
 </section>
 <details aria-labelledby="raw-brief-title"><summary id="raw-brief-title">原始裁决简报</summary><pre>${esc(input.text)}</pre></details>
+${explainSection(input)}
 ${input.reviewable ? reviewSection(input) : ''}
 </main>`
   return pageShell({
@@ -204,7 +259,7 @@ ${input.reviewable ? reviewSection(input) : ''}
     header,
     nav: briefNav(view),
     main,
-    ...(input.reviewable ? { script: `<script>${BRIEF_SCRIPT}</script>` } : {}),
+    script: `<script>${BRIEF_SCRIPT}</script>`,
   })
 }
 

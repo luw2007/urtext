@@ -146,12 +146,20 @@ describe('propagateStale', () => {
     expect(report.invalidatedEvidence).toBe(2)
 
     const rows = db
-      .prepare('SELECT spec_path, invalidated_at FROM evidence ORDER BY spec_path')
-      .all() as { spec_path: string; invalidated_at: number | null }[]
+      .prepare('SELECT spec_path, invalidated_at, invalidation_source FROM evidence ORDER BY spec_path')
+      .all() as { spec_path: string; invalidated_at: number | null; invalidation_source: string | null }[]
     expect(rows).toEqual([
-      { spec_path: 'specs/billing/spec.md', invalidated_at: null },
-      { spec_path: 'specs/checkout/spec.md', invalidated_at: 99 },
-      { spec_path: 'specs/coupon/spec.md', invalidated_at: 99 },
+      { spec_path: 'specs/billing/spec.md', invalidated_at: null, invalidation_source: null },
+      {
+        spec_path: 'specs/checkout/spec.md',
+        invalidated_at: 99,
+        invalidation_source: 'specs/billing/spec.md#C001',
+      },
+      {
+        spec_path: 'specs/coupon/spec.md',
+        invalidated_at: 99,
+        invalidation_source: 'specs/billing/spec.md#C001',
+      },
     ])
   })
 
@@ -183,6 +191,14 @@ describe('propagateStale', () => {
       { specPath: 'specs/coupon/spec.md', clauseId: 'C001' },
     ])
     expect(report.invalidatedEvidence).toBe(2)
+    expect(
+      db
+        .prepare('SELECT spec_path, invalidation_source FROM evidence WHERE invalidated_at = 99 ORDER BY spec_path')
+        .all()
+    ).toEqual([
+      { spec_path: 'specs/billing/spec.md', invalidation_source: 'specs/billing/spec.md#FR001' },
+      { spec_path: 'specs/coupon/spec.md', invalidation_source: 'specs/billing/spec.md#FR001' },
+    ])
   })
 
   test('removed FRs match old raw keys and invalidate bound evidence', () => {
@@ -203,15 +219,16 @@ describe('propagateStale', () => {
     expect(report.invalidatedEvidence).toBe(1)
   })
 
-  test('a simultaneous clause and bound-FR edit still self-stamps exactly once', () => {
+  test('a simultaneous clause and bound-FR edit attributes self to FR and downstream to clause', () => {
     index(
       'specs/x/spec.md',
-      '## FR001 intent\nv1\n## C001 lock <!-- oracle:manual req:FR001 -->\nclause v1'
+      '## FR001 intent\nv1\n## C001 lock <!-- oracle:manual req:FR001 -->\nclause v1\n## C002 dep <!-- oracle:manual refs:specs/x/spec.md#C001 req:FR001 -->'
     )
     insertEvidence('specs/x/spec.md', 'C001')
+    insertEvidence('specs/x/spec.md', 'C002')
     const changed = index(
       'specs/x/spec.md',
-      '## FR001 intent\nv2\n## C001 lock <!-- oracle:manual req:FR001 -->\nclause v2',
+      '## FR001 intent\nv2\n## C001 lock <!-- oracle:manual req:FR001 -->\nclause v2\n## C002 dep <!-- oracle:manual refs:specs/x/spec.md#C001 req:FR001 -->',
       2
     )
     expect(changed.kind).toBe('indexed')
@@ -222,8 +239,148 @@ describe('propagateStale', () => {
       99,
       changed.changedRequirements.map((reqId) => ({ specPath: 'specs/x/spec.md', reqId }))
     )
-    expect(report.staleClauses).toEqual([{ specPath: 'specs/x/spec.md', clauseId: 'C001' }])
-    expect(report.invalidatedEvidence).toBe(1)
+    expect(report.staleClauses).toEqual([
+      { specPath: 'specs/x/spec.md', clauseId: 'C001' },
+      { specPath: 'specs/x/spec.md', clauseId: 'C002' },
+    ])
+    expect(report.invalidatedEvidence).toBe(2)
+    expect(
+      db
+        .prepare('SELECT clause_id, invalidated_at, invalidation_source FROM evidence ORDER BY clause_id')
+        .all()
+    ).toEqual([
+      { clause_id: 'C001', invalidated_at: 99, invalidation_source: 'specs/x/spec.md#FR001' },
+      { clause_id: 'C002', invalidated_at: 99, invalidation_source: 'specs/x/spec.md#C001' },
+    ])
+  })
+
+  test('keeps the first labelled root at a C+FR collision and stamps both columns', () => {
+    index(
+      'specs/x/spec.md',
+      [
+        '## FR001 defended intent',
+        '## FR002 independent intent',
+        '## C001 earlier root <!-- oracle:manual req:FR002 -->',
+        '## C002 changed defender <!-- oracle:manual req:FR001 -->',
+        '## C003 collision descendant <!-- oracle:manual refs:specs/x/spec.md#C001,specs/x/spec.md#C002 req:FR002 -->',
+      ].join('\n')
+    )
+    insertEvidence('specs/x/spec.md', 'C002')
+    insertEvidence('specs/x/spec.md', 'C003')
+
+    const report = propagateStale(
+      db,
+      [
+        { specPath: 'specs/x/spec.md', clauseId: 'C001' },
+        { specPath: 'specs/x/spec.md', clauseId: 'C002' },
+      ],
+      99,
+      [{ specPath: 'specs/x/spec.md', reqId: 'FR001' }]
+    )
+
+    expect(report.staleClauses).toEqual([
+      { specPath: 'specs/x/spec.md', clauseId: 'C002' },
+      { specPath: 'specs/x/spec.md', clauseId: 'C003' },
+    ])
+    expect(report.invalidatedEvidence).toBe(2)
+    expect(
+      db
+        .prepare('SELECT clause_id, invalidated_at, invalidation_source FROM evidence ORDER BY clause_id')
+        .all()
+    ).toEqual([
+      { clause_id: 'C002', invalidated_at: 99, invalidation_source: 'specs/x/spec.md#FR001' },
+      { clause_id: 'C003', invalidated_at: 99, invalidation_source: 'specs/x/spec.md#C001' },
+    ])
+  })
+
+  test('uses incoming changed-clause order to break C+FR collision ties', () => {
+    index(
+      'specs/x/spec.md',
+      [
+        '## FR001 defended intent',
+        '## FR002 independent intent',
+        '## C001 later root <!-- oracle:manual req:FR002 -->',
+        '## C002 earlier changed defender <!-- oracle:manual req:FR001 -->',
+        '## C003 collision descendant <!-- oracle:manual refs:specs/x/spec.md#C001,specs/x/spec.md#C002 req:FR002 -->',
+      ].join('\n')
+    )
+    insertEvidence('specs/x/spec.md', 'C002')
+    insertEvidence('specs/x/spec.md', 'C003')
+
+    const report = propagateStale(
+      db,
+      [
+        { specPath: 'specs/x/spec.md', clauseId: 'C002' },
+        { specPath: 'specs/x/spec.md', clauseId: 'C001' },
+      ],
+      99,
+      [{ specPath: 'specs/x/spec.md', reqId: 'FR001' }]
+    )
+
+    expect(report.staleClauses).toEqual([
+      { specPath: 'specs/x/spec.md', clauseId: 'C002' },
+      { specPath: 'specs/x/spec.md', clauseId: 'C003' },
+    ])
+    expect(report.invalidatedEvidence).toBe(2)
+    expect(
+      db
+        .prepare('SELECT clause_id, invalidated_at, invalidation_source FROM evidence ORDER BY clause_id')
+        .all()
+    ).toEqual([
+      { clause_id: 'C002', invalidated_at: 99, invalidation_source: 'specs/x/spec.md#FR001' },
+      { clause_id: 'C003', invalidated_at: 99, invalidation_source: 'specs/x/spec.md#C002' },
+    ])
+  })
+
+  test('preserves the first two-column stamp when a later cause reaches the same evidence', () => {
+    index(
+      'specs/x/spec.md',
+      [
+        '## FR001 defended intent',
+        '## C001 defender <!-- oracle:manual req:FR001 -->',
+        '## C002 dependent <!-- oracle:manual refs:specs/x/spec.md#C001 req:FR001 -->',
+      ].join('\n')
+    )
+    insertEvidence('specs/x/spec.md', 'C002')
+
+    const first = propagateStale(db, [], 99, [{ specPath: 'specs/x/spec.md', reqId: 'FR001' }])
+    const second = propagateStale(db, [{ specPath: 'specs/x/spec.md', clauseId: 'C001' }], 100)
+
+    expect(first.staleClauses).toEqual([
+      { specPath: 'specs/x/spec.md', clauseId: 'C001' },
+      { specPath: 'specs/x/spec.md', clauseId: 'C002' },
+    ])
+    expect(first.invalidatedEvidence).toBe(1)
+    expect(second.staleClauses).toEqual([{ specPath: 'specs/x/spec.md', clauseId: 'C002' }])
+    expect(second.invalidatedEvidence).toBe(0)
+    expect(
+      db
+        .prepare('SELECT invalidated_at, invalidation_source FROM evidence WHERE clause_id = ?')
+        .get('C002')
+    ).toEqual({ invalidated_at: 99, invalidation_source: 'specs/x/spec.md#FR001' })
+  })
+
+  test('never backfills a legacy NULL source on already stale evidence', () => {
+    index(
+      'specs/x/spec.md',
+      [
+        '## FR001 defended intent',
+        '## C001 source <!-- oracle:manual req:FR001 -->',
+        '## C002 dependent <!-- oracle:manual refs:specs/x/spec.md#C001 req:FR001 -->',
+      ].join('\n')
+    )
+    insertEvidence('specs/x/spec.md', 'C002')
+    db.prepare('UPDATE evidence SET invalidated_at = ? WHERE clause_id = ?').run(7, 'C002')
+
+    const report = propagateStale(db, [{ specPath: 'specs/x/spec.md', clauseId: 'C001' }], 99)
+
+    expect(report.staleClauses).toEqual([{ specPath: 'specs/x/spec.md', clauseId: 'C002' }])
+    expect(report.invalidatedEvidence).toBe(0)
+    expect(
+      db
+        .prepare('SELECT invalidated_at, invalidation_source FROM evidence WHERE clause_id = ?')
+        .get('C002')
+    ).toEqual({ invalidated_at: 7, invalidation_source: null })
   })
 
   test('no changed clauses is a no-op', () => {

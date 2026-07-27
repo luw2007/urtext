@@ -30,25 +30,36 @@ if (form) {
   })
 }
 const explainBtn = document.getElementById('explain-btn')
-if (explainBtn && form) {
+const explainHost = document.querySelector('[data-explain-key]')
+if (explainBtn instanceof HTMLButtonElement && explainHost instanceof HTMLElement) {
   const explainAuditor = document.getElementById('explain-auditor')
   const explainModel = document.getElementById('explain-model')
   const explainOut = document.getElementById('explain-out')
   const defaultModel = { omp: 'deepseek/deepseek-v4-flash', claude: 'sonnet', codex: 'gpt-5.6-terra', traex: 'kimi-k2.6' }
-  explainAuditor.addEventListener('change', () => { explainModel.value = defaultModel[explainAuditor.value] })
+  explainAuditor?.addEventListener('change', () => {
+    if (explainAuditor instanceof HTMLSelectElement && explainModel instanceof HTMLInputElement) {
+      explainModel.value = defaultModel[explainAuditor.value] || ''
+    }
+  })
   explainBtn.addEventListener('click', async () => {
+    if (!(explainAuditor instanceof HTMLSelectElement) || !(explainModel instanceof HTMLInputElement) || !(explainOut instanceof HTMLOutputElement)) return
+    const key = explainHost.dataset.explainKey
+    if (key === undefined || key === '') return
     explainBtn.disabled = true
-    explainOut.textContent = '正在让 AI 基于本条款生成实例，可能需要一会儿…'
+    explainOut.textContent = '正在生成基于当前事实投影的说明…'
     try {
       const r = await fetch('/api/explain', {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-csrf': csrf },
-        body: JSON.stringify({ key: form.dataset.key, auditor: explainAuditor.value, model: explainModel.value }),
+        body: JSON.stringify({ key, auditor: explainAuditor.value, ...(explainModel.value ? { model: explainModel.value } : {}) }),
       })
       const j = await r.json()
       explainOut.textContent = j.error ? j.error : j.text
-    } catch { explainOut.textContent = '生成失败，请重试或换一个客户端。' }
-    explainBtn.disabled = false
+    } catch {
+      explainOut.textContent = '生成失败，请重试或换一个客户端。'
+    } finally {
+      explainBtn.disabled = false
+    }
   })
 }
 `

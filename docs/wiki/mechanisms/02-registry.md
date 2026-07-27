@@ -52,14 +52,15 @@ whole-workspace pass sees the break. That check therefore belongs to `check`
 time, and an `unknown_ref` does not silently corrupt A's own revision state — it
 is reported as a validation failure across the workspace.
 
-## Evidence is append-only, invalidation is a flag
+## Evidence is append-only, invalidation is one logical stamp
 
 The registry's one concession to mutability is narrow and principled. When an
 upstream clause's `text_hash` changes, the existing evidence of every clause in
-its reverse-dependency closure is stamped with `invalidated_at` — the single
-mutable column in the evidence table. Evidence is **never deleted**; it is marked
-void and retained for audit. Nothing in Urtext ever erases the record of what was
-once checked and how.
+its reverse-dependency closure is stamped in one UPDATE with `invalidated_at`
+and `invalidation_source`. Those two columns are one logical invalidation stamp:
+when and which changed key voided the evidence. Historical rows retain a NULL
+source rather than receiving a fabricated backfill. Evidence is **never deleted**;
+it is marked void and retained for audit.
 
 With the chain in place, running the oracles and recording their verdicts is the
 job of [the verifier](03-verifier.md).
