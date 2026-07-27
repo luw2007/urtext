@@ -274,6 +274,7 @@ const fakeClient = (responses: Record<string, unknown>): CdpClient => ({
     if (!(method in responses)) throw new Error(`unexpected CDP call ${method}`)
     return responses[method]
   }),
+  on: vi.fn(),
   close: vi.fn(),
 })
 
@@ -399,6 +400,7 @@ describe('captureFocusOrder', () => {
         if (method === 'Runtime.evaluate') return { result: { value: activeIds[call++] } }
         throw new Error(`unexpected ${method}`)
       }),
+      on: vi.fn(),
       close: vi.fn(),
     }
     const order = await captureFocusOrder(client, 2)
@@ -414,6 +416,7 @@ describe('captureFocusOrder', () => {
         if (method === 'Runtime.evaluate') return { result: { value: activeIds[call++] } }
         throw new Error(`unexpected ${method}`)
       }),
+      on: vi.fn(),
       close: vi.fn(),
     }
     await expect(captureFocusOrder(wrappedClient, 8)).resolves.toEqual(['skip-link', 'a[1]'])
@@ -426,6 +429,7 @@ describe('captureFocusOrder', () => {
         if (method === 'Runtime.evaluate') return { result: { value: repeatedIds[call++] } }
         throw new Error(`unexpected ${method}`)
       }),
+      on: vi.fn(),
       close: vi.fn(),
     }
     await expect(captureFocusOrder(repeatedClient, 8)).resolves.toEqual(['skip-link', 'a[1]', 'a[1]'])
@@ -493,6 +497,7 @@ describe('runCheckAtViewport / buildAssertions / computeExitCode — full wiring
         }
         throw new Error(`unexpected CDP call ${method}`)
       }),
+      on: vi.fn(),
       close: vi.fn(),
     }
   }
@@ -906,6 +911,7 @@ describe('verifyButtonDisablesDuringSubmit', () => {
         }
         throw new Error(`unexpected ${method}`)
       }),
+      on: vi.fn(),
       close: vi.fn(),
     }
   }
@@ -941,6 +947,7 @@ describe('verifyButtonDisablesDuringSubmit', () => {
         if (method === 'DOM.querySelector') return { nodeId: 0 }
         throw new Error(`unexpected ${method}`)
       }),
+      on: vi.fn(),
       close: vi.fn(),
     }
     await expect(verifyButtonDisablesDuringSubmit(client, '#missing')).rejects.toThrow(/selector not found in DOM/)

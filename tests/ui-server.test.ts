@@ -303,7 +303,7 @@ describe('§9.2 all-route Host enforcement', () => {
       const response = await rawFetch(`http://127.0.0.1:${port}${route.path}`, {
         method: route.method,
         headers: { host: 'evil.example', 'content-type': 'application/json' },
-        body: route.method === 'POST' ? '{}' : undefined,
+        ...(route.method === 'POST' ? { body: '{}' } : {}),
       })
       expect(response.status).toBe(403)
       await expect(response.json()).resolves.toEqual({ error: 'forbidden host' })

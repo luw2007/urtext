@@ -6,11 +6,12 @@
  * loopback listener with a locally injected, non-network agent-stub transport.
  */
 import { spawn, spawnSync } from 'node:child_process'
-import type { ChildProcessWithoutNullStreams } from 'node:child_process'
+import type { ChildProcessByStdio } from 'node:child_process'
 import { connect } from 'node:net'
 import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import type { Readable } from 'node:stream'
 
 import DatabaseConstructor from 'better-sqlite3'
 import { afterEach, describe, expect, test } from 'vitest'
@@ -25,7 +26,9 @@ const scratch = (prefix: string): string => {
   return dir
 }
 
-const spawnedChildren: ChildProcessWithoutNullStreams[] = []
+type ServerChild = ChildProcessByStdio<null, Readable, Readable>
+
+const spawnedChildren: ServerChild[] = []
 
 afterEach(() => {
   for (const child of spawnedChildren.splice(0)) {
@@ -58,7 +61,7 @@ const buildCompiledFixture = (paths: AccBuildPaths): string => {
 }
 
 interface RunningServer {
-  child: ChildProcessWithoutNullStreams
+  child: ServerChild
   url: string
   port: number
   stdout: () => string
@@ -70,11 +73,11 @@ interface RunningServer {
  * that reads accumulated stdout and can SIGINT-shut it down for the single
  * final sanitized-result JSON line. */
 const startCompiledServer = (paths: AccBuildPaths, root: string): Promise<RunningServer> => {
-  const child = spawn(process.execPath, [paths.serverEntry, '--root', root], {
+  const child: ServerChild = spawn(process.execPath, [paths.serverEntry, '--root', root], {
     cwd: tmpdir(),
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: true,
-  }) as ChildProcessWithoutNullStreams
+  })
   spawnedChildren.push(child)
 
   let buffer = ''
@@ -122,7 +125,7 @@ const startCompiledServer = (paths: AccBuildPaths, root: string): Promise<Runnin
 
 /** Send SIGINT to the helper's own process group, wait for exit, and parse the
  * single final sanitized-result JSON line it printed before exiting. */
-const stopAndCollectResult = (child: ChildProcessWithoutNullStreams, stdout: () => string): Promise<unknown> => {
+const stopAndCollectResult = (child: ServerChild, stdout: () => string): Promise<unknown> => {
   const { promise, resolve, reject } = Promise.withResolvers<unknown>()
   const deadline = setTimeout(() => reject(new Error('compiled server did not exit within 5s of SIGINT')), 5000)
   child.once('exit', () => {

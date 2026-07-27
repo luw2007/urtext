@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -9,6 +9,7 @@ import { runOracle } from '../src/oracle-runner.js'
 import { openRegistry } from '../src/registry.js'
 import { scanWorkspace } from '../src/scanner.js'
 import { ensureEvidenceLedger, verifyWorkspace } from '../src/verifier.js'
+import { run } from '../src/cli.js'
 import type { ParsedClause } from '../src/clause-parser.js'
 
 let db: Database
@@ -161,5 +162,41 @@ describe('verifyWorkspace', () => {
     verifyWorkspace(db, root)
     const count = db.prepare('SELECT COUNT(*) AS n FROM evidence').get() as { n: number }
     expect(count.n).toBe(2)
+  })
+  test('importable CLI returns 1 when a ready test oracle fails and appends evidence', () => {
+    const root = mkdtempSync(join(tmpdir(), 'urtext-cli-verify-'))
+    tempDirs.push(root)
+    const sourceNodeModules = join(process.cwd(), 'node_modules')
+    mkdirSync(join(root, 'specs/x'), { recursive: true })
+    mkdirSync(join(root, 'tests'), { recursive: true })
+    symlinkSync(sourceNodeModules, join(root, 'node_modules'), 'dir')
+    writeFileSync(
+      join(root, 'specs/x/spec.md'),
+      '## FR001 test intent\n## C001 failing test <!-- oracle:test:tests/failing.test.ts req:FR001 -->'
+    )
+    writeFileSync(
+      join(root, 'tests/failing.test.ts'),
+      "import { expect, test } from 'vitest'\n\ntest('ready test oracle fails', () => {\n  expect(true).toBe(false)\n})\n"
+    )
+
+    const previous = process.cwd()
+    try {
+      process.chdir(root)
+      expect(run(['verify'])).toBe(1)
+    } finally {
+      process.chdir(previous)
+    }
+
+    const workspaceDb = new DatabaseConstructor(join(root, '.urtext/registry.sqlite'))
+    try {
+      const evidence = workspaceDb
+        .prepare('SELECT clause_id, verdict, exit_code, output FROM evidence ORDER BY id')
+        .all() as { clause_id: string; verdict: string; exit_code: number; output: string }[]
+      expect(evidence).toHaveLength(1)
+      expect(evidence[0]).toMatchObject({ clause_id: 'C001', verdict: 'fail', exit_code: 1 })
+      expect(evidence[0]?.output).toContain('ready test oracle fails')
+    } finally {
+      workspaceDb.close()
+    }
   })
 })

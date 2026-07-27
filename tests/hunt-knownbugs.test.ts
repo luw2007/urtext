@@ -7,7 +7,24 @@ import { run } from '../.claude/workflows/lib/hunt-core.mjs'
 
 const LEDGER_PATH = '.claude/workflows/hunt-ledger.json'
 
-const makeRuntime = (overrides: Record<string, unknown> = {}) => {
+type HuntIssue = { number: number; title: string; labels: { name: string }[] }
+type HuntFinding = {
+  id: string
+  area: string
+  category: string
+  title: string
+  repro_path: string
+  repro_command: string
+  expected: string
+  observed: string
+  confidence: string
+}
+type HuntAgentResult = { findings: HuntFinding[] } | { verdict: string; observed: string }
+type HuntAgent = (prompt: string, opts: { model?: string; [key: string]: unknown }) => Promise<HuntAgentResult>
+type GitHubList = (args: string[]) => Promise<HuntIssue[]>
+type GitHubCreate = (args: string[]) => Promise<void>
+
+const makeRuntime = () => {
   const writes: Array<[string, string]> = []
   const runtime = {
     read: vi.fn(() => '{"swept":{}}'),
@@ -18,13 +35,12 @@ const makeRuntime = (overrides: Record<string, unknown> = {}) => {
     parallel: (tasks: Array<() => Promise<unknown>>) => Promise.all(tasks.map((task) => task())),
     env: {},
     adapters: {
-      agent: vi.fn(async () => ({ findings: [] })),
+      agent: vi.fn<HuntAgent>(async () => ({ findings: [] })),
       gh: {
-        list: vi.fn(async () => []),
-        create: vi.fn(async () => undefined),
+        list: vi.fn<GitHubList>(async () => []),
+        create: vi.fn<GitHubCreate>(async () => undefined),
       },
     },
-    ...overrides,
   }
   return { runtime, writes }
 }
@@ -97,7 +113,8 @@ describe('hunt known-bug GitHub round-trip', () => {
     await run(runtime)
 
     expect(runtime.adapters.gh.create).toHaveBeenCalledOnce()
-    const args = runtime.adapters.gh.create.mock.calls[0][0]
+    const args = runtime.adapters.gh.create.mock.calls[0]?.[0]
+    if (args === undefined) throw new Error('expected GitHub issue create arguments')
     expect(args).toContain('--label')
     expect(args).toContain('hunt,false-verdict')
     expect(args).toContain('area:clause-parser')

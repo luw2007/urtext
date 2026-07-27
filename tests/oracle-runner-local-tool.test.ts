@@ -14,12 +14,18 @@ import { runOracle } from '../src/oracle-runner.js'
  * network-resolving `npx`) when that binary is absent.
  */
 
-const testClause = (ref: string): ParsedClause =>
-  ({
-    id: 'C001',
-    title: 'x',
-    oracle: { kind: 'test', ref },
-  }) as ParsedClause
+const testClause = (ref: string): ParsedClause => ({
+  clauseId: 'C001',
+  seq: 1,
+  title: 'x',
+  level: 2,
+  oracle: { kind: 'test', ref },
+  risk: 'low',
+  refs: [],
+  reqs: [],
+  body: null,
+  line: 0,
+})
 
 let workspace: string
 

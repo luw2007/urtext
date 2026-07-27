@@ -10,19 +10,43 @@ FIX_CORE=.claude/workflows/lib/fix-core.mjs
 AUDIT_CORE=.claude/workflows/lib/audit-core.mjs
 SKILL=.claude/skills/integrate-worker/SKILL.md
 
+# Print each verified assertion: evidence must carry what was checked, not a
+# silent exit code — meta-audit reads the output, not this script.
+check() {
+  pattern=$1
+  file=$2
+  grep -q "$pattern" "$file"
+  echo "verified: '$pattern' present in $file"
+}
+
 case "${1:?usage: oracle-loops.sh <check-name>}" in
   trust-boundary)
     grep -q 'NEVER merge here' "$FIX_CORE" && grep -q '视为未验证' "$SKILL" ;;
   single-source)
     grep -q 'docs/VISION.md' "$HUNT_CORE" && grep -q 'docs/VISION.md' "$FIX_CORE" && grep -q 'docs/VISION.md' "$AUDIT_CORE" ;;
   shell-safety)
-    grep -q 'SHELL SAFETY' "$HUNT_CORE" && grep -q 'SHELL SAFETY' "$FIX_CORE" ;;
+    check 'never compose rm/mv/redirect targets from shell variables' "$HUNT_CORE"
+    check 'literal /tmp paths' "$HUNT_CORE"
+    check 'null-guards' "$HUNT_CORE"
+    check 'prefer leaving temp files over deleting them' "$HUNT_CORE"
+    check 'never rm' "$HUNT_CORE"
+    check 'inside the repo checkout' "$HUNT_CORE"
+    check 'compose rm/mv/redirect targets from shell variables' "$FIX_CORE"
+    check 'literal /tmp paths' "$FIX_CORE"
+    check 'null-guard with' "$FIX_CORE"
+    check "don't delete temp files at all" "$FIX_CORE"
+    check 'NEVER rm inside the repo checkout' "$FIX_CORE" ;;
   no-repro-no-report)
     grep -q 'NO REPRO, NO REPORT' "$HUNT_CORE" ;;
   rotation)
     grep -q 'ledger.swept' "$HUNT_CORE" && test -f .claude/workflows/hunt-ledger.json ;;
   model-split)
-    grep -q 'model: "smol"' "$HUNT_CORE" ;;
+    check 'model: "smol"' "$HUNT_CORE"
+    check 'boundary inputs: empty, huge, unicode, malformed, truncated mid-token' "$HUNT_CORE"
+    check 'adversarial construction: inputs designed to make the referee lie' "$HUNT_CORE"
+    check 'state & ordering: crash mid-write, re-run idempotency, stale caches, concurrent invocations' "$HUNT_CORE"
+    check 'integration seams: git interop, filesystem edge cases, CLI flag combinations' "$HUNT_CORE"
+    check 'Independently verify this Urtext bug finding on the CURRENT trunk' "$HUNT_CORE" ;;
   categories)
     grep -q 'false-verdict' "$HUNT_CORE" && grep -q 'style, performance, diagnostic wording' "$HUNT_CORE" ;;
   timeout)
@@ -32,7 +56,8 @@ case "${1:?usage: oracle-loops.sh <check-name>}" in
   reproduce-first)
     grep -q 'REPRODUCE FIRST' "$FIX_CORE" && grep -q 'refutations are as valuable as fixes' "$FIX_CORE" ;;
   coverage-follows-capability)
-    grep -q 'COVERAGE FOLLOWS CAPABILITY' "$FIX_CORE" ;;
+    check 'COVERAGE FOLLOWS CAPABILITY' "$FIX_CORE"
+    check 'MUST gain tests in the same change' "$FIX_CORE" ;;
   isolation)
     grep -q 'git worktree add' "$ADAPTERS" && grep -q 'MAX_WORKERS = 4' "$FIX_CORE" ;;
   no-scope-creep)
@@ -53,7 +78,8 @@ case "${1:?usage: oracle-loops.sh <check-name>}" in
   lane-discipline)
     grep -q '车道纪律' "$SKILL" && grep -q '热点' "$SKILL" ;;
   unmapped-gate)
-    grep -q 'manual-ack' "$SKILL" ;;
+    check '逐条裁决：回写 spec 或显式 manual-ack' "$SKILL"
+    check 'unmapped 非空且未裁决的 diff 不得合入' "$SKILL" ;;
   referee-run)
     grep -q "Never confirm something you couldn't run" "$HUNT_CORE" \
       && grep -q 'FULL VERIFICATION GATE' "$FIX_CORE" \
