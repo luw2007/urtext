@@ -7,6 +7,7 @@ import DatabaseConstructor, { type Database } from 'better-sqlite3'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 
 import { blame, detectUnmapped, diffHunks, recordAck, recordMapping } from '../src/dwarf.js'
+import { run } from '../src/cli.js'
 import { openRegistry } from '../src/registry.js'
 import { scanWorkspace } from '../src/scanner.js'
 
@@ -115,6 +116,20 @@ describe('detectUnmapped', () => {
     expect('unmapped' in result && result.unmapped).toEqual([
       { filePath: 'src/impl.ts', lineStart: 2, lineEnd: 2 },
     ])
+  })
+
+  test('CLI check --diff exits 1 for a dirty tracked unmapped change in text and JSON modes', () => {
+    const root = setupRepo()
+    writeFileSync(join(root, 'src/impl.ts'), ['const a = 1', 'const b = 20', 'const c = 3', ''].join('\n'))
+
+    const previous = process.cwd()
+    try {
+      process.chdir(root)
+      expect(run(['check', '--diff'])).toBe(1)
+      expect(run(['check', '--diff', '--json'])).toBe(1)
+    } finally {
+      process.chdir(previous)
+    }
   })
 
   test('a mapped change is attributed and no longer unmapped', () => {

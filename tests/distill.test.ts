@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
 
 import { parseClauseFile } from '../src/clause-parser.js'
+import { run } from '../src/cli.js'
 import { baseline, baselineValidation, cluster, coverage, discover, distillUsage, l2IntentReview, l2IntentReviewValidation, promote, validate } from '../src/distill.js'
 
 const tempDirs: string[] = []
@@ -160,6 +161,30 @@ describe('codebase fact distillation', () => {
         path: 'tests/missing.test.ts',
       },
     ])
+  })
+
+  test('CLI distill validate exits 1 for an invalid declaration', () => {
+    const root = makeWorkspace()
+    writeFileSync(
+      join(root, 'specs/payments/spec.md'),
+      [
+        '# Payments',
+        '',
+        '## C001 Charges succeed <!-- oracle:test:tests/missing.test.ts req:FR001 -->',
+        '',
+        '## Implementation Evidence',
+        '',
+        '- `src/missing.ts`',
+      ].join('\n')
+    )
+
+    const previous = process.cwd()
+    try {
+      process.chdir(root)
+      expect(run(['distill', 'validate'])).toBe(1)
+    } finally {
+      process.chdir(previous)
+    }
   })
 
   test('validates test oracle targets even without implementation evidence', () => {
