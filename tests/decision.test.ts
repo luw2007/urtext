@@ -30,7 +30,7 @@ const setupRepo = (): string => {
   mkdirSync(join(root, 'specs/x'), { recursive: true })
   writeFileSync(
     join(root, 'specs/x/spec.md'),
-    ['## C001 design intent <!-- oracle:manual -->', '## C002 label <!-- oracle:cmd:true -->'].join('\n')
+    ['## FR001 test intent', '## C001 design intent <!-- oracle:manual req:FR001 -->', '## C002 label <!-- oracle:cmd:true req:FR001 -->'].join('\n')
   )
   git(root, 'add', '-A')
   git(root, 'commit', '-q', '-m', 'baseline')

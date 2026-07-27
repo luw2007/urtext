@@ -33,6 +33,19 @@ That is the impact of touching C004 (the oracle runner clause): five downstream
 clauses depend on it, transitively, and each carries the tasks that cite them.
 No one read anything. The graph knew.
 
+## Requirement-direction impact
+
+Requirements add a second, complementary direction. `urtext impact
+<spec-path>#FR<n>` first selects clauses whose live `req:` binding uniquely
+resolves to that FR. Those clauses are the sorted direct seeds; the linker then
+walks the same reverse `refs` closure and projects checklist tasks. The CLI uses
+one list with `[direct]` and `[transitive]` markers, so direct defenders remain
+inside the affected closure while their role stays explicit. Ambiguous or
+dangling bindings never count as defenders—the same truth used by the status
+report's uncovered-requirement calculation. Missing or tombstoned FR targets
+fail with exit 1; a declared FR with no defenders is observable but not an
+error.
+
 ## Stale propagation invalidates evidence
 
 The graph is not just for queries — it drives invalidation. When a clause's

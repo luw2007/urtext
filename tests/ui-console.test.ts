@@ -31,7 +31,7 @@ const setupRepo = (extraClauseLine?: string): string => {
   git(root, 'config', 'user.email', 'test@urtext.dev')
   git(root, 'config', 'user.name', 'test')
   mkdirSync(join(root, 'specs/x'), { recursive: true })
-  const lines = ['## C001 design intent <!-- oracle:manual -->', '## C002 label <!-- oracle:cmd:true -->']
+  const lines = ['## FR001 test intent', '## C001 design intent <!-- oracle:manual req:FR001 -->', '## C002 label <!-- oracle:cmd:true req:FR001 -->']
   if (extraClauseLine) lines.push(extraClauseLine)
   writeFileSync(join(root, 'specs/x/spec.md'), lines.join('\n'))
   git(root, 'add', '-A')
@@ -88,7 +88,7 @@ describe('console-family shell and route ownership', () => {
     expect(clean).not.toContain('worktree dirty')
     const header = clean.slice(clean.indexOf('<header>'), clean.indexOf('</header>'))
     expect(header).not.toContain('<a href')
-    writeFileSync(join(root, 'specs/x/spec.md'), '## C001 design intent <!-- oracle:manual -->\nchanged\n')
+    writeFileSync(join(root, 'specs/x/spec.md'), '## FR001 test intent\n## C001 design intent <!-- oracle:manual req:FR001 -->\nchanged\n')
     const dirty = render('queue', buildUiSnapshot(db, root))
     expect(dirty).toContain('⚠ worktree dirty')
     expect(dirty).toContain('data-tone="warn"')
@@ -140,6 +140,7 @@ describe('console-family shell and route ownership', () => {
     expect(pages.queue).not.toContain('id="all-specs"')
     expect(pages.queue).not.toContain('id="decided-title"')
     expect(pages.queue).not.toContain('id="audit-runner"')
+    expect(pages.queue).toContain('id="uncovered-intent"')
     expect(pages.queue).toContain(
       `${snapshot.status.counts.human} for you, ${snapshot.status.counts.agent} for the agent, ${snapshot.status.counts.autoPass} auto-pass · ${snapshot.decided}/${snapshot.totalManual} manual decided`
     )
@@ -152,6 +153,7 @@ describe('console-family shell and route ownership', () => {
     expect(pages.agent).not.toContain(`${snapshot.status.counts.human} for you`)
     expect(pages.agent).not.toContain('data-banner="wip"')
     expect(pages.agent).not.toContain('urtext map &lt;spec&gt;')
+    expect(pages.agent).not.toContain('id="uncovered-intent"')
 
     expect(pages.specs).toContain('id="all-specs"')
     expect(pages.specs).not.toContain('id="your-queue-title"')
@@ -160,6 +162,7 @@ describe('console-family shell and route ownership', () => {
     expect(pages.specs).not.toContain('id="audit-runner"')
     expect(pages.specs).not.toContain('data-banner="wip"')
     expect(pages.specs).not.toContain('urtext map &lt;spec&gt;')
+    expect(pages.specs).not.toContain('id="uncovered-intent"')
 
     expect(pages.decisions).toContain('id="decided-title"')
     expect(pages.decisions).not.toContain('id="your-queue-title"')
@@ -168,6 +171,7 @@ describe('console-family shell and route ownership', () => {
     expect(pages.decisions).not.toContain('id="audit-runner"')
     expect(pages.decisions).not.toContain('data-banner="wip"')
     expect(pages.decisions).not.toContain('urtext map &lt;spec&gt;')
+    expect(pages.decisions).not.toContain('id="uncovered-intent"')
   })
 
   test('only interactive routes carry CSRF and the console script', () => {
@@ -211,7 +215,7 @@ describe('console-family shell and route ownership', () => {
 
 describe('queue projection and unmapped remediation', () => {
   test('queue rows paginate without reordering and include stable data-row keys', () => {
-    const snapshot = buildUiSnapshot(db, setupRepo('## C003 another manual <!-- oracle:manual -->'))
+    const snapshot = buildUiSnapshot(db, setupRepo('## C003 another manual <!-- oracle:manual req:FR001 -->'))
     const human = snapshot.status.items.filter((item) => item.lane === 'human')
     expect(human.length).toBeGreaterThanOrEqual(2)
     const first = render('queue', snapshot, 1, 1)
@@ -224,7 +228,7 @@ describe('queue projection and unmapped remediation', () => {
   })
 
   test('decision form ids are page-local and labels stay paired with textareas', () => {
-    const snapshot = buildUiSnapshot(db, setupRepo('## C003 another manual <!-- oracle:manual -->'))
+    const snapshot = buildUiSnapshot(db, setupRepo('## C003 another manual <!-- oracle:manual req:FR001 -->'))
     for (const page of [render('queue', snapshot, 1, 1), render('queue', snapshot, 2, 1)]) {
       expect((page.match(/id="decision-form-0"/g) ?? [])).toHaveLength(1)
       expect(page).toContain('<label for="decision-note-0">Reason</label>')
@@ -237,7 +241,7 @@ describe('queue projection and unmapped remediation', () => {
   })
 
   test('queue preserves inline decide behavior, empty text, WIP copy, and escaping', () => {
-    const root = setupRepo(`## C003 <script>'"&x <!-- oracle:manual -->`)
+    const root = setupRepo(`## C003 <script>'"&x <!-- oracle:manual req:FR001 -->`)
     const snapshot = buildUiSnapshot(db, root)
     const html = render('queue', snapshot)
     expect(html).toContain('data-key="specs/x/spec.md#C001"')
@@ -357,7 +361,7 @@ describe('agent projection and audit controls', () => {
 
 describe('spec and decision projections', () => {
   test('All Specs uses one table with adjacent spec rowgroups and per-page counts', () => {
-    const snapshot = buildUiSnapshot(db, setupRepo('## C003 third <!-- oracle:manual -->'))
+    const snapshot = buildUiSnapshot(db, setupRepo('## C003 third <!-- oracle:manual req:FR001 -->'))
     const clauses = [snapshot.clauses[0]!, { ...snapshot.clauses[1]!, specPath: 'specs/y/spec.md' }, { ...snapshot.clauses[2]!, specPath: 'specs/y/spec.md' }]
     const html = render('specs', { ...snapshot, clauses }, 1, 20)
     expect(mainListTableCount(html)).toBe(1)
@@ -371,7 +375,7 @@ describe('spec and decision projections', () => {
   })
 
   test('All Specs pagination preserves data-clause order and page-local group counts', () => {
-    const snapshot = buildUiSnapshot(db, setupRepo('## C003 third <!-- oracle:manual -->'))
+    const snapshot = buildUiSnapshot(db, setupRepo('## C003 third <!-- oracle:manual req:FR001 -->'))
     const html = render('specs', snapshot, 2, 1)
     expect(html).toContain(`data-clause="${snapshot.clauses[1]!.specPath}#${snapshot.clauses[1]!.clauseId}"`)
     expect(html).not.toContain(`data-clause="${snapshot.clauses[0]!.specPath}#${snapshot.clauses[0]!.clauseId}"`)
@@ -389,7 +393,7 @@ describe('spec and decision projections', () => {
   })
 
   test('decisions route filters and paginates decided clauses in snapshot order', () => {
-    const root = setupRepo('## C003 another manual <!-- oracle:manual -->')
+    const root = setupRepo('## C003 another manual <!-- oracle:manual req:FR001 -->')
     const empty = render('decisions', buildUiSnapshot(db, root))
     expect(empty).toContain('none yet')
     recordDecision(db, { specPath: 'specs/x/spec.md', clauseId: 'C001', verdict: 'pass', decider: 'alice' }, root, 1)

@@ -57,6 +57,25 @@ const summary = (snapshot: UiSnapshot): string => {
   return `<p>${snapshot.status.counts.human} for you, ${snapshot.status.counts.agent} for the agent, ${snapshot.status.counts.autoPass} auto-pass · ${snapshot.decided}/${snapshot.totalManual} manual decided</p>${wip}`
 }
 
+const uncoveredIntentSection = (snapshot: UiSnapshot): string => {
+  const requirements = snapshot.status.uncoveredRequirements
+  const content =
+    requirements.length === 0
+      ? `<p>${statusChip('muted', '○', '无未覆盖意图', 'uncovered-none')} — every live requirement has a unique clause binding</p>`
+      : `<ul>${requirements
+          .map((requirement) => {
+            const key = `${requirement.specPath}#${requirement.reqId}`
+            return `<li data-uncovered="${esc(key)}">${statusChip(
+              'warn',
+              '⚠',
+              '未覆盖',
+              'uncovered'
+            )} <code>${esc(key)}</code> ${esc(requirement.title)}</li>`
+          })
+          .join('')}</ul>`
+  return `<section id="uncovered-intent" aria-labelledby="uncovered-intent-title"><h2 id="uncovered-intent-title">Uncovered intent (${requirements.length})</h2>${content}<p><small>意图缺锁不是阻断项：不进队列、不计入 wip、不改变退出码。</small></p></section>`
+}
+
 const workspaceAlert = (snapshot: UiSnapshot, route: ConsoleRoute): string => {
   if (snapshot.unmappedError !== null) {
     const action = route === 'queue' ? '' : ' — <a href="/">在 Your queue 查看</a>'
@@ -221,7 +240,9 @@ export const renderConsoleFamilyPage = (input: ConsolePageInput): string => {
   const main = `<main id="main">${route === 'queue' ? summary(snapshot) : ''}${workspaceAlert(
     snapshot,
     route
-  )}${notice}${body}${paginationNav(ROUTE_PATH[route], w)}</main>`
+  )}${notice}${body}${paginationNav(ROUTE_PATH[route], w)}${
+    route === 'queue' ? uncoveredIntentSection(snapshot) : ''
+  }</main>`
   return pageShell({
     title: 'urtext console',
     ...(interactive ? { csrfToken: input.csrfToken } : {}),

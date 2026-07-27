@@ -23,6 +23,7 @@ import type { Database } from 'better-sqlite3'
 
 import type { DiffHunk } from './dwarf.js'
 import { adjudicate, type ClauseDecision } from './gate.js'
+import { uncoveredRequirements, type RequirementCoverage } from './linker.js'
 
 export type StatusLane = 'agent' | 'human'
 
@@ -72,8 +73,10 @@ export interface StatusReport {
   schema: 'urtext.status/1'
   head: string | null
   items: StatusItem[]
-  counts: { agent: number; human: number; autoPass: number }
+  counts: { agent: number; human: number; uncovered: number; autoPass: number }
   wip: { limit: number; exceeded: boolean }
+  /** Live requirements with zero uniquely resolved live clause bindings. */
+  uncoveredRequirements: RequirementCoverage[]
 }
 
 /** Provisional default — recalibrate from real queue data (plan v2 R5). */
@@ -180,6 +183,7 @@ export const buildStatus = (db: Database, input: StatusInput): StatusReport => {
   const agent = clauseItems.filter((item) => item.lane === 'agent').sort(byRiskThenKey)
 
   const limit = input.wipLimit ?? DEFAULT_WIP_LIMIT
+  const uncovered = uncoveredRequirements(db)
   return {
     schema: 'urtext.status/1',
     head: input.head,
@@ -187,8 +191,10 @@ export const buildStatus = (db: Database, input: StatusInput): StatusReport => {
     counts: {
       agent: agent.length,
       human: human.length,
+      uncovered: uncovered.length,
       autoPass: report.decisions.length - clauseItems.length,
     },
     wip: { limit, exceeded: human.length > limit },
+    uncoveredRequirements: uncovered,
   }
 }

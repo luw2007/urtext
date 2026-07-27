@@ -24,9 +24,21 @@ import { adjudicate } from './gate.js'
 import { buildStatus, type StatusReport } from './status.js'
 import { currentHead, listDecisions, recordDecision } from './decision.js'
 import { listReviews, recordReview, worktreeDirty } from './review.js'
-import type { ClauseNavigation, ImpactDependent, ReviewFacts, SpecImpactView } from './ui/contracts.js'
+import type {
+  ClauseNavigation,
+  ImpactDependent,
+  RequirementBindingView,
+  ReviewFacts,
+  SpecImpactView,
+} from './ui/contracts.js'
 
-export type { ClauseNavigation, ImpactDependent, ReviewFacts, SpecImpactView } from './ui/contracts.js'
+export type {
+  ClauseNavigation,
+  ImpactDependent,
+  RequirementBindingView,
+  ReviewFacts,
+  SpecImpactView,
+} from './ui/contracts.js'
 export interface UiClause {
   specPath: string
   clauseId: string
@@ -110,10 +122,73 @@ export const briefHistory = (db: Database, target: ClauseTarget): BriefHistoryLi
       })),
   ].sort((a, b) => b.when - a.when)
 
+interface StoredClauseRequirement {
+  path: string | null
+  reqId: string
+}
+
+const featureOf = (specPath: string): string | null =>
+  specPath.match(/^specs\/([^/]+)\//)?.[1] ?? null
+
+/** Resolve the target clause's stored `reqs` JSON in declaration order.
+ * Requirement liveness is checked with a req-id-scoped query, not liveGraph. */
+const resolveClauseRequirementBindings = (
+  db: Database,
+  target: ClauseTarget
+): RequirementBindingView[] => {
+  const clause = db
+    .prepare(
+      `SELECT c.reqs
+       FROM clauses c
+       JOIN (
+         SELECT spec_path, MAX(revision) AS revision
+         FROM revisions WHERE file_kind = 'clauses' GROUP BY spec_path
+       ) latest ON latest.spec_path = c.spec_path AND latest.revision = c.revision
+       JOIN revisions r ON r.spec_path = c.spec_path AND r.revision = c.revision
+       WHERE c.spec_path = ? AND c.clause_id = ? AND r.status != 'tombstoned'`
+    )
+    .get(target.specPath, target.clauseId) as { reqs: string } | undefined
+  if (clause === undefined) return []
+
+  const declared = JSON.parse(clause.reqs) as StoredClauseRequirement[]
+  const requirementStmt = db.prepare(
+    `SELECT q.spec_path, q.req_id, q.title
+     FROM requirements q
+     JOIN (
+       SELECT spec_path, MAX(revision) AS revision
+       FROM revisions WHERE file_kind = 'clauses' GROUP BY spec_path
+     ) latest ON latest.spec_path = q.spec_path AND latest.revision = q.revision
+     JOIN revisions r ON r.spec_path = q.spec_path AND r.revision = q.revision
+     WHERE q.req_id = ? AND r.status != 'tombstoned'
+     ORDER BY q.spec_path, q.req_id`
+  )
+  const sourceFeature = featureOf(target.specPath)
+  return declared.map((binding) => {
+    const rawTarget = binding.path === null ? binding.reqId : `${binding.path}#${binding.reqId}`
+    const rows = requirementStmt.all(binding.reqId) as {
+      spec_path: string
+      req_id: string
+      title: string
+    }[]
+    const candidates = rows
+      .filter((row) =>
+        binding.path === null
+          ? sourceFeature !== null && featureOf(row.spec_path) === sourceFeature
+          : row.spec_path === binding.path
+      )
+      .map((row) => ({ specPath: row.spec_path, reqId: row.req_id, title: row.title }))
+    const resolved = candidates.length === 1 ? candidates[0] : undefined
+    if (resolved !== undefined) return { state: 'resolved', rawTarget, target: resolved }
+    if (candidates.length === 0) return { state: 'dangling', rawTarget }
+    return { state: 'ambiguous', rawTarget, candidates }
+  })
+}
+
 export const buildSpecImpactView = (
   brief: Brief,
   dependents: ImpactDependent[] = [],
-  navigation: ClauseNavigation = { previous: null, next: null }
+  navigation: ClauseNavigation = { previous: null, next: null },
+  requirementBindings: RequirementBindingView[] = []
 ): SpecImpactView => ({
   schema: 'urtext.spec-impact/1',
   head: brief.manifest.head,
@@ -123,6 +198,7 @@ export const buildSpecImpactView = (
   risk: brief.manifest.risk,
   stale: brief.manifest.stale,
   hasEvidence: brief.manifest.evidence !== null,
+  requirementBindings,
   mappings: brief.manifest.mappings,
   impact: brief.impact,
   dependents,
@@ -134,20 +210,25 @@ export interface BriefApiResult {
   status: number
   body:
     | { ok: true; briefHash: string; text: string; risk: 'low' | 'high'; reviewable: boolean; facts: ReviewFacts; view: SpecImpactView }
-    | { error: string }
+    | { error: string; requirementBindings: RequirementBindingView[] }
 }
 
 /** Build one clause's brief for the console (JSON api + the /brief page). */
 export const handleBrief = (db: Database, root: string, spec: unknown, clause: unknown): BriefApiResult => {
   if (typeof spec !== 'string' || typeof clause !== 'string' || !/^C\d+$/.test(clause)) {
-    return { status: 400, body: { error: 'need ?spec=<spec-path>&clause=C<n>' } }
+    return {
+      status: 400,
+      body: { error: 'need ?spec=<spec-path>&clause=C<n>', requirementBindings: [] },
+    }
   }
   const target = { specPath: spec, clauseId: clause }
   const outcome = buildBrief(db, root, target)
   if (outcome.kind === 'refused') {
+    const requirementBindings =
+      outcome.code === 'unknown_clause' ? [] : resolveClauseRequirementBindings(db, target)
     return {
       status: outcome.code === 'unknown_clause' ? 404 : 409,
-      body: { error: `[${outcome.code}] ${outcome.message}` },
+      body: { error: `[${outcome.code}] ${outcome.message}`, requirementBindings },
     }
   }
   const manifest = outcome.brief.manifest
@@ -186,7 +267,12 @@ export const handleBrief = (db: Database, root: string, spec: unknown, clause: u
       text: renderBriefText(outcome.brief, briefHistory(db, target)),
       risk: manifest.risk,
       reviewable,
-      view: buildSpecImpactView(outcome.brief, dependents, navigation),
+      view: buildSpecImpactView(
+        outcome.brief,
+        dependents,
+        navigation,
+        resolveClauseRequirementBindings(db, target)
+      ),
       facts: {
         title: `${manifest.specPath}#${manifest.clauseId} ${manifest.title}`,
         files,

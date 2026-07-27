@@ -74,13 +74,13 @@ export const discoverUnits = (workspaceRoot: string): FeatureUnit[] => {
   return units
 }
 
-/** Scan the workspace and reconcile every discovered file into the registry. */
-export const scanWorkspace = (db: Database, workspaceRoot: string): ScanReport => {
+const scanWorkspaceTransaction = (db: Database, workspaceRoot: string): ScanReport => {
   const units = discoverUnits(workspaceRoot)
   const outcomes: ScanReport['outcomes'] = []
   const timestamp = Date.now()
 
   const changed: { specPath: string; clauseId: string }[] = []
+  const changedRequirements: { specPath: string; reqId: string }[] = []
   const clauselessUnits: string[] = []
   for (const unit of units) {
     // Clause files first — collect the unit's declared ids for the checklist check.
@@ -98,6 +98,9 @@ export const scanWorkspace = (db: Database, workspaceRoot: string): ScanReport =
       const outcome = indexClauseFile(db, { specPath, content, timestamp })
       if (outcome.kind === 'indexed') {
         for (const clauseId of outcome.changedClauses) changed.push({ specPath, clauseId })
+        for (const reqId of outcome.changedRequirements) {
+          changedRequirements.push({ specPath, reqId })
+        }
       } else if (outcome.kind === 'unchanged' && outcome.status === 'building') {
         outcome.errors = parsed.errors
       }
@@ -120,7 +123,11 @@ export const scanWorkspace = (db: Database, workspaceRoot: string): ScanReport =
   // Link pass over the reconciled snapshot: cross-file ref validation, then
   // stale propagation from every clause whose normative text changed.
   const linkErrors = linkWorkspace(db)
-  const stale = propagateStale(db, changed, timestamp)
+  const stale = propagateStale(db, changed, timestamp, changedRequirements)
 
   return { units, outcomes, linkErrors, stale, clauselessUnits }
 }
+
+/** Scan and reconcile one workspace atomically with stale invalidation. */
+export const scanWorkspace = (db: Database, workspaceRoot: string): ScanReport =>
+  db.transaction(() => scanWorkspaceTransaction(db, workspaceRoot))()

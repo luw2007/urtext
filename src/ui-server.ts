@@ -202,7 +202,10 @@ const dispatchGet = async (
     scanWorkspace(ctx.db, ctx.root)
     const result = handleBrief(ctx.db, ctx.root, url.searchParams.get('spec'), url.searchParams.get('clause'))
     if ('error' in result.body) {
-      html(result.status, renderBriefErrorPage(result.body.error))
+      html(
+        result.status,
+        renderBriefErrorPage(result.body.error, result.body.requirementBindings)
+      )
       return { status: result.status, stage: 'handler' }
     }
     const key = `${url.searchParams.get('spec')}#${url.searchParams.get('clause')}`

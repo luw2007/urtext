@@ -734,13 +734,33 @@ describe('extractSelectorCounts / validatePageSpecificSelectors', () => {
   })
 
   test('console page with the expected counts passes', () => {
-    expect(validatePageSpecificSelectors('console', { '#audit-runner': 0, '#explain-btn': 0 }, PAGE_SPECIFIC_SELECTORS)).toEqual([])
+    expect(
+      validatePageSpecificSelectors(
+        'console',
+        {
+          '#audit-runner': 0,
+          '#explain-btn': 0,
+          '#uncovered-intent': 1,
+          'li[data-uncovered="specs/demo/spec.md#FR002"]': 1,
+        },
+        PAGE_SPECIFIC_SELECTORS
+      )
+    ).toEqual([])
   })
 
   test('an injected leaked explain button on the console page fails page-specific presence', () => {
-    expect(validatePageSpecificSelectors('console', { '#audit-runner': 0, '#explain-btn': 1 }, PAGE_SPECIFIC_SELECTORS)).toEqual([
-      'console:#explain-btn: expected count 0, got 1',
-    ])
+    expect(
+      validatePageSpecificSelectors(
+        'console',
+        {
+          '#audit-runner': 0,
+          '#explain-btn': 1,
+          '#uncovered-intent': 1,
+          'li[data-uncovered="specs/demo/spec.md#FR002"]': 1,
+        },
+        PAGE_SPECIFIC_SELECTORS
+      )
+    ).toEqual(['console:#explain-btn: expected count 0, got 1'])
   })
 
   test('an injected missing audit-runner on the agent page fails page-specific presence', () => {

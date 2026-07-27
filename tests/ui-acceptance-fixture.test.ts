@@ -5,7 +5,7 @@ import { join } from 'node:path'
 
 import { afterEach, describe, expect, test } from 'vitest'
 
-import { handleBrief } from '../src/index.js'
+import { buildStatus, handleBrief } from '../src/index.js'
 import {
   buildFixture,
   cleanupFixture,
@@ -41,7 +41,8 @@ afterEach(() => {
 })
 
 describe('S4 acceptance fixture — setup/cleanup/repeatability', () => {
-  test('builds a self-contained repo + registry from an arbitrary process cwd', () => {
+  // Fixture setup runs git init + scan (~4.3s solo); the 5s default flakes under load.
+  test('builds a self-contained repo + registry from an arbitrary process cwd', { timeout: 30_000 }, () => {
     const originalCwd = process.cwd()
     process.chdir(tmpdir())
     try {
@@ -86,6 +87,19 @@ describe('S4 acceptance fixture — setup/cleanup/repeatability', () => {
       cleanupFixture(handleB)
     }
   }, 15000)
+
+  test('fixture exposes exactly FR002 as uncovered intent', () => {
+    handle = setupFixture()
+    const status = buildStatus(handle.db, { head: null, unmapped: [] })
+    expect(status.counts.uncovered).toBe(1)
+    expect(status.uncoveredRequirements).toEqual([
+      {
+        specPath: 'specs/demo/spec.md',
+        reqId: 'FR002',
+        title: 'acceptance fixture uncovered intent',
+      },
+    ])
+  })
 })
 
 describe('S4 acceptance fixture — five real mapping diffs', () => {

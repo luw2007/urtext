@@ -21,14 +21,17 @@ Then <observable outcome>.
 
 ## Candidate functional requirements
 
-- **<PREFIX>-FR-001**: <behavior>.
+## FR001 <intent>
+
+<Why this behavior must exist.>
+
   **Evidence**: `<path>`
   **Confidence**: observed | inferred
   **Verification**: `<existing oracle>` | evidence gap
 
 ## Candidate clauses
 
-## C001 <decidable behavior> <!-- oracle:<kind>:<ref> risk:<low|high> -->
+## C001 <decidable behavior> <!-- oracle:<kind>:<ref> risk:<low|high> req:FR<n> -->
 
 <Given/When/Then rule.>
 

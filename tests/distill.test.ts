@@ -5,6 +5,7 @@ import { join } from 'node:path'
 
 import { afterEach, describe, expect, test } from 'vitest'
 
+import { parseClauseFile } from '../src/clause-parser.js'
 import { baseline, baselineValidation, cluster, coverage, discover, distillUsage, l2IntentReview, l2IntentReviewValidation, promote, validate } from '../src/distill.js'
 
 const tempDirs: string[] = []
@@ -29,7 +30,9 @@ const makeWorkspace = (): string => {
     [
       '# Payments',
       '',
-      '## C001 Charges succeed <!-- oracle:test:tests/charge.test.ts -->',
+      '## FR001 test intent',
+      '',
+      '## C001 Charges succeed <!-- oracle:test:tests/charge.test.ts req:FR001 -->',
       '',
       'A valid charge completes.',
       '',
@@ -137,7 +140,7 @@ describe('codebase fact distillation', () => {
       [
         '# Payments',
         '',
-        '## C001 Charges succeed <!-- oracle:test:tests/missing.test.ts -->',
+        '## C001 Charges succeed <!-- oracle:test:tests/missing.test.ts req:FR001 -->',
         '',
         '## Implementation Evidence',
         '',
@@ -163,7 +166,7 @@ describe('codebase fact distillation', () => {
     const root = makeWorkspace()
     writeFileSync(
       join(root, 'specs/payments/spec.md'),
-      '## C001 Charges succeed <!-- oracle:test:tests/missing.test.ts -->\n'
+      '## C001 Charges succeed <!-- oracle:test:tests/missing.test.ts req:FR001 -->\n'
     )
 
     expect(validate(discover(root), root).errors).toEqual([
@@ -238,7 +241,9 @@ describe('codebase fact distillation', () => {
       },
     ])
     expect(report.gaps).toEqual(['platform/src: src/charge.ts', 'platform/src: src/cli.ts'])
-    expect(readFileSync(join(root, '.urtext/distill/baseline/payments.md'), 'utf8')).toContain('## C001 Existing tests execute for payments')
+    const baselineDoc = readFileSync(join(root, '.urtext/distill/baseline/payments.md'), 'utf8')
+    expect(baselineDoc).toContain('## Baseline C001 — existing tests execute for payments')
+    expect(parseClauseFile(baselineDoc).clauses).toEqual([])
     expect(baselineValidation(facts, domains, report)).toEqual({ errors: [] })
   })
   test('promotes only observed low-risk runnable draft clauses after feature confirmation', () => {
@@ -253,23 +258,23 @@ describe('codebase fact distillation', () => {
         '',
         `**Facts manifest**: \`.urtext/distill/facts.json\` at \`${facts.workspaceHead}\``,
         '',
-        '## C006 Eligible <!-- oracle:cmd:true -->',
+        '## C006 Eligible <!-- oracle:cmd:true req:FR001 -->',
         '',
         '**Confidence**: observed',
         '',
-        '## C007 Inferred <!-- oracle:cmd:true -->',
+        '## C007 Inferred <!-- oracle:cmd:true req:FR001 -->',
         '',
         '**Confidence**: inferred',
         '',
-        '## C008 High risk <!-- oracle:cmd:true risk:high -->',
+        '## C008 High risk <!-- oracle:cmd:true risk:high req:FR001 -->',
         '',
         '**Confidence**: observed',
         '',
-        '## C009 Manual <!-- oracle:manual -->',
+        '## C009 Manual <!-- oracle:manual req:FR001 -->',
         '',
         '**Confidence**: observed',
         '',
-        '## C010 Needs decision <!-- oracle:cmd:true -->',
+        '## C010 Needs decision <!-- oracle:cmd:true req:FR001 -->',
         '',
         '**Confidence**: observed',
         '**Human decision needed**: choose scope',
@@ -281,7 +286,58 @@ describe('codebase fact distillation', () => {
       retained: ['C007', 'C008', 'C009', 'C010'],
     })
     expect(readFileSync(join(root, 'specs/payments/clauses.md'), 'utf8')).toContain('## C006 Eligible')
+    expect(readFileSync(join(root, 'specs/payments/clauses.md'), 'utf8')).toContain('req:FR001')
     expect(readFileSync(join(root, 'specs/payments/clauses.md'), 'utf8')).not.toContain('## C007 Inferred')
+  })
+
+  test('promotion into a fresh feature carries the draft FR declarations it binds', () => {
+    const root = makeWorkspace()
+    const facts = discover(root)
+    mkdirSync(join(root, '.urtext/distill/spec-drafts/payments'), { recursive: true })
+    writeFileSync(
+      join(root, '.urtext/distill/spec-drafts/payments/spec-draft.md'),
+      [
+        '# Candidate',
+        '',
+        `**Facts manifest**: \`.urtext/distill/facts.json\` at \`${facts.workspaceHead}\``,
+        '',
+        '## FR001 Observed payment behavior stays locked',
+        '',
+        'Recorded behavior keeps executing as observed.',
+        '',
+        '## C006 Eligible <!-- oracle:cmd:true req:FR001 -->',
+        '',
+        '**Confidence**: observed',
+      ].join('\n')
+    )
+
+    expect(promote(root, '.urtext/distill/spec-drafts/payments/spec-draft.md', 'specs/newfeature', true).promoted).toEqual(['C006'])
+    const written = parseClauseFile(readFileSync(join(root, 'specs/newfeature/clauses.md'), 'utf8'))
+    expect(written.errors).toEqual([])
+    expect(written.requirements.map((requirement) => requirement.reqId)).toEqual(['FR001'])
+    expect(written.clauses.map((clause) => clause.clauseId)).toEqual(['C006'])
+  })
+
+  test('promotion into a fresh feature fails closed when neither draft nor target declares the bound FR', () => {
+    const root = makeWorkspace()
+    const facts = discover(root)
+    mkdirSync(join(root, '.urtext/distill/spec-drafts/payments'), { recursive: true })
+    writeFileSync(
+      join(root, '.urtext/distill/spec-drafts/payments/spec-draft.md'),
+      [
+        '# Candidate',
+        '',
+        `**Facts manifest**: \`.urtext/distill/facts.json\` at \`${facts.workspaceHead}\``,
+        '',
+        '## C006 Eligible <!-- oracle:cmd:true req:FR001 -->',
+        '',
+        '**Confidence**: observed',
+      ].join('\n')
+    )
+
+    expect(() => promote(root, '.urtext/distill/spec-drafts/payments/spec-draft.md', 'specs/newfeature', true)).toThrow(
+      'draft does not declare FR001'
+    )
   })
 
   test('accepts an observed candidate whose decision marker is none', () => {
@@ -295,7 +351,7 @@ describe('codebase fact distillation', () => {
         '',
         `**Facts manifest**: \`.urtext/distill/facts.json\` at \`${facts.workspaceHead}\``,
         '',
-        '## C006 Eligible <!-- oracle:cmd:node%20--version -->',
+        '## C006 Eligible <!-- oracle:cmd:node%20--version req:FR001 -->',
         '',
         '**Confidence**: observed',
         '**Human decision needed**: none',
@@ -323,7 +379,7 @@ describe('codebase fact distillation', () => {
         '',
         `**Facts manifest**: \`.urtext/distill/facts.json\` at \`${facts.workspaceHead}\``,
         '',
-        '## C001 Duplicate <!-- oracle:cmd:true -->',
+        '## C001 Duplicate <!-- oracle:cmd:true req:FR001 -->',
         '',
         '**Confidence**: observed',
       ].join('\n')
@@ -342,12 +398,12 @@ describe('codebase fact distillation', () => {
         '',
         `**Facts manifest**: \`.urtext/distill/facts.json\` at \`${facts.workspaceHead}\``,
         '',
-        '## C006 Eligible <!-- oracle:cmd:true -->',
+        '## C006 Eligible <!-- oracle:cmd:true req:FR001 -->',
         '',
         '**Confidence**: observed',
       ].join('\n')
     )
-    writeFileSync(join(root, 'specs/payments/spec.md'), '## C001 Broken <!-- oracle:test:tests/missing.test.ts -->\n')
+    writeFileSync(join(root, 'specs/payments/spec.md'), '## C001 Broken <!-- oracle:test:tests/missing.test.ts req:FR001 -->\n')
 
     expect(() => promote(root, '.urtext/distill/spec-drafts/payments/spec-draft.md', 'specs/payments', true)).toThrow(
       'validation'
@@ -366,7 +422,7 @@ describe('codebase fact distillation', () => {
         '',
         `**Facts manifest**: \`.urtext/distill/facts.json\` at \`${facts.workspaceHead}\``,
         '',
-        '## C006 Missing test <!-- oracle:test:tests/missing.test.ts -->',
+        '## C006 Missing test <!-- oracle:test:tests/missing.test.ts req:FR001 -->',
         '',
         '**Confidence**: observed',
       ].join('\n')
@@ -392,7 +448,7 @@ describe('codebase fact distillation', () => {
           '',
           `**Facts manifest**: \`.urtext/distill/facts.json\` at \`${facts.workspaceHead}\``,
           '',
-          '## C006 Escaped test <!-- oracle:test:../outside.test.ts -->',
+          '## C006 Escaped test <!-- oracle:test:../outside.test.ts req:FR001 -->',
           '',
           '**Confidence**: observed',
         ].join('\n')
@@ -418,7 +474,7 @@ describe('codebase fact distillation', () => {
         '',
         `**Facts manifest**: \`.urtext/distill/facts.json\` at \`${facts.workspaceHead}\``,
         '',
-        '## C006 Missing command <!-- oracle:cmd:urtext-command-that-does-not-exist -->',
+        '## C006 Missing command <!-- oracle:cmd:urtext-command-that-does-not-exist req:FR001 -->',
         '',
         '**Confidence**: observed',
       ].join('\n')
@@ -444,7 +500,7 @@ describe('codebase fact distillation', () => {
         '',
         `**Facts manifest**: \`.urtext/distill/facts.json\` at \`${facts.workspaceHead}\``,
         '',
-        '## C006 Relative command <!-- oracle:cmd:./scripts/check.sh -->',
+        '## C006 Relative command <!-- oracle:cmd:./scripts/check.sh req:FR001 -->',
         '',
         '**Confidence**: observed',
       ].join('\n')
@@ -467,7 +523,7 @@ describe('codebase fact distillation', () => {
         '',
         '**Facts manifest**: `.urtext/distill/facts.json` at `0000000000000000000000000000000000000000`',
         '',
-        '## C001 Eligible <!-- oracle:cmd:true -->',
+        '## C001 Eligible <!-- oracle:cmd:true req:FR001 -->',
         '',
         '**Confidence**: observed',
       ].join('\n')

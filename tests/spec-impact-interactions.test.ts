@@ -31,8 +31,9 @@ beforeEach(() => {
   git('config', 'user.name', 'test')
   mkdirSync(join(root, 'specs/x'), { recursive: true })
   writeFileSync(join(root, 'specs/x/spec.md'), [
-    '## C001 base <!-- oracle:cmd:true -->',
-    '## C002 dependent <!-- oracle:cmd:true refs:specs/x/spec.md#C001 -->',
+    '## FR001 test intent',
+    '## C001 base <!-- oracle:cmd:true req:FR001 -->',
+    '## C002 dependent <!-- oracle:cmd:true refs:specs/x/spec.md#C001 req:FR001 -->',
   ].join('\n'))
   git('add', '-A')
   git('commit', '-q', '-m', 'baseline')

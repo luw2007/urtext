@@ -5,8 +5,13 @@
  */
 import type { BriefMapping } from '../brief.js'
 import { BRIEF_SCRIPT } from './brief-script.js'
-import type { BriefPageInput, SpecImpactView, UiRenderConfig } from './contracts.js'
-import { briefHref, esc, pageShell, riskBadge } from './html.js'
+import type {
+  BriefPageInput,
+  RequirementBindingView,
+  SpecImpactView,
+  UiRenderConfig,
+} from './contracts.js'
+import { briefHref, esc, pageShell, riskBadge, statusChip } from './html.js'
 
 const clauseKey = (target: { specPath: string; clauseId: string }): string => `${target.specPath}#${target.clauseId}`
 
@@ -21,6 +26,48 @@ const evidenceChip = (view: SpecImpactView): string =>
     : view.stale
       ? `<span data-tone="warn" data-state="stale">⚠ 证据已过期 — 需重新 verify</span>`
       : `<span data-tone="ok" data-state="fresh">✓ 当前有效</span>`
+
+const resolvedRequirementBindingsHtml = (
+  bindings: readonly RequirementBindingView[]
+): string => {
+  const resolved = bindings.filter(
+    (binding): binding is Extract<RequirementBindingView, { state: 'resolved' }> =>
+      binding.state === 'resolved'
+  )
+  if (resolved.length === 0) return ''
+  const items = resolved
+    .map((binding) => {
+      const key = `${binding.target.specPath}#${binding.target.reqId}`
+      return `<li data-state="req-resolved"><code>${esc(key)}</code> ${esc(binding.target.title)}</li>`
+    })
+    .join('')
+  return `<section data-section="requirement-bindings" aria-labelledby="requirement-bindings-title"><h2 id="requirement-bindings-title">Requirement bindings / 需求绑定</h2><ul>${items}</ul></section>`
+}
+
+const brokenRequirementBindingsHtml = (
+  bindings: readonly RequirementBindingView[]
+): string => {
+  const broken = bindings.filter(
+    (binding): binding is Exclude<RequirementBindingView, { state: 'resolved' }> =>
+      binding.state !== 'resolved'
+  )
+  if (broken.length === 0) return ''
+  const items = broken
+    .map((binding) => {
+      if (binding.state === 'dangling') {
+        return `<li data-state="req-dangling">${statusChip('danger', '✗', 'broken')} <code>${esc(binding.rawTarget)}</code> — target does not exist</li>`
+      }
+      const candidates = binding.candidates
+        .map(
+          (candidate) =>
+            `${candidate.specPath}#${candidate.reqId} ${candidate.title}`
+        )
+        .join('；')
+      return `<li data-state="req-ambiguous">${statusChip('danger', '✗', 'broken')} <code>${esc(binding.rawTarget)}</code> — ambiguous: ${esc(candidates)}</li>`
+    })
+    .join('')
+  return `<section data-section="requirement-bindings" aria-labelledby="requirement-bindings-title"><h2 id="requirement-bindings-title">Requirement bindings / 需求绑定</h2><ul>${items}</ul></section>`
+}
 
 const mappedStatus = (view: SpecImpactView): string =>
   view.mappings.length === 0
@@ -142,6 +189,7 @@ ${oracleMeta(view)}
   const main = `<main id="main">
 <section id="spec-impact" aria-label="Spec impact">
 <p>${evidenceChip(view)}</p>
+${resolvedRequirementBindingsHtml(view.requirementBindings)}
 <section data-section="mappings" aria-labelledby="mappings-title"><h2 id="mappings-title">映射状态</h2><p>${mappedStatus(view)}</p></section>
 <section data-section="stale-dependencies" aria-labelledby="stale-dependencies-title"><h2 id="stale-dependencies-title">Stale Dependencies / 下游依赖</h2>${dependentsHtml(view)}<p>${view.impact.affectedTasks.length} 个关联任务</p></section>
 ${view.mappings.length > 0 ? '<h2>Code Blame Diff</h2>' : ''}
@@ -162,10 +210,15 @@ ${input.reviewable ? reviewSection(input) : ''}
 
 /** Fail-closed error page (404/409): same shell, no risk badge, no controls
  * (§3.2 pt.9). */
-export const renderBriefErrorPage = (message: string): string =>
+export const renderBriefErrorPage = (
+  message: string,
+  requirementBindings: readonly RequirementBindingView[] = []
+): string =>
   pageShell({
     title: 'urtext brief error',
     header: `<header><h1 id="error-title">无法生成裁决简报</h1></header>`,
     nav: `<nav aria-label="页面导航"><a href="/">← console</a> · <a href="/specs">查看全部 Specs</a> · <a href="/">刷新状态</a></nav>`,
-    main: `<main id="main"><p role="alert" data-state="error">${esc(message)}</p></main>`,
+    main: `<main id="main"><p role="alert" data-state="error">${esc(message)}</p>${brokenRequirementBindingsHtml(
+      requirementBindings
+    )}</main>`,
   })

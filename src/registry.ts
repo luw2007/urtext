@@ -42,6 +42,8 @@ export type IndexOutcome =
        * files. The linker propagates stale along the refs graph from these.
        */
       changedClauses: string[]
+      /** Requirement ids whose title/body changed or were removed. Pure additions are excluded: nothing bound them before, so no prior evidence exists to invalidate. */
+      changedRequirements: string[]
     }
   | { kind: 'tombstoned'; revision: number }
 
@@ -55,6 +57,8 @@ export interface CrossRefError {
 const hashContent = (content: string): string =>
   `sha256:${createHash('sha256').update(content, 'utf8').digest('hex')}`
 
+export const REGISTRY_GRAMMAR_VERSION = 1
+
 export const REGISTRY_SCHEMA = `
 CREATE TABLE IF NOT EXISTS revisions (
   spec_path     TEXT    NOT NULL,
@@ -63,6 +67,7 @@ CREATE TABLE IF NOT EXISTS revisions (
   content_hash  TEXT,
   status        TEXT    NOT NULL CHECK (status IN ('ready', 'building', 'tombstoned')),
   created_at    INTEGER NOT NULL,
+  grammar_version INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (spec_path, revision),
   CHECK ((status = 'tombstoned') = (content_hash IS NULL)),
   CHECK (content_hash IS NULL OR content_hash GLOB 'sha256:*')
@@ -79,9 +84,23 @@ CREATE TABLE IF NOT EXISTS clauses (
   oracle_ref  TEXT,
   risk        TEXT    NOT NULL DEFAULT 'low' CHECK (risk IN ('low', 'high')),
   refs        TEXT    NOT NULL DEFAULT '[]',
+  reqs        TEXT    NOT NULL DEFAULT '[]',
   body        TEXT,
   line        INTEGER NOT NULL,
   PRIMARY KEY (spec_path, revision, clause_id),
+  FOREIGN KEY (spec_path, revision) REFERENCES revisions (spec_path, revision) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS requirements (
+  spec_path   TEXT    NOT NULL,
+  revision    INTEGER NOT NULL,
+  req_id      TEXT    NOT NULL,
+  seq         INTEGER NOT NULL,
+  title       TEXT    NOT NULL,
+  text_hash   TEXT    NOT NULL DEFAULT '',
+  body        TEXT,
+  line        INTEGER NOT NULL,
+  PRIMARY KEY (spec_path, revision, req_id),
   FOREIGN KEY (spec_path, revision) REFERENCES revisions (spec_path, revision) ON DELETE CASCADE
 );
 
@@ -112,33 +131,54 @@ CREATE TABLE IF NOT EXISTS clause_refs (
   PRIMARY KEY (spec_path, revision, clause_id, to_spec, to_clause),
   FOREIGN KEY (spec_path, revision) REFERENCES revisions (spec_path, revision) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS clause_reqs (
+  spec_path   TEXT    NOT NULL,
+  revision    INTEGER NOT NULL,
+  clause_id   TEXT    NOT NULL,
+  to_spec     TEXT    NOT NULL,
+  to_req      TEXT    NOT NULL,
+  line        INTEGER NOT NULL,
+  PRIMARY KEY (spec_path, revision, clause_id, to_spec, to_req),
+  FOREIGN KEY (spec_path, revision) REFERENCES revisions (spec_path, revision) ON DELETE CASCADE
+);
 `
 
 export const openRegistry = (db: Database): void => {
-  db.exec(REGISTRY_SCHEMA)
-  // Additive migration for M1-era registries (predating text_hash).
-  const columns = db
-    .prepare(`SELECT name FROM pragma_table_info('clauses')`)
-    .all() as { name: string }[]
-  if (!columns.some((column) => column.name === 'text_hash')) {
-    db.exec(`ALTER TABLE clauses ADD COLUMN text_hash TEXT NOT NULL DEFAULT ''`)
-  }
+  db.transaction(() => {
+    db.exec(REGISTRY_SCHEMA)
+    const clauseColumns = db
+      .prepare(`SELECT name FROM pragma_table_info('clauses')`)
+      .all() as { name: string }[]
+    if (!clauseColumns.some((column) => column.name === 'text_hash')) {
+      db.exec(`ALTER TABLE clauses ADD COLUMN text_hash TEXT NOT NULL DEFAULT ''`)
+    }
+    if (!clauseColumns.some((column) => column.name === 'reqs')) {
+      db.exec(`ALTER TABLE clauses ADD COLUMN reqs TEXT NOT NULL DEFAULT '[]'`)
+    }
+    const revisionColumns = db
+      .prepare(`SELECT name FROM pragma_table_info('revisions')`)
+      .all() as { name: string }[]
+    if (!revisionColumns.some((column) => column.name === 'grammar_version')) {
+      db.exec(`ALTER TABLE revisions ADD COLUMN grammar_version INTEGER NOT NULL DEFAULT 0`)
+    }
+  })()
 }
 
 const latestRevision = (
   db: Database,
   specPath: string
-): { revision: number; content_hash: string | null; status: 'ready' | 'building' | 'tombstoned' } | undefined =>
+): { revision: number; content_hash: string | null; status: 'ready' | 'building' | 'tombstoned'; grammar_version: number } | undefined =>
   db
     .prepare(
-      `SELECT revision, content_hash, status FROM revisions
+      `SELECT revision, content_hash, status, grammar_version FROM revisions
        WHERE spec_path = ? ORDER BY revision DESC LIMIT 1`
     )
     .get(specPath) as
-    | { revision: number; content_hash: string | null; status: 'ready' | 'building' | 'tombstoned' }
+    | { revision: number; content_hash: string | null; status: 'ready' | 'building' | 'tombstoned'; grammar_version: number }
     | undefined
 
-const clauseTextHash = (title: string, body: string | null): string =>
+const textHash = (title: string, body: string | null): string =>
   `sha256:${createHash('sha256').update(`${title}\n${body ?? ''}`, 'utf8').digest('hex')}`
 
 /**
@@ -154,7 +194,12 @@ export const indexClauseFile = (
   const { specPath, content, timestamp } = input
   const contentHash = hashContent(content)
   const latest = latestRevision(db, specPath)
-  if (latest && latest.status !== 'tombstoned' && latest.content_hash === contentHash) {
+  if (
+    latest &&
+    latest.status !== 'tombstoned' &&
+    latest.content_hash === contentHash &&
+    latest.grammar_version === REGISTRY_GRAMMAR_VERSION
+  ) {
     return { kind: 'unchanged', revision: latest.revision, status: latest.status }
   }
 
@@ -165,27 +210,38 @@ export const indexClauseFile = (
   // text_hash of the prior live revision, keyed by clause id ([] for rev 1
   // or after a tombstone — nothing existed before, so nothing "changed").
   const priorHashes = new Map<string, string>()
+  const priorReqHashes = new Map<string, string>()
   if (latest && latest.status !== 'tombstoned') {
     const rows = db
       .prepare('SELECT clause_id, text_hash FROM clauses WHERE spec_path = ? AND revision = ?')
       .all(specPath, latest.revision) as { clause_id: string; text_hash: string }[]
     for (const row of rows) priorHashes.set(row.clause_id, row.text_hash)
+    const reqRows = db
+      .prepare('SELECT req_id, text_hash FROM requirements WHERE spec_path = ? AND revision = ?')
+      .all(specPath, latest.revision) as { req_id: string; text_hash: string }[]
+    for (const row of reqRows) priorReqHashes.set(row.req_id, row.text_hash)
   }
 
   const changedClauses: string[] = []
+  const changedRequirements: string[] = []
   db.transaction(() => {
     db.prepare(
-      `INSERT INTO revisions (spec_path, revision, file_kind, content_hash, status, created_at)
-       VALUES (?, ?, 'clauses', ?, ?, ?)`
-    ).run(specPath, nextRevision, contentHash, status, timestamp)
+      `INSERT INTO revisions
+         (spec_path, revision, file_kind, content_hash, status, created_at, grammar_version)
+       VALUES (?, ?, 'clauses', ?, ?, ?, ?)`
+    ).run(specPath, nextRevision, contentHash, status, timestamp, REGISTRY_GRAMMAR_VERSION)
 
     const insert = db.prepare(
       `INSERT INTO clauses
-         (spec_path, revision, clause_id, seq, title, text_hash, oracle_kind, oracle_ref, risk, refs, body, line)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         (spec_path, revision, clause_id, seq, title, text_hash, oracle_kind, oracle_ref, risk, refs, reqs, body, line)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     const insertRef = db.prepare(
       `INSERT OR IGNORE INTO clause_refs (spec_path, revision, clause_id, to_spec, to_clause, line)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    )
+    const insertReqEdge = db.prepare(
+      `INSERT OR IGNORE INTO clause_reqs (spec_path, revision, clause_id, to_spec, to_req, line)
        VALUES (?, ?, ?, ?, ?, ?)`
     )
     // Duplicate clause ids keep the revision at `building`; insert first-wins
@@ -194,33 +250,74 @@ export const indexClauseFile = (
     for (const clause of parsed.clauses) {
       if (inserted.has(clause.clauseId)) continue
       inserted.add(clause.clauseId)
-      const textHash = clauseTextHash(clause.title, clause.body)
-      if (priorHashes.get(clause.clauseId) !== textHash) changedClauses.push(clause.clauseId)
+      const hash = textHash(clause.title, clause.body)
+      if (priorHashes.get(clause.clauseId) !== hash) changedClauses.push(clause.clauseId)
       insert.run(
         specPath,
         nextRevision,
         clause.clauseId,
         clause.seq,
         clause.title,
-        textHash,
+        hash,
         clause.oracle?.kind ?? null,
         clause.oracle?.ref ?? null,
         clause.risk,
         JSON.stringify(clause.refs),
+        JSON.stringify(clause.reqs),
         clause.body,
         clause.line
       )
       for (const ref of clause.refs) {
         insertRef.run(specPath, nextRevision, clause.clauseId, ref.path, ref.clauseId, clause.line)
       }
+      for (const req of clause.reqs) {
+        insertReqEdge.run(specPath, nextRevision, clause.clauseId, req.path ?? '', req.reqId, clause.line)
+      }
     }
     // Removed clauses changed too — their dependents must re-verify.
     for (const clauseId of priorHashes.keys()) {
       if (!inserted.has(clauseId)) changedClauses.push(clauseId)
     }
+
+    const insertReq = db.prepare(
+      `INSERT INTO requirements (spec_path, revision, req_id, seq, title, text_hash, body, line)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    const insertedReqs = new Set<string>()
+    for (const requirement of parsed.requirements) {
+      if (insertedReqs.has(requirement.reqId)) continue
+      insertedReqs.add(requirement.reqId)
+      const hash = textHash(requirement.title, requirement.body)
+      const prior = priorReqHashes.get(requirement.reqId)
+      // Pure additions are excluded: nothing bound them before, so there is
+      // no prior evidence to invalidate (removals are collected below).
+      if (prior !== undefined && prior !== hash) {
+        changedRequirements.push(requirement.reqId)
+      }
+      insertReq.run(
+        specPath,
+        nextRevision,
+        requirement.reqId,
+        requirement.seq,
+        requirement.title,
+        hash,
+        requirement.body,
+        requirement.line
+      )
+    }
+    for (const reqId of priorReqHashes.keys()) {
+      if (!insertedReqs.has(reqId)) changedRequirements.push(reqId)
+    }
   })()
 
-  return { kind: 'indexed', revision: nextRevision, status, errors: parsed.errors, changedClauses }
+  return {
+    kind: 'indexed',
+    revision: nextRevision,
+    status,
+    errors: parsed.errors,
+    changedClauses,
+    changedRequirements,
+  }
 }
 
 /**
@@ -291,7 +388,14 @@ export const indexTaskFile = (
     }
   })()
 
-  return { kind: 'indexed', revision: nextRevision, status, errors, changedClauses: [] }
+  return {
+    kind: 'indexed',
+    revision: nextRevision,
+    status,
+    errors,
+    changedClauses: [],
+    changedRequirements: [],
+  }
 }
 
 /**

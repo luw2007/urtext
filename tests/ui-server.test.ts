@@ -33,9 +33,10 @@ const setupWorkspace = () => {
   git('config', 'user.name', 'test')
   mkdirSync(join(root, 'specs/x'), { recursive: true })
   writeFileSync(join(root, 'specs/x/spec.md'), [
-    '## C001 guarded <!-- oracle:cmd:true risk:high -->',
-    '## C002 dependent <!-- oracle:cmd:true refs:specs/x/spec.md#C001 -->',
-    '## C003 manual gate <!-- oracle:manual -->',
+    '## FR001 test intent',
+    '## C001 guarded <!-- oracle:cmd:true risk:high req:FR001 -->',
+    '## C002 dependent <!-- oracle:cmd:true refs:specs/x/spec.md#C001 req:FR001 -->',
+    '## C003 manual gate <!-- oracle:manual req:FR001 -->',
   ].join('\n'))
   writeFileSync(join(root, 'tracked.txt'), 'baseline')
   git('add', '-A')
@@ -235,11 +236,34 @@ describe('ui server spec impact', () => {
     expect(unknownHtml).toContain('data-state="error"')
     expect(unknownHtml).not.toContain('data-state="risk-')
 
-    writeFileSync(join(root, 'specs/x/spec.md'), '## C001 broken <!-- oracle:nope -->')
+    writeFileSync(join(root, 'specs/x/spec.md'), '## C001 broken <!-- oracle:nope req:FR001 -->')
     const notReady = await fetch(`${server.url}/brief?spec=specs%2Fx%2Fspec.md&clause=C001`)
     expect(notReady.status).toBe(409)
     expect(notReady.headers.get('content-type')).toContain('text/html')
     expect(await notReady.text()).toContain('[not_ready]')
+  })
+
+  test('renders broken requirement diagnostics in the fail-closed 409 shell only', async () => {
+    writeFileSync(
+      join(root, 'specs/x/spec.md'),
+      [
+        '## FR001 test intent',
+        '## C001 guarded <!-- oracle:cmd:true risk:high req:FR999 -->',
+      ].join('\n')
+    )
+    const response = await fetch(
+      `${server.url}/brief?spec=specs%2Fx%2Fspec.md&clause=C001`
+    )
+    expect(response.status).toBe(409)
+    const html = await response.text()
+    expect(html).toContain('[link_error]')
+    expect(html).toContain('data-section="requirement-bindings"')
+    expect(html).toContain('data-state="req-dangling"')
+    expect(html).toContain('data-tone="danger"')
+    expect(html).toContain('<code>FR999</code>')
+    expect(html).not.toContain('data-state="req-resolved"')
+    expect(html).not.toContain('id="review-form"')
+    expect(html).not.toContain('id="decision-form-')
   })
 
   test('preserves CSRF and same-origin write protections', async () => {
@@ -332,10 +356,11 @@ describe('console-family pagination over HTTP', () => {
 
   test('pageSize=1 traverses every route in snapshot order with no duplicates', async () => {
     writeFileSync(join(root, 'specs/x/spec.md'), [
-      '## C001 guarded <!-- oracle:cmd:true risk:high -->',
-      '## C002 dependent <!-- oracle:cmd:true refs:specs/x/spec.md#C001 -->',
-      '## C003 manual gate <!-- oracle:manual -->',
-      '## C004 second manual <!-- oracle:manual -->',
+      '## FR001 test intent',
+      '## C001 guarded <!-- oracle:cmd:true risk:high req:FR001 -->',
+      '## C002 dependent <!-- oracle:cmd:true refs:specs/x/spec.md#C001 req:FR001 -->',
+      '## C003 manual gate <!-- oracle:manual req:FR001 -->',
+      '## C004 second manual <!-- oracle:manual req:FR001 -->',
     ].join('\n'))
     writeFileSync(join(root, 'tracked-2.txt'), 'baseline')
     git('add', '-A')

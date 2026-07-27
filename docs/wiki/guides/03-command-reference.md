@@ -24,14 +24,23 @@ additionally fails on unmapped working-tree changes — a hand edit that answers
 no clause. This is the fail-closed gate on grammar and references. `--json`
 emits the `urtext.check/1` envelope (valid JSON even on exit 1).
 
-### `urtext verify`
+### `urtext verify [--incremental]`
 Index and check, then run every clause's oracle and record append-only evidence.
 **Exit 1** on a validation or link error (before any oracle runs) *or* on any
 failing clause oracle. Reports pass-rate and manual-share:
 
 ```text
-34 pass, 0 fail, 5 pending — pass rate 100%, manual share 13%
+34 pass, 0 fail, 5 pending — pass rate 100%, manual share 13% (8.4s)
 ```
+
+With `--incremental`, verify reuses a prior passing, non-stale `test`-oracle
+verdict when the workspace fingerprint (HEAD + tracked diff + untracked contents
++ runtime identity) is unchanged — a reused verdict **appends no new evidence
+row**. Any git-visible change, a `fail`, an invalidated verdict, a non-`test`
+oracle, or a clause whose revision is new re-executes. Without the flag every
+runnable oracle re-runs as before; when reuse occurs the summary reports it
+inline, e.g. `34 pass, 0 fail, 5 pending, 12 reused — pass rate 100%, manual
+share 13% (4.7s)`.
 
 ## Operator queue and brief
 
@@ -72,6 +81,20 @@ Affected clauses (reverse closure):
   ...
 Affected tasks:
   specs/urtext/tasks.md T003 oracle runner 与证据库 (cites C004)
+```
+
+### `urtext impact <spec-path>#FR<n>`
+List every live clause whose `req:` uniquely resolves to the requirement, then
+their reverse `refs` closure and the tasks citing any affected clause. The one
+clause list marks every row `[direct]` or `[transitive]`. An existing but
+uncovered FR prints `none` and exits 0; an undeclared or tombstoned FR prints a
+clear error and exits 1.
+
+```text
+$ urtext impact specs/urtext/spec.md#FR013
+Affected clauses (direct + reverse closure):
+  [direct] specs/urtext/spec.md#C020
+  ...
 ```
 
 ## Clause ↔ code mapping (DWARF)
@@ -263,6 +286,7 @@ authoritative):
 | `verify` | validation/link error before oracles, or any clause oracle fails |
 | `status` | anything is pending in either lane |
 | `brief` | bad target, or any requested brief is refused (building/link-broken revision, unknown clause) |
+| `impact` | bad target format, or an undeclared/tombstoned FR |
 | `audit --import` | current coverage contains a `disagree` |
 | `gate` | any clause needs a human |
 | `map` | unknown clause, bad arguments, git failure, or a range that does not overlap the current `git diff` |

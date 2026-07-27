@@ -33,8 +33,9 @@ const setupRepo = (): string => {
   writeFileSync(
     join(root, 'specs/x/spec.md'),
     [
-      '## C001 money path <!-- oracle:cmd:true risk:high -->',
-      '## C002 label <!-- oracle:cmd:true -->',
+      '## FR001 test intent',
+      '## C001 money path <!-- oracle:cmd:true risk:high req:FR001 -->',
+      '## C002 label <!-- oracle:cmd:true req:FR001 -->',
     ].join('\n')
   )
   git(root, 'add', '-A')

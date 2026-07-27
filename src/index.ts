@@ -4,7 +4,9 @@ export {
   type OracleKind,
   type ClauseOracle,
   type ClauseRef,
+  type ClauseReq,
   type ParsedClause,
+  type ParsedRequirement,
   type ClauseParseError,
   type ParsedClauseFile,
 } from './clause-parser.js'
@@ -31,10 +33,16 @@ export {
   linkWorkspace,
   propagateStale,
   impact,
+  impactRequirement,
+  uncoveredRequirements,
   type LinkError,
   type ClauseKey,
+  type RequirementKey,
+  type RequirementCoverage,
   type StaleReport,
   type ImpactReport,
+  type RequirementImpactReport,
+  type RequirementImpactOutcome,
 } from './linker.js'
 export { runOracle, type OracleResult, type Verdict } from './oracle-runner.js'
 export {
@@ -115,6 +123,7 @@ export {
   type ReviewFacts,
   type ImpactDependent,
   type ClauseNavigation,
+  type RequirementBindingView,
   type SpecImpactView,
 } from './review-ui.js'
 export { renderConsolePage } from './ui/render-console.js'

@@ -25,10 +25,11 @@ const git = (root: string, ...args: string[]) => {
 }
 
 const SPEC = [
-  '## C001 money path <!-- oracle:cmd:true risk:high -->',
+  '## FR001 test intent',
+  '## C001 money path <!-- oracle:cmd:true risk:high req:FR001 -->',
   'v1 semantics',
-  '## C002 ship policy <!-- oracle:manual risk:high -->',
-  '## C003 naming taste <!-- oracle:manual -->',
+  '## C002 ship policy <!-- oracle:manual risk:high req:FR001 -->',
+  '## C003 naming taste <!-- oracle:manual req:FR001 -->',
 ].join('\n')
 
 const setupRepo = (): string => {

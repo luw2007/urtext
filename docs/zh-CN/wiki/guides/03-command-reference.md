@@ -23,14 +23,16 @@ Urtext 自身写入的唯一状态。注意，`test` 和 `cmd` oracle(判据) �
 还会因未映射的 working-tree 改动而失败——也就是不对应任何子句的手工编辑。
 这是语法和引用的 fail-closed 裁决门(gate)。
 
-### `urtext verify`
+### `urtext verify [--incremental]`
 先 index 和 check，再运行每个子句的 oracle，并记录只追加证据(evidence)。
 校验或链接错误（在任何 oracle 运行之前）*或者*任何失败的
 子句 oracle 都会 **Exit 1**。报告 pass-rate 和 manual-share：
 
 ```text
-34 pass, 0 fail, 5 pending — pass rate 100%, manual share 13%
+34 pass, 0 fail, 5 pending — pass rate 100%, manual share 13% (8.4s)
 ```
+
+带 `--incremental` 时，当工作区指纹（HEAD + 已跟踪 diff + 未跟踪内容 + 运行时身份）未变，verify 会复用此前通过且未失效的 `test`-oracle 判定——被复用的子句**不再追加新的证据行**。任何 git 可见改动、`fail`、已失效判定、非 `test` oracle，或修订为新增的子句都会重新执行。不带该标志时，所有可运行 oracle 照常逐个重跑；复用发生时汇总行会内联报告复用数，例如 `34 pass, 0 fail, 5 pending, 12 reused — pass rate 100%, manual share 13% (4.7s)`。
 
 ## 操作队列与简报
 
@@ -66,6 +68,19 @@ Affected clauses (reverse closure):
   ...
 Affected tasks:
   specs/urtext/tasks.md T003 oracle runner 与证据库 (cites C004)
+```
+
+### `urtext impact <spec-path>#FR<n>`
+列出 `req:` 唯一解析到该需求的所有活跃子句，再列出它们在 `refs` 图上的反向闭包，
+以及引用任一受影响子句的任务。单一子句列表用 `[direct]` / `[transitive]` 标识来源。
+FR 已声明但无人守护时打印 `none` 并 Exit 0；FR 未声明或已 tombstone 时清楚报错并
+Exit 1。
+
+```text
+$ urtext impact specs/urtext/spec.md#FR013
+Affected clauses (direct + reverse closure):
+  [direct] specs/urtext/spec.md#C020
+  ...
 ```
 
 ## 子句 ↔ 代码映射 (DWARF)
@@ -187,6 +202,7 @@ daemon；Ctrl-C 时 Exit 0。
 | `verify` | oracle 运行前出现校验/链接错误，或任何子句 oracle 失败 |
 | `status` | 任一车道存在待办 |
 | `brief` | 目标错误，或任一简报被拒绝（building/引用悬空修订、未知子句） |
+| `impact` | 目标格式错误，或 FR 未声明/已 tombstone |
 | `audit --import` | 当前覆盖包含 `disagree` |
 | `gate` | 任何子句需要人 |
 | `map` | 未知子句、参数错误、git failure，或范围没有与当前 `git diff` 重叠 |

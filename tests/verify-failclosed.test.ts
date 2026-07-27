@@ -16,7 +16,7 @@ const makeWorkspace = (specContent: string): string => {
   const root = mkdtempSync(join(tmpdir(), 'urtext-failclosed-'))
   tempDirs.push(root)
   mkdirSync(join(root, 'specs/x'), { recursive: true })
-  writeFileSync(join(root, 'specs/x/spec.md'), specContent)
+  writeFileSync(join(root, 'specs/x/spec.md'), `## FR001 test intent\n${specContent}`)
   return root
 }
 
@@ -33,7 +33,7 @@ afterEach(() => {
 describe('fail-closed rescan of building specs', () => {
   test('an unchanged building file keeps status building and re-reports its errors', () => {
     // Space in a cmd oracle value → malformed_anchor → building.
-    const root = makeWorkspace('## C001 broken <!-- oracle:cmd:node scripts/x.mjs -->\n')
+    const root = makeWorkspace('## C001 broken <!-- oracle:cmd:node scripts/x.mjs req:FR001 -->\n')
 
     const first = scanWorkspace(db, root).outcomes[0]!.outcome
     expect(first).toMatchObject({ kind: 'indexed', status: 'building' })
@@ -48,7 +48,7 @@ describe('fail-closed rescan of building specs', () => {
   })
 
   test('a building spec exposes no ready clauses to verify', () => {
-    const root = makeWorkspace('## C001 broken <!-- oracle:cmd:node scripts/x.mjs -->\n')
+    const root = makeWorkspace('## C001 broken <!-- oracle:cmd:node scripts/x.mjs req:FR001 -->\n')
     scanWorkspace(db, root)
     scanWorkspace(db, root)
     expect(verifyWorkspace(db, root).verdicts).toHaveLength(0)
@@ -56,7 +56,7 @@ describe('fail-closed rescan of building specs', () => {
 })
 
 describe('single-clause verify and evidence duration', () => {
-  const TWO_CLAUSES = ['## C001 a <!-- oracle:cmd:true -->', '', '## C002 b <!-- oracle:cmd:true -->', ''].join('\n')
+  const TWO_CLAUSES = ['## C001 a <!-- oracle:cmd:true req:FR001 -->', '', '## C002 b <!-- oracle:cmd:true req:FR001 -->', ''].join('\n')
 
   test('the only-filter runs exactly the targeted clause', () => {
     const root = makeWorkspace(TWO_CLAUSES)

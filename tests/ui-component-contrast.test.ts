@@ -16,7 +16,7 @@ import { describe, expect, test } from 'vitest'
 import type { UiSnapshot } from '../src/review-ui.js'
 import { renderBriefErrorPage, renderBriefPage } from '../src/ui/render-brief.js'
 import { renderConsoleFamilyPage, type ConsoleRoute } from '../src/ui/render-console.js'
-import type { BriefPageInput } from '../src/ui/contracts.js'
+import type { BriefPageInput, RequirementBindingView } from '../src/ui/contracts.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(__dirname, '..')
@@ -51,6 +51,7 @@ interface ErrorFixture {
   page: 'error'
   branches: string[]
   message: string
+  requirementBindings?: RequirementBindingView[]
 }
 type Fixture = ConsoleFixture | BriefFixture | ErrorFixture
 
@@ -82,6 +83,7 @@ const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as ContrastManif
 const SOURCE_FILES = [
   'src/ui/theme.ts',
   'src/ui/html.ts',
+  'src/ui/contracts.ts',
   'src/ui/pagination.ts',
   'src/ui/render-console.ts',
   'src/ui/render-brief.ts',
@@ -103,11 +105,11 @@ const renderFixture = (fixture: Fixture): string => {
       ...(fixture.auditResult !== undefined ? { auditResult: fixture.auditResult } : {}),
     })
   if (fixture.page === 'brief') return renderBriefPage(fixture.input)
-  return renderBriefErrorPage(fixture.message)
+  return renderBriefErrorPage(fixture.message, fixture.requirementBindings)
 }
 
 describe('ui contrast manifest — freshness', () => {
-  test('sourceContractSha256 matches the seven source files + fixtureMatrix bytes, re-read now', () => {
+  test('sourceContractSha256 matches the eight source files + fixtureMatrix bytes, re-read now', () => {
     const hash = createHash('sha256')
     for (const path of SOURCE_FILES) hash.update(frame(path, readFileSync(join(ROOT, path))))
     hash.update(frame('fixtureMatrix', Buffer.from(JSON.stringify(manifest.fixtureMatrix), 'utf8')))
@@ -182,6 +184,8 @@ const CANONICAL_BRANCHES = [
   'console.specs.empty',
   'console.decided.empty',
   'console.decided.nonEmpty',
+  'console.uncoveredIntent.empty',
+  'console.uncoveredIntent.nonEmpty',
   'brief.risk.low',
   'brief.risk.high',
   'brief.reviewable.false',
@@ -200,7 +204,10 @@ const CANONICAL_BRANCHES = [
   'brief.nav.prevAbsent',
   'brief.nav.nextPresent',
   'brief.nav.nextAbsent',
+  'brief.requirementBindings.resolved',
   'error.page',
+  'error.requirementBindings.dangling',
+  'error.requirementBindings.ambiguous',
 ] as const
 
 describe('ui contrast manifest — visible-branch coverage', () => {

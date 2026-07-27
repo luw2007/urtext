@@ -47,10 +47,10 @@ $ urtext verify
   ? C006 CLI 帮助面命令集变更需人工确认 (manual, pending)
   ? C504 模型路由是人类决策 (manual, pending)
 
-34 pass, 0 fail, 5 pending — pass rate 100%, manual share 13%
+34 pass, 0 fail, 5 pending — pass rate 100%, manual share 13% (12.7s)
 ```
 
-仔细读最后一行，因为这是用三个数字表达的哲学：
+仔细读最后一行——这是用三个比率加一个墙钟表达的哲学：
 
 - **`34 pass, 0 fail`** — 完成是*客观证据的聚合*，而不是
   AI 给出的分数。每一个绿色标记都是一个实际运行并且
@@ -64,6 +64,13 @@ $ urtext verify
   每次 `verify` 都会打印这个占比，并在超过 50% 时警告；上升趋势意味着
   [中心赌注](../concepts/03-why-decidable.md)正在失败。13% 舒适地
   低于这条线。
+- **`(12.7s)`** — 整次运行的墙钟耗时。它*不是*逐子句耗时之和：test oracle 共享同一个批量 vitest 进程，所以各部分永远加不成整体。
+
+## 批量执行与增量复用
+
+test oracle 在**单个批量 vitest 进程**中运行——不同 ref 去重，逐子句判定由 vitest 的 JSON 报告按子串 ref 语义归因，遇到未匹配 ref、批量失败或无法解释的非零退出时一律 fail-closed。因为所有子句共享同一进程，逐子句耗时不再等于墙钟耗时。设置 `URTEXT_VERIFY_BATCH=0` 可回退到逐 ref 运行。
+
+`urtext verify --incremental` 在工作区指纹（HEAD + 已跟踪 diff + 未跟踪内容 + 运行时身份）未变时复用通过且未失效的 `test`-oracle 判定；被复用的判定不追加证据行。任何 git 可见改动、`fail`、已失效判定、非 `test` oracle 或修订为新增的子句都会强制重新执行。
 
 ## 完成是聚合，不是意见
 

@@ -2,7 +2,7 @@ import { execFileSync, spawnSync } from 'node:child_process'
 import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, sep } from 'node:path'
 
-import { parseClauseFile, type ParsedClause } from './clause-parser.js'
+import { parseClauseFile, type ParsedClause, type ParsedRequirement } from './clause-parser.js'
 
 export interface FeatureDeclaration {
   path: string
@@ -282,7 +282,7 @@ const renderBaselineClauses = (domain: string, groups: ObservedBaselineGroup[]):
     '**Status**: Observed fact baseline — not product intent',
     '',
     ...groups.flatMap((group) => [
-      `## ${group.clauseId} Existing tests execute for ${domain} <!-- oracle:cmd:${encodedCommand(group.command)} -->`,
+      `## Baseline ${group.clauseId} — existing tests execute for ${domain} <!-- oracle:cmd:${encodedCommand(group.command)} -->`,
       '',
       `Given the recorded workspace HEAD,`,
       `When ${group.testFiles.map((path) => `\`${path}\``).join(', ')} run,`,
@@ -579,18 +579,27 @@ const isEligible = (clause: ParsedClause, workspaceRoot: string): boolean =>
   !hasPendingHumanDecision(clause.body) &&
   hasExistingTestOracle(clause, workspaceRoot) && hasResolvableCommandOracle(clause, workspaceRoot)
 
+const stripReviewMarkers = (body: string | null): string =>
+  body
+    ?.split('\n')
+    .filter((line) => !/^\*\*(Confidence|Evidence|Human decision needed|Review decision)\*\*:/.test(line))
+    .join('\n')
+    .trim() ?? ''
+
 const renderClause = (clause: ParsedClause): string => {
   const anchor = [
     `oracle:${clause.oracle!.kind}${clause.oracle!.ref ? `:${clause.oracle!.ref}` : ''}`,
     ...(clause.risk === 'high' ? ['risk:high'] : []),
     ...(clause.refs.length > 0 ? [`refs:${clause.refs.map((ref) => `${ref.path}#${ref.clauseId}`).join(',')}`] : []),
+    ...(clause.reqs.length > 0 ? [`req:${clause.reqs.map((req) => req.path === null ? req.reqId : `${req.path}#${req.reqId}`).join(',')}`] : []),
   ].join(' ')
-  const body = clause.body
-    ?.split('\n')
-    .filter((line) => !/^\*\*(Confidence|Evidence|Human decision needed|Review decision)\*\*:/.test(line))
-    .join('\n')
-    .trim()
+  const body = stripReviewMarkers(clause.body)
   return `## ${clause.clauseId} ${clause.title} <!-- ${anchor} -->${body ? `\n\n${body}` : ''}`
+}
+
+const renderRequirement = (requirement: ParsedRequirement): string => {
+  const body = stripReviewMarkers(requirement.body)
+  return `## ${requirement.reqId} ${requirement.title}${body ? `\n\n${body}` : ''}`
 }
 
 export const promote = (
@@ -629,17 +638,30 @@ export const promote = (
   } catch {
     mkdirSync(join(workspaceRoot, targetFeature), { recursive: true })
   }
-  const existingIds = new Set(
-    listFiles(workspaceRoot, targetFeature)
-      .filter((path) => path.endsWith('.md'))
-      .flatMap((path) => parseClauseFile(readFileSync(join(workspaceRoot, path), 'utf8')).clauses)
-      .map((clause) => clause.clauseId)
-  )
+  const targetFiles = listFiles(workspaceRoot, targetFeature)
+    .filter((path) => path.endsWith('.md'))
+    .map((path) => parseClauseFile(readFileSync(join(workspaceRoot, path), 'utf8')))
+  const existingIds = new Set(targetFiles.flatMap((file) => file.clauses).map((clause) => clause.clauseId))
+  const existingReqIds = new Set(targetFiles.flatMap((file) => file.requirements).map((requirement) => requirement.reqId))
   for (const clause of promoted) {
     if (existingIds.has(clause.clauseId)) throw new Error(`target already declares ${clause.clauseId}`)
   }
+  // A promotion must leave a workspace that still checks clean: carry the
+  // draft's declarations for unit-local reqs the target does not declare.
+  const draftRequirements = new Map(parsed.requirements.map((requirement) => [requirement.reqId, requirement]))
+  const carried: ParsedRequirement[] = []
+  for (const clause of promoted) {
+    for (const req of clause.reqs) {
+      if (req.path !== null || existingReqIds.has(req.reqId)) continue
+      const declaration = draftRequirements.get(req.reqId)
+      if (!declaration) throw new Error(`draft does not declare ${req.reqId}`)
+      carried.push(declaration)
+      existingReqIds.add(req.reqId)
+    }
+  }
   if (promoted.length > 0) {
-    writeFileSync(targetPath, `${existing ? `${existing}\n\n` : '# Executable clauses\n\n'}${promoted.map(renderClause).join('\n\n')}\n`)
+    const sections = [...carried.map(renderRequirement), ...promoted.map(renderClause)]
+    writeFileSync(targetPath, `${existing ? `${existing}\n\n` : '# Executable clauses\n\n'}${sections.join('\n\n')}\n`)
   }
   return { promoted: promoted.map((clause) => clause.clauseId), retained }
 }

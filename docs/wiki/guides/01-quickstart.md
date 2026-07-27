@@ -74,7 +74,7 @@ test passes, you get a line like:
 ```text
   ✓ C001 Coupons must not stack [high] (test, pass)
 
-1 pass, 0 fail, 0 pending — pass rate 100%, manual share 0%
+1 pass, 0 fail, 0 pending — pass rate 100%, manual share 0% (2.1s)
 ```
 
 That green mark is not an AI's opinion that your code looks right. It is an oracle
