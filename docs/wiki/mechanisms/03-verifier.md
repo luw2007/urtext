@@ -47,10 +47,10 @@ $ urtext verify
   ? C006 CLI 帮助面命令集变更需人工确认 (manual, pending)
   ? C504 模型路由是人类决策 (manual, pending)
 
-34 pass, 0 fail, 5 pending — pass rate 100%, manual share 13%
+34 pass, 0 fail, 5 pending — pass rate 100%, manual share 13% (12.7s)
 ```
 
-Read the last line carefully, because it is the philosophy in three numbers:
+Read the last line carefully — it is the philosophy in three ratios and a wall clock:
 
 - **`34 pass, 0 fail`** — completion is an *aggregate of objective evidence*, not
   a score an AI assigned. Every green mark is an oracle that actually ran and
@@ -64,6 +64,24 @@ Read the last line carefully, because it is the philosophy in three numbers:
   Every `verify` prints this share and warns above 50%; a rising trend means the
   [central bet](../concepts/03-why-decidable.md) is failing. Thirteen is
   comfortably under the line.
+- **`(12.7s)`** — a wall clock for the whole run. It is *not* the sum of
+  per-clause durations: test oracles share one batched vitest process, so the
+  parts never add up to the whole.
+
+## Batched execution and incremental reuse
+
+Test oracles run in **one batched vitest process** — distinct refs are
+deduplicated, per-clause verdicts are attributed from vitest's JSON report using
+substring ref semantics, and the run fails closed on unmatched refs, a batch
+failure, or an unexplained non-zero exit. Because one process serves every
+clause, per-clause durations no longer sum to the wall time. Set
+`URTEXT_VERIFY_BATCH=0` to restore per-ref runs.
+
+`urtext verify --incremental` reuses a passing, non-stale `test`-oracle verdict
+when the workspace fingerprint (HEAD + tracked diff + untracked contents +
+runtime identity) is unchanged; a reused verdict appends no evidence row. Any
+git-visible change, a `fail`, an invalidated verdict, a non-`test` oracle, or a
+new-revision clause forces re-execution.
 
 ## Completion is an aggregate, not an opinion
 

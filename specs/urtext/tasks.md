@@ -32,3 +32,5 @@
     parser FR/req 与五个新错误码；requirements+clause_reqs 表；grammar version 强制重扫；linker unknown_req/ambiguous_req 与 FR stale；status 未覆盖需求区块；三个 feature 的 FR 迁移。
 - [ ] T017 FR impact 与 UI observability <!-- role:coder depends:T016 gate:true clauses:C025,C026 -->
     FR direct+refs closure 查询、CLI C/FR target 分派、detail req resolved/broken 状态、queue uncovered intent、contrast manifest 与真实 browser acceptance。
+- [ ] T018 verify 批量与增量性能 <!-- role:coder depends:T017 gate:true clauses:C027 -->
+    单 vitest 批量执行去重 test oracle；workspace fingerprint 增量复用（--incremental，opt-in）；fail-closed 归因与 batch≡solo 等价测试；全量 ~600s→~50s。

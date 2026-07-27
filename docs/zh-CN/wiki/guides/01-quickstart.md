@@ -74,7 +74,7 @@ urtext verify
 ```text
   ✓ C001 Coupons must not stack [high] (test, pass)
 
-1 pass, 0 fail, 0 pending — pass rate 100%, manual share 0%
+1 pass, 0 fail, 0 pending — pass rate 100%, manual share 0% (2.1s)
 ```
 
 这个绿色标记不是 AI 觉得你的代码看起来正确的意见。它是一个 oracle

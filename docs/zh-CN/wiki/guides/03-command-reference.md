@@ -23,14 +23,16 @@ Urtext 自身写入的唯一状态。注意，`test` 和 `cmd` oracle(判据) �
 还会因未映射的 working-tree 改动而失败——也就是不对应任何子句的手工编辑。
 这是语法和引用的 fail-closed 裁决门(gate)。
 
-### `urtext verify`
+### `urtext verify [--incremental]`
 先 index 和 check，再运行每个子句的 oracle，并记录只追加证据(evidence)。
 校验或链接错误（在任何 oracle 运行之前）*或者*任何失败的
 子句 oracle 都会 **Exit 1**。报告 pass-rate 和 manual-share：
 
 ```text
-34 pass, 0 fail, 5 pending — pass rate 100%, manual share 13%
+34 pass, 0 fail, 5 pending — pass rate 100%, manual share 13% (8.4s)
 ```
+
+带 `--incremental` 时，当工作区指纹（HEAD + 已跟踪 diff + 未跟踪内容 + 运行时身份）未变，verify 会复用此前通过且未失效的 `test`-oracle 判定——被复用的子句**不再追加新的证据行**。任何 git 可见改动、`fail`、已失效判定、非 `test` oracle，或修订为新增的子句都会重新执行。不带该标志时，所有可运行 oracle 照常逐个重跑；复用发生时汇总行会内联报告复用数，例如 `34 pass, 0 fail, 5 pending, 12 reused — pass rate 100%, manual share 13% (4.7s)`。
 
 ## 操作队列与简报
 
