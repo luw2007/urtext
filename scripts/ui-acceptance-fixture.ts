@@ -213,6 +213,36 @@ export const buildFixture = (root: string): FixtureHandle => {
     db.close()
     throw new Error(`fixture C002 has an invalid stale stamp: ${JSON.stringify(staleEvidence)}`)
   }
+
+  // The spec edit creates revision 2 for every clause in the file. Rebuild
+  // only C004's evidence/audit pair so its review lane describes that live
+  // revision, while C001 -> C002 remains the fixture's intentionally stale
+  // propagation chain.
+  const reviewVerification = verifyWorkspace(
+    db,
+    root,
+    { specPath: 'specs/demo/spec.md', clauseId: 'C004' }
+  )
+  if (reviewVerification.counts.pass !== 1) {
+    db.close()
+    throw new Error(`fixture C004 re-verification failed: ${JSON.stringify(reviewVerification.counts)}`)
+  }
+  const reviewItem = exportRequest(db).items.find(
+    (item) => item.specPath === 'specs/demo/spec.md' && item.clauseId === 'C004'
+  )
+  if (reviewItem === undefined) {
+    db.close()
+    throw new Error('fixture C004 current-revision evidence was not auditable')
+  }
+  const reviewAudit = importVerdicts(
+    db,
+    [{ evidenceId: reviewItem.evidenceId, auditor: 'acceptance-fixture', verdict: 'agree' }],
+    timestamp
+  )
+  if (reviewAudit.kind !== 'imported') {
+    db.close()
+    throw new Error(`fixture C004 current-revision audit failed: ${reviewAudit.message}`)
+  }
   const implementationSha = runGit(root, ['rev-parse', 'HEAD'])
 
   if (worktreeDirty(root) !== false) {

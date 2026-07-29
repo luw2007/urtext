@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -29,6 +30,22 @@ const scratch = (prefix: string): string => {
 const worktreeDirty = (root: string): boolean => {
   const result = spawnSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' })
   return result.stdout.trim().length > 0
+}
+
+const observedDiffFingerprint = (root: string, baselineSha: string, filePath: string): string => {
+  const result = spawnSync('git', ['diff', '--unified=0', baselineSha, '--', filePath], {
+    cwd: root,
+    encoding: 'utf8',
+  })
+  if (result.status !== 0) throw new Error(result.stderr || `git diff failed for ${filePath}`)
+  const lines = result.stdout.split('\n')
+  const header = lines.findIndex((line) => line.startsWith('@@ '))
+  if (header < 0) throw new Error(`no observed diff hunk for ${filePath}`)
+  const fingerprintInput = lines
+    .slice(header)
+    .filter((line, index) => index === 0 || /^(?:[+-]|\\)/.test(line))
+    .join('\n')
+  return createHash('sha256').update(fingerprintInput).digest('hex')
 }
 
 let repeatHandleA: FixtureHandle | undefined
@@ -124,6 +141,21 @@ describe('S4 acceptance fixture — five real mapping diffs', () => {
       expect(mapping.diff).toContain('+  const base')
       expect(mapping.diff).toContain('updated by acceptance fixture')
       expect(mapping.lineStart).toBeLessThanOrEqual(mapping.lineEnd)
+    }
+    const provenance = handle.db
+      .prepare(
+        `SELECT file_path AS filePath, commit_sha AS commitSha, diff_fingerprint AS diffFingerprint
+         FROM clause_code_map
+         WHERE kind = 'clause' AND spec_path = 'specs/demo/spec.md' AND clause_id = 'C004'
+         ORDER BY file_path`
+      )
+      .all() as { filePath: string; commitSha: string; diffFingerprint: string | null }[]
+    expect(provenance).toHaveLength(5)
+    for (const mapping of provenance) {
+      expect(mapping.commitSha).toBe(handle.mappingBaselineSha)
+      expect(mapping.diffFingerprint).toBe(
+        observedDiffFingerprint(handle.root, handle.mappingBaselineSha, mapping.filePath)
+      )
     }
     expect(worktreeDirty(handle.root)).toBe(false)
   })
