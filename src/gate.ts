@@ -20,6 +20,7 @@ import type { Database } from 'better-sqlite3'
 import { coverage } from './audit.js'
 import { decisionsAtHead, type DecisionVerdict } from './decision.js'
 import { reviewsAtHead } from './review.js'
+import type { ScanReport } from './scanner.js'
 import { ensureEvidenceLedger } from './verifier.js'
 
 export type Decision = 'auto-pass' | 'human'
@@ -49,6 +50,12 @@ export interface GateReport {
   overall: Decision
   /** Top-level triggers: per-clause escalations plus unmapped changes. */
   reasons: string[]
+}
+
+export interface GateOptions {
+  dirtyWorktree?: boolean
+  /** Current scanner/check outcomes that must block adjudication when invalid. */
+  scanReport?: Pick<ScanReport, 'outcomes' | 'linkErrors'>
 }
 
 interface LiveClauseRow {
@@ -124,7 +131,7 @@ export const adjudicate = (
   db: Database,
   unmappedCount = 0,
   headSha?: string,
-  opts: { dirtyWorktree?: boolean } = {}
+  opts: GateOptions = {}
 ): GateReport => {
   const evidence = evidenceByClause(db)
   const audits = coverage(db)
@@ -206,6 +213,21 @@ export const adjudicate = (
   }
   if (unmappedCount > 0) {
     reasons.push(`${unmappedCount} unmapped change(s) (P3: write back to spec or ack)`)
+  }
+  const buildingCount =
+    opts.scanReport?.outcomes.filter(
+      ({ outcome }) => outcome.kind !== 'tombstoned' && outcome.status === 'building'
+    ).length ?? 0
+  if (buildingCount > 0) {
+    reasons.push(
+      `${buildingCount} building revision(s) — fix \`urtext check\` failures before adjudicating`
+    )
+  }
+  const linkErrorCount = opts.scanReport?.linkErrors.length ?? 0
+  if (linkErrorCount > 0) {
+    reasons.push(
+      `${linkErrorCount} unresolved link error(s) — fix \`urtext check\` failures before adjudicating`
+    )
   }
   return {
     decisions,

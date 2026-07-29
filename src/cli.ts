@@ -366,7 +366,7 @@ export const run = (argv: string[]): number => {
     }
 
     if (command === 'gate') {
-      scanWorkspace(db, workspaceRoot)
+      const scanReport = scanWorkspace(db, workspaceRoot)
       let unmappedCount = 0
       if (argv.includes('--diff')) {
         const unmappedReport = detectUnmapped(db, workspaceRoot)
@@ -378,7 +378,10 @@ export const run = (argv: string[]): number => {
       }
       const head = currentHead(workspaceRoot)
       const dirty = worktreeDirty(workspaceRoot) ?? false
-      const report = adjudicate(db, unmappedCount, head ?? undefined, { dirtyWorktree: dirty })
+      const report = adjudicate(db, unmappedCount, head ?? undefined, {
+        dirtyWorktree: dirty,
+        scanReport,
+      })
       if (argv.includes('--json')) {
         console.log(
           JSON.stringify({ schema: 'urtext.gate/1', head, worktreeDirty: dirty, ...report }, null, 2)
