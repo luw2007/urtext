@@ -205,6 +205,7 @@ describe('adjudicate (risk-tier gate)', () => {
   })
 })
 
+// TDD RED checkpoint: scanner/check invalid states must participate in gate semantics.
 describe('adjudicate scan blockers', () => {
   const auditAgree = (clauseId: string) =>
     importVerdicts(db, [{ evidenceId: evidenceIdFor(clauseId), auditor: 'codex', verdict: 'agree' }], 1)
