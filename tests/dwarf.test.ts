@@ -64,6 +64,31 @@ describe('diffHunks', () => {
     const result = diffHunks(root)
     expect('hunks' in result && result.hunks).toEqual([])
   })
+
+  test('reports the full new-side range of an untracked text file', () => {
+    const root = setupRepo()
+    writeFileSync(join(root, 'src/new.ts'), ['const first = 1', 'const second = 2', ''].join('\n'))
+
+    const result = diffHunks(root)
+
+    expect('hunks' in result && result.hunks).toEqual([
+      { filePath: 'src/new.ts', lineStart: 1, lineEnd: 2 },
+    ])
+  })
+
+  test('reports a sentinel range when a tracked binary diff has no textual hunk', () => {
+    const root = setupRepo()
+    writeFileSync(join(root, 'src/blob.bin'), Buffer.from([0, 1, 2]))
+    git(root, 'add', 'src/blob.bin')
+    git(root, 'commit', '-q', '-m', 'add binary fixture')
+    writeFileSync(join(root, 'src/blob.bin'), Buffer.from([0, 1, 3]))
+
+    const result = diffHunks(root)
+
+    expect('hunks' in result && result.hunks).toEqual([
+      { filePath: 'src/blob.bin', lineStart: 1, lineEnd: 1 },
+    ])
+  })
 })
 
 describe('recordMapping', () => {
@@ -157,6 +182,50 @@ describe('detectUnmapped', () => {
     expect(ack.kind).toBe('acked')
     const result = detectUnmapped(db, root)
     expect('unmapped' in result && result.unmapped).toEqual([])
+  })
+
+  test('an oversized same-HEAD mapping does not swallow a later separate edit', () => {
+    const root = setupRepo()
+    writeFileSync(join(root, 'src/impl.ts'), ['const a = 1', 'const b = 20', 'const c = 3', ''].join('\n'))
+    const mapped = recordMapping(
+      db,
+      { specPath: 'specs/x/spec.md', clauseId: 'C001', filePath: 'src/impl.ts', lineStart: 1, lineEnd: 999 },
+      root,
+      1
+    )
+    expect(mapped.kind).toBe('mapped')
+
+    writeFileSync(
+      join(root, 'src/impl.ts'),
+      ['const a = 1', 'const b = 20', 'const c = 3', 'const d = 4', ''].join('\n')
+    )
+
+    const result = detectUnmapped(db, root)
+    expect('unmapped' in result && result.unmapped).toEqual([
+      { filePath: 'src/impl.ts', lineStart: 4, lineEnd: 4 },
+    ])
+  })
+
+  test('an oversized same-HEAD ack does not swallow a later separate edit', () => {
+    const root = setupRepo()
+    writeFileSync(join(root, 'src/impl.ts'), ['const a = 1', 'const b = 20', 'const c = 3', ''].join('\n'))
+    const acked = recordAck(
+      db,
+      { filePath: 'src/impl.ts', lineStart: 1, lineEnd: 999, note: 'bounded ack' },
+      root,
+      1
+    )
+    expect(acked.kind).toBe('acked')
+
+    writeFileSync(
+      join(root, 'src/impl.ts'),
+      ['const a = 1', 'const b = 20', 'const c = 3', 'const d = 4', ''].join('\n')
+    )
+
+    const result = detectUnmapped(db, root)
+    expect('unmapped' in result && result.unmapped).toEqual([
+      { filePath: 'src/impl.ts', lineStart: 4, lineEnd: 4 },
+    ])
   })
 
   test('editing a spec file IS the attribution (write-back)', () => {
