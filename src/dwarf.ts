@@ -14,6 +14,8 @@
  */
 
 import { spawnSync } from 'node:child_process'
+import { lstatSync, readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 
 import type { Database } from 'better-sqlite3'
 
@@ -88,6 +90,40 @@ const git = (args: string[], cwd: string): { ok: boolean; stdout: string; error:
   return { ok: true, stdout: result.stdout ?? '', error: '' }
 }
 
+interface StatusPath {
+  filePath: string
+  untracked: boolean
+}
+
+const statusPaths = (stdout: string): StatusPath[] => {
+  const records = stdout.split('\0')
+  const paths: StatusPath[] = []
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index]
+    if (record.length < 4) continue
+    const status = record.slice(0, 2)
+    paths.push({ filePath: record.slice(3), untracked: status === '??' })
+    // Porcelain v1 -z emits an extra NUL-delimited source path for renames/copies.
+    if (/[RC]/.test(status)) index += 1
+  }
+  return paths
+}
+
+const untrackedLineEnd = (workspaceRoot: string, filePath: string): number => {
+  try {
+    const path = resolve(workspaceRoot, filePath)
+    if (!lstatSync(path).isFile()) return 1
+    const content = readFileSync(path)
+    if (content.length === 0 || content.includes(0)) return 1
+    const text = content.toString('utf8')
+    return Math.max(1, text.endsWith('\n') ? text.split('\n').length - 1 : text.split('\n').length)
+  } catch {
+    // A file may disappear between status and read; retaining a sentinel keeps
+    // the observed dirty path fail-closed instead of silently dropping it.
+    return 1
+  }
+}
+
 /**
  * Working-tree hunks vs HEAD, new-side line numbers (`--unified=0` so hunk
  * bounds are exact). A pure deletion has zero new-side lines; it anchors to
@@ -96,6 +132,8 @@ const git = (args: string[], cwd: string): { ok: boolean; stdout: string; error:
 export const diffHunks = (workspaceRoot: string): { hunks: DiffHunk[] } | { error: string } => {
   const diff = git(['diff', '--unified=0', 'HEAD'], workspaceRoot)
   if (!diff.ok) return { error: `git diff failed: ${diff.error}` }
+  const status = git(['status', '--porcelain=v1', '-z', '--untracked-files=all'], workspaceRoot)
+  if (!status.ok) return { error: `git status failed: ${status.error}` }
 
   const hunks: DiffHunk[] = []
   let currentFile: string | null = null
@@ -122,6 +160,19 @@ export const diffHunks = (workspaceRoot: string): { hunks: DiffHunk[] } | { erro
       lineEnd: anchored + Math.max(count, 1) - 1,
     })
   }
+
+  for (const changed of statusPaths(status.stdout)) {
+    if (hunks.some((hunk) => hunk.filePath === changed.filePath)) continue
+    hunks.push({
+      filePath: changed.filePath,
+      lineStart: 1,
+      lineEnd: changed.untracked ? untrackedLineEnd(workspaceRoot, changed.filePath) : 1,
+    })
+  }
+  hunks.sort(
+    (left, right) =>
+      left.filePath.localeCompare(right.filePath) || left.lineStart - right.lineStart
+  )
   return { hunks }
 }
 
@@ -148,19 +199,19 @@ const headSha = (workspaceRoot: string): string | null => {
   return head.ok ? head.stdout.trim() : null
 }
 
-/** Shared cross-verification: the claimed range must intersect a real hunk. */
+/** Shared cross-verification: bind the claim to the real hunk it intersects. */
 const verifyRange = (
   workspaceRoot: string,
   filePath: string,
   lineStart: number,
   lineEnd: number,
   verb: string
-): { sha: string } | { rejected: MapOutcome & { kind: 'rejected' } } => {
+): { sha: string; hunk: DiffHunk } | { rejected: MapOutcome & { kind: 'rejected' } } => {
   const result = diffHunks(workspaceRoot)
   if ('error' in result) {
     return { rejected: { kind: 'rejected', code: 'git_failed', message: result.error } }
   }
-  const touched = result.hunks.some(
+  const touched = result.hunks.find(
     (hunk) =>
       hunk.filePath === filePath && overlaps(hunk.lineStart, hunk.lineEnd, lineStart, lineEnd)
   )
@@ -177,7 +228,7 @@ const verifyRange = (
   if (sha === null) {
     return { rejected: { kind: 'rejected', code: 'git_failed', message: 'git rev-parse HEAD failed' } }
   }
-  return { sha }
+  return { sha, hunk: touched }
 }
 
 /**
@@ -218,8 +269,8 @@ export const recordMapping = (
       claim.specPath,
       claim.clauseId,
       claim.filePath,
-      claim.lineStart,
-      claim.lineEnd,
+      verified.hunk.lineStart,
+      verified.hunk.lineEnd,
       verified.sha,
       claim.note ?? null,
       timestamp
@@ -248,7 +299,14 @@ export const recordAck = (
          (kind, file_path, line_start, line_end, commit_sha, note, created_at)
        VALUES ('ack', ?, ?, ?, ?, ?, ?)`
     )
-    .run(ack.filePath, ack.lineStart, ack.lineEnd, verified.sha, ack.note, timestamp)
+    .run(
+      ack.filePath,
+      verified.hunk.lineStart,
+      verified.hunk.lineEnd,
+      verified.sha,
+      ack.note,
+      timestamp
+    )
   return { kind: 'acked', id: Number(inserted.lastInsertRowid), commitSha: verified.sha }
 }
 
@@ -261,7 +319,7 @@ interface MappingRow {
 
 /**
  * Attribute every working-tree hunk. A hunk is accounted for when it
- * intersects a clause mapping or ack recorded AT THE CURRENT HEAD (older
+ * exactly matches a clause mapping or ack recorded AT THE CURRENT HEAD (older
  * mappings describe other code states), or when it edits `specs/**` markdown
  * — writing the spec back IS the attribution.
  */
@@ -290,7 +348,8 @@ export const detectUnmapped = (
     return !rows.some(
       (row) =>
         row.file_path === hunk.filePath &&
-        overlaps(row.line_start, row.line_end, hunk.lineStart, hunk.lineEnd)
+        row.line_start === hunk.lineStart &&
+        row.line_end === hunk.lineEnd
     )
   })
   return { hunks: result.hunks, unmapped }
