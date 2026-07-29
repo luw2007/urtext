@@ -15,7 +15,7 @@
 
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { lstatSync, readFileSync } from 'node:fs'
+import { lstatSync, readFileSync, readlinkSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 import type { Database } from 'better-sqlite3'
@@ -128,26 +128,36 @@ const statusPaths = (stdout: string): StatusPath[] => {
   return paths
 }
 
-const fileFingerprint = (workspaceRoot: string, filePath: string): string => {
-  try {
-    return fingerprint(readFileSync(resolve(workspaceRoot, filePath)))
-  } catch {
-    return fingerprint('missing')
-  }
+const untrackedLineEnd = (content: Buffer): number => {
+  if (content.length === 0 || content.includes(0)) return 1
+  const text = content.toString('utf8')
+  return Math.max(1, text.endsWith('\n') ? text.split('\n').length - 1 : text.split('\n').length)
 }
 
-const untrackedLineEnd = (workspaceRoot: string, filePath: string): number => {
+const statusFallback = (
+  workspaceRoot: string,
+  changed: StatusPath
+): { lineEnd: number; fingerprint: string } | { error: string } => {
+  const path = resolve(workspaceRoot, changed.filePath)
   try {
-    const path = resolve(workspaceRoot, filePath)
-    if (!lstatSync(path).isFile()) return 1
+    const stats = lstatSync(path)
+    if (stats.isSymbolicLink()) {
+      return {
+        lineEnd: 1,
+        fingerprint: fingerprint(`symlink\0${readlinkSync(path)}`),
+      }
+    }
+    if (!stats.isFile()) {
+      return { error: `status fingerprint failed for ${changed.filePath}: unsupported file type` }
+    }
     const content = readFileSync(path)
-    if (content.length === 0 || content.includes(0)) return 1
-    const text = content.toString('utf8')
-    return Math.max(1, text.endsWith('\n') ? text.split('\n').length - 1 : text.split('\n').length)
-  } catch {
-    // A file may disappear between status and read; retaining a sentinel keeps
-    // the observed dirty path fail-closed instead of silently dropping it.
-    return 1
+    return {
+      lineEnd: changed.untracked ? untrackedLineEnd(content) : 1,
+      fingerprint: fingerprint(content),
+    }
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error)
+    return { error: `status fingerprint failed for ${changed.filePath}: ${detail}` }
   }
 }
 
@@ -223,11 +233,13 @@ const observedDiffHunks = (
 
   for (const changed of statusPaths(status.stdout)) {
     if (hunks.some((hunk) => hunk.filePath === changed.filePath)) continue
+    const fallback = statusFallback(workspaceRoot, changed)
+    if ('error' in fallback) return fallback
     hunks.push({
       filePath: changed.filePath,
       lineStart: 1,
-      lineEnd: changed.untracked ? untrackedLineEnd(workspaceRoot, changed.filePath) : 1,
-      fingerprint: fileFingerprint(workspaceRoot, changed.filePath),
+      lineEnd: fallback.lineEnd,
+      fingerprint: fallback.fingerprint,
     })
   }
   hunks.sort(
