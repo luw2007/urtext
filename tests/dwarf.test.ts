@@ -228,6 +228,28 @@ describe('detectUnmapped', () => {
     ])
   })
 
+  test('replacing an acked symlink with a binary regular file invalidates its same-HEAD ack', () => {
+    const root = setupRepo()
+    const link = join(root, 'src/current.ts')
+    const target = 'missing-first.ts'
+    symlinkSync(target, link)
+    const acked = recordAck(
+      db,
+      { filePath: 'src/current.ts', lineStart: 1, lineEnd: 1, note: 'link only' },
+      root,
+      1
+    )
+    expect(acked.kind).toBe('acked')
+
+    rmSync(link)
+    writeFileSync(link, Buffer.from(`symlink\0${target}`))
+
+    const result = detectUnmapped(db, root)
+    expect('unmapped' in result && result.unmapped).toEqual([
+      { filePath: 'src/current.ts', lineStart: 1, lineEnd: 1 },
+    ])
+  })
+
   test('rejects provenance when a status-only regular file cannot be read', () => {
     const root = setupRepo()
     const path = join(root, 'src/unreadable.bin')
