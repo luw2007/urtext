@@ -127,6 +127,7 @@ describe('complete spec impact interactions', () => {
       expect.objectContaining({ specPath: 'specs/x/tasks.md', fileId: 'T001', clauseId: 'C002' })
     )
     expect(html).toContain('data-state="risk-high"')
+    expect(html).toContain('data-state="no-evidence"')
     expect(html).toContain('data-state="stale"')
     expect(html).toContain('1 个关联任务')
     expect(html).toContain('尚无映射代码')

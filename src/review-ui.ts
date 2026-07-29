@@ -28,7 +28,12 @@ import {
 } from './brief.js'
 import { detectUnmapped, type DiffHunk } from './dwarf.js'
 import { adjudicate } from './gate.js'
-import { buildStatus, type StatusItem, type StatusReport } from './status.js'
+import {
+  buildStatus,
+  projectEvidenceStaleness,
+  type StatusItem,
+  type StatusReport,
+} from './status.js'
 import { currentHead, listDecisions, recordDecision } from './decision.js'
 import { listReviews, recordReview, worktreeDirty } from './review.js'
 import type {
@@ -86,8 +91,10 @@ export const buildUiSnapshot = (db: Database, root: string): UiSnapshot => {
   const unmappedError = 'error' in unmappedReport ? unmappedReport.error : null
   const status = buildStatus(db, { head, unmapped, dirtyWorktree: dirty })
   const report = adjudicate(db, unmapped.length, head ?? undefined, { dirtyWorktree: dirty })
+  const staleness = projectEvidenceStaleness(db)
   const clauses: UiClause[] = report.decisions.map((d) => {
     const isManual = d.decisionVerdict !== 'n/a'
+    const projectedStaleness = staleness.get(`${d.specPath}#${d.clauseId}`)
     return {
       specPath: d.specPath,
       clauseId: d.clauseId,
@@ -96,7 +103,7 @@ export const buildUiSnapshot = (db: Database, root: string): UiSnapshot => {
       evidenceVerdict: d.evidenceVerdict,
       auditVerdict: d.auditVerdict,
       reviewStatus: d.reviewStatus,
-      stale: d.stale,
+      stale: d.stale || projectedStaleness?.stale === true,
       decisionVerdict: d.decisionVerdict,
       actionable: isManual && d.decisionVerdict === 'none',
     }
@@ -201,7 +208,8 @@ export const buildSpecImpactView = (
   navigation: ClauseNavigation = { previous: null, next: null },
   requirementBindings: RequirementBindingView[] = [],
   refs: ImpactDependent[] = [],
-  oneHopDependents: ImpactDependent[] = []
+  oneHopDependents: ImpactDependent[] = [],
+  stale: boolean = brief.manifest.stale
 ): SpecImpactView => ({
   schema: 'urtext.spec-impact/1',
   head: brief.manifest.head,
@@ -209,7 +217,7 @@ export const buildSpecImpactView = (
   oracleKind: brief.manifest.oracleKind,
   oracleRef: brief.manifest.oracleRef,
   risk: brief.manifest.risk,
-  stale: brief.manifest.stale,
+  stale,
   hasEvidence: brief.manifest.evidence !== null,
   requirementBindings,
   refs,
@@ -247,20 +255,24 @@ export const handleBrief = (db: Database, root: string, spec: unknown, clause: u
     }
   }
   const manifest = outcome.brief.manifest
+  const staleness = projectEvidenceStaleness(db)
+  const projectedTargetStale =
+    manifest.stale || staleness.get(`${manifest.specPath}#${manifest.clauseId}`)?.stale === true
   const reviewable =
     manifest.risk === 'high' &&
     manifest.evidence?.verdict === 'pass' &&
     manifest.auditVerdict === 'agree' &&
-    !manifest.stale
+    !projectedTargetStale
   const files = [...new Set(manifest.mappings.map((mapping) => mapping.filePath))]
   const decisions = adjudicate(db, 0, manifest.head ?? undefined).decisions
   const decisionByKey = new Map(decisions.map((decision) => [`${decision.specPath}#${decision.clauseId}`, decision]))
   const toNeighbor = (dependent: ClauseTarget): ImpactDependent => {
     const decision = decisionByKey.get(`${dependent.specPath}#${dependent.clauseId}`)
+    const projectedStaleness = staleness.get(`${dependent.specPath}#${dependent.clauseId}`)
     return {
       ...dependent,
       title: decision?.title ?? '',
-      stale: decision?.stale ?? false,
+      stale: decision?.stale === true || projectedStaleness?.stale === true,
       evidenceVerdict: decision?.evidenceVerdict ?? 'missing',
     }
   }
@@ -295,7 +307,8 @@ export const handleBrief = (db: Database, root: string, spec: unknown, clause: u
         navigation,
         resolveClauseRequirementBindings(db, target),
         refs,
-        oneHopDependents
+        oneHopDependents,
+        projectedTargetStale
       ),
       facts: {
         title: `${manifest.specPath}#${manifest.clauseId} ${manifest.title}`,

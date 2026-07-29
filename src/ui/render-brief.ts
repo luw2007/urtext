@@ -20,12 +20,14 @@ const oracleMeta = (view: SpecImpactView): string =>
     view.oracleRef !== null ? ` <code>${esc(view.oracleRef)}</code>` : ''
   }</p>`
 
-const evidenceChip = (view: SpecImpactView): string =>
-  !view.hasEvidence
-    ? `<span data-tone="muted" data-state="no-evidence">○ 尚无证据 — 运行 <code>urtext verify</code></span>`
-    : view.stale
-      ? `<span data-tone="warn" data-state="stale">⚠ 证据已过期 — 需重新 verify</span>`
-      : `<span data-tone="ok" data-state="fresh">✓ 当前有效</span>`
+const evidenceChip = (view: SpecImpactView): string => {
+  const stale = `<span data-tone="warn" data-state="stale">⚠ 证据已过期 — 需重新 verify</span>`
+  if (!view.hasEvidence) {
+    const missing = `<span data-tone="muted" data-state="no-evidence">○ 尚无证据 — 运行 <code>urtext verify</code></span>`
+    return view.stale ? `${missing} ${stale}` : missing
+  }
+  return view.stale ? stale : `<span data-tone="ok" data-state="fresh">✓ 当前有效</span>`
+}
 
 const resolvedRequirementBindingsHtml = (
   bindings: readonly RequirementBindingView[]

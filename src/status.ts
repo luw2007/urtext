@@ -81,6 +81,46 @@ export interface StatusReport {
   uncoveredRequirements: RequirementCoverage[]
 }
 
+export interface EvidenceStalenessProjection {
+  stale: boolean
+  /** Origin key for a stale stamp; null for legacy unattributed rows. */
+  invalidationSource: string | null
+}
+
+/**
+ * Display-only staleness for each clause's latest evidence row, regardless of
+ * revision. The projection deliberately exposes no verdict: callers must keep
+ * using adjudicate's current-revision verdict and may only add stale context.
+ */
+export const projectEvidenceStaleness = (
+  db: Database
+): Map<string, EvidenceStalenessProjection> => {
+  const rows = db
+    .prepare(
+      `SELECT e.spec_path, e.clause_id, e.invalidated_at, e.invalidation_source
+       FROM evidence e
+       JOIN (
+         SELECT spec_path, clause_id, MAX(id) AS id
+         FROM evidence GROUP BY spec_path, clause_id
+       ) latest ON latest.id = e.id`
+    )
+    .all() as {
+      spec_path: string
+      clause_id: string
+      invalidated_at: number | null
+      invalidation_source: string | null
+    }[]
+  return new Map(
+    rows.map((row) => [
+      `${row.spec_path}#${row.clause_id}`,
+      {
+        stale: row.invalidated_at !== null,
+        invalidationSource: row.invalidated_at === null ? null : row.invalidation_source,
+      },
+    ])
+  )
+}
+
 /** Provisional default — recalibrate from real queue data (plan v2 R5). */
 export const DEFAULT_WIP_LIMIT = 10
 
@@ -99,7 +139,11 @@ const NEXT_HINT: Record<StatusReason, string> = {
 }
 
 /** Mirror of the gate's escalation logic as typed reason codes. */
-const clauseReasons = (decision: ClauseDecision, dirtyWorktree: boolean): Set<StatusReason> => {
+const clauseReasons = (
+  decision: ClauseDecision,
+  dirtyWorktree: boolean,
+  stale: boolean
+): Set<StatusReason> => {
   const reasons = new Set<StatusReason>()
   const isManual = decision.decisionVerdict !== 'n/a'
   if (decision.evidenceVerdict === 'missing') reasons.add('missing_evidence')
@@ -108,7 +152,7 @@ const clauseReasons = (decision: ClauseDecision, dirtyWorktree: boolean): Set<St
     if (decision.decisionVerdict === 'fail') reasons.add('manual_failed')
     else if (decision.decisionVerdict !== 'pass') reasons.add('manual_undecided')
   }
-  if (decision.stale) reasons.add('stale')
+  if (stale) reasons.add('stale')
   if (!isManual) {
     if (decision.auditVerdict === 'disagree') reasons.add('audit_disagreement')
     else if (decision.auditVerdict === 'unaudited') reasons.add('unaudited')
@@ -121,8 +165,14 @@ const clauseReasons = (decision: ClauseDecision, dirtyWorktree: boolean): Set<St
   return reasons
 }
 
-const clauseItem = (decision: ClauseDecision, dirtyWorktree: boolean): StatusItem | null => {
-  const present = clauseReasons(decision, dirtyWorktree)
+const clauseItem = (
+  decision: ClauseDecision,
+  dirtyWorktree: boolean,
+  staleness: EvidenceStalenessProjection | undefined
+): StatusItem | null => {
+  const stale = decision.stale || staleness?.stale === true
+  const invalidationSource = decision.invalidationSource ?? staleness?.invalidationSource ?? null
+  const present = clauseReasons(decision, dirtyWorktree, stale)
   if (present.size === 0) return null
   const ordered = [...AGENT_ORDER, ...HUMAN_ORDER].filter((reason) => present.has(reason))
   const lane: StatusLane = AGENT_ORDER.some((reason) => present.has(reason)) ? 'agent' : 'human'
@@ -138,8 +188,8 @@ const clauseItem = (decision: ClauseDecision, dirtyWorktree: boolean): StatusIte
     clauseId: decision.clauseId,
     title: decision.title,
     risk: decision.risk,
-    ...(decision.stale && decision.invalidationSource !== null
-      ? { invalidationSource: decision.invalidationSource }
+    ...(stale && invalidationSource !== null
+      ? { invalidationSource }
       : {}),
   }
 }
@@ -163,9 +213,14 @@ export const buildStatus = (db: Database, input: StatusInput): StatusReport => {
   const report = adjudicate(db, input.unmapped.length, input.head ?? undefined, {
     dirtyWorktree: dirty,
   })
+  const staleness = projectEvidenceStaleness(db)
 
   const clauseItems = report.decisions
-    .map((decision) => clauseItem(decision, dirty))
+    .map((decision) => clauseItem(
+      decision,
+      dirty,
+      staleness.get(`${decision.specPath}#${decision.clauseId}`)
+    ))
     .filter((item): item is StatusItem => item !== null)
   const unmappedItems: StatusItem[] = input.unmapped.map((hunk) => ({
     key: `${hunk.filePath}:${hunk.lineStart}-${hunk.lineEnd}`,
