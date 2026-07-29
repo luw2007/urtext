@@ -107,8 +107,10 @@ interface ObservedDiffHunk extends DiffHunk {
   fingerprint: string
 }
 
-const fingerprint = (content: string | Buffer): string =>
-  createHash('sha256').update(content).digest('hex')
+type FingerprintDomain = 'patch' | 'regular' | 'symlink'
+
+const fingerprint = (domain: FingerprintDomain, content: string | Buffer): string =>
+  createHash('sha256').update(domain).update('\0').update(content).digest('hex')
 
 const isToolState = (filePath: string): boolean =>
   filePath === '.urtext' || filePath.startsWith('.urtext/')
@@ -144,7 +146,7 @@ const statusFallback = (
     if (stats.isSymbolicLink()) {
       return {
         lineEnd: 1,
-        fingerprint: fingerprint(`symlink\0${readlinkSync(path)}`),
+        fingerprint: fingerprint('symlink', readlinkSync(path)),
       }
     }
     if (!stats.isFile()) {
@@ -153,7 +155,7 @@ const statusFallback = (
     const content = readFileSync(path)
     return {
       lineEnd: changed.untracked ? untrackedLineEnd(content) : 1,
-      fingerprint: fingerprint(content),
+      fingerprint: fingerprint('regular', content),
     }
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error)
@@ -188,6 +190,7 @@ const observedDiffHunks = (
       lineStart: completed.lineStart,
       lineEnd: completed.lineEnd,
       fingerprint: fingerprint(
+        'patch',
         completed.patchLines
           .filter((line, index) => index === 0 || /^(?:[+-]|\\)/.test(line))
           .join('\n')
