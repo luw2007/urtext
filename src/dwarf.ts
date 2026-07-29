@@ -14,6 +14,7 @@
  */
 
 import { spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { lstatSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
@@ -29,6 +30,7 @@ CREATE TABLE IF NOT EXISTS clause_code_map (
   line_start  INTEGER NOT NULL,
   line_end    INTEGER NOT NULL CHECK (line_end >= line_start),
   commit_sha  TEXT    NOT NULL,
+  diff_fingerprint TEXT,
   dispatch_id TEXT,
   note        TEXT,
   created_at  INTEGER NOT NULL,
@@ -38,6 +40,12 @@ CREATE TABLE IF NOT EXISTS clause_code_map (
 
 export const ensureCodeMap = (db: Database): void => {
   db.exec(CODE_MAP_SCHEMA)
+  const columns = db
+    .prepare(`SELECT name FROM pragma_table_info('clause_code_map')`)
+    .all() as { name: string }[]
+  if (!columns.some((column) => column.name === 'diff_fingerprint')) {
+    db.exec(`ALTER TABLE clause_code_map ADD COLUMN diff_fingerprint TEXT`)
+  }
 }
 
 export interface DiffHunk {
@@ -95,18 +103,37 @@ interface StatusPath {
   untracked: boolean
 }
 
+interface ObservedDiffHunk extends DiffHunk {
+  fingerprint: string
+}
+
+const fingerprint = (content: string | Buffer): string =>
+  createHash('sha256').update(content).digest('hex')
+
+const isToolState = (filePath: string): boolean =>
+  filePath === '.urtext' || filePath.startsWith('.urtext/')
+
 const statusPaths = (stdout: string): StatusPath[] => {
   const records = stdout.split('\0')
   const paths: StatusPath[] = []
   for (let index = 0; index < records.length; index += 1) {
     const record = records[index]
-    if (record.length < 4) continue
+    if (record === undefined || record.length < 4) continue
     const status = record.slice(0, 2)
-    paths.push({ filePath: record.slice(3), untracked: status === '??' })
+    const filePath = record.slice(3)
+    if (!isToolState(filePath)) paths.push({ filePath, untracked: status === '??' })
     // Porcelain v1 -z emits an extra NUL-delimited source path for renames/copies.
     if (/[RC]/.test(status)) index += 1
   }
   return paths
+}
+
+const fileFingerprint = (workspaceRoot: string, filePath: string): string => {
+  try {
+    return fingerprint(readFileSync(resolve(workspaceRoot, filePath)))
+  } catch {
+    return fingerprint('missing')
+  }
 }
 
 const untrackedLineEnd = (workspaceRoot: string, filePath: string): number => {
@@ -129,37 +156,70 @@ const untrackedLineEnd = (workspaceRoot: string, filePath: string): number => {
  * bounds are exact). A pure deletion has zero new-side lines; it anchors to
  * a 1-line range at its position so it still demands attribution.
  */
-export const diffHunks = (workspaceRoot: string): { hunks: DiffHunk[] } | { error: string } => {
+const observedDiffHunks = (
+  workspaceRoot: string
+): { hunks: ObservedDiffHunk[] } | { error: string } => {
   const diff = git(['diff', '--unified=0', 'HEAD'], workspaceRoot)
   if (!diff.ok) return { error: `git diff failed: ${diff.error}` }
   const status = git(['status', '--porcelain=v1', '-z', '--untracked-files=all'], workspaceRoot)
   if (!status.ok) return { error: `git status failed: ${status.error}` }
 
-  const hunks: DiffHunk[] = []
+  const hunks: ObservedDiffHunk[] = []
   let currentFile: string | null = null
+  let pending:
+    | { filePath: string; lineStart: number; lineEnd: number; patchLines: string[] }
+    | undefined
+  const flushPending = (): void => {
+    const completed = pending
+    pending = undefined
+    if (completed === undefined || isToolState(completed.filePath)) return
+    hunks.push({
+      filePath: completed.filePath,
+      lineStart: completed.lineStart,
+      lineEnd: completed.lineEnd,
+      fingerprint: fingerprint(
+        completed.patchLines
+          .filter((line, index) => index === 0 || /^(?:[+-]|\\)/.test(line))
+          .join('\n')
+      ),
+    })
+  }
   for (const line of diff.stdout.split('\n')) {
+    if (line.startsWith('diff --git ')) {
+      flushPending()
+      currentFile = null
+      continue
+    }
     const oldFile = line.match(/^--- (?:a\/(.*)|\/dev\/null)$/)
     if (oldFile) {
+      flushPending()
       currentFile = oldFile[1] ?? null
       continue
     }
     const newFile = line.match(/^\+\+\+ (?:b\/(.*)|\/dev\/null)$/)
     if (newFile) {
+      flushPending()
       // Deleted files keep the old path; everything else uses the new path.
       if (newFile[1] !== undefined) currentFile = newFile[1]
       continue
     }
     const hunk = line.match(HUNK_HEADER)
-    if (!hunk || currentFile === null) continue
-    const start = Number(hunk[1])
-    const count = hunk[2] === undefined ? 1 : Number(hunk[2])
-    const anchored = Math.max(start, 1) // a deletion at file start reports +0
-    hunks.push({
-      filePath: currentFile,
-      lineStart: anchored,
-      lineEnd: anchored + Math.max(count, 1) - 1,
-    })
+    if (hunk && currentFile !== null) {
+      flushPending()
+      const start = Number(hunk[1])
+      const count = hunk[2] === undefined ? 1 : Number(hunk[2])
+      const anchored = Math.max(start, 1) // a deletion at file start reports +0
+      pending = {
+        filePath: currentFile,
+        lineStart: anchored,
+        lineEnd: anchored + Math.max(count, 1) - 1,
+        patchLines: [line],
+      }
+      continue
+    }
+    if (pending !== undefined) pending.patchLines.push(line)
   }
+  flushPending()
 
   for (const changed of statusPaths(status.stdout)) {
     if (hunks.some((hunk) => hunk.filePath === changed.filePath)) continue
@@ -167,6 +227,7 @@ export const diffHunks = (workspaceRoot: string): { hunks: DiffHunk[] } | { erro
       filePath: changed.filePath,
       lineStart: 1,
       lineEnd: changed.untracked ? untrackedLineEnd(workspaceRoot, changed.filePath) : 1,
+      fingerprint: fileFingerprint(workspaceRoot, changed.filePath),
     })
   }
   hunks.sort(
@@ -174,6 +235,18 @@ export const diffHunks = (workspaceRoot: string): { hunks: DiffHunk[] } | { erro
       left.filePath.localeCompare(right.filePath) || left.lineStart - right.lineStart
   )
   return { hunks }
+}
+
+export const diffHunks = (workspaceRoot: string): { hunks: DiffHunk[] } | { error: string } => {
+  const result = observedDiffHunks(workspaceRoot)
+  if ('error' in result) return result
+  return {
+    hunks: result.hunks.map(({ filePath, lineStart, lineEnd }) => ({
+      filePath,
+      lineStart,
+      lineEnd,
+    })),
+  }
 }
 
 const overlaps = (aStart: number, aEnd: number, bStart: number, bEnd: number): boolean =>
@@ -206,8 +279,8 @@ const verifyRange = (
   lineStart: number,
   lineEnd: number,
   verb: string
-): { sha: string; hunk: DiffHunk } | { rejected: MapOutcome & { kind: 'rejected' } } => {
-  const result = diffHunks(workspaceRoot)
+): { sha: string; hunk: ObservedDiffHunk } | { rejected: MapOutcome & { kind: 'rejected' } } => {
+  const result = observedDiffHunks(workspaceRoot)
   if ('error' in result) {
     return { rejected: { kind: 'rejected', code: 'git_failed', message: result.error } }
   }
@@ -262,8 +335,9 @@ export const recordMapping = (
   const inserted = db
     .prepare(
       `INSERT INTO clause_code_map
-         (kind, spec_path, clause_id, file_path, line_start, line_end, commit_sha, note, created_at)
-       VALUES ('clause', ?, ?, ?, ?, ?, ?, ?, ?)`
+         (kind, spec_path, clause_id, file_path, line_start, line_end, commit_sha,
+          diff_fingerprint, note, created_at)
+       VALUES ('clause', ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       claim.specPath,
@@ -272,6 +346,7 @@ export const recordMapping = (
       verified.hunk.lineStart,
       verified.hunk.lineEnd,
       verified.sha,
+      verified.hunk.fingerprint,
       claim.note ?? null,
       timestamp
     )
@@ -296,14 +371,15 @@ export const recordAck = (
   const inserted = db
     .prepare(
       `INSERT INTO clause_code_map
-         (kind, file_path, line_start, line_end, commit_sha, note, created_at)
-       VALUES ('ack', ?, ?, ?, ?, ?, ?)`
+         (kind, file_path, line_start, line_end, commit_sha, diff_fingerprint, note, created_at)
+       VALUES ('ack', ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       ack.filePath,
       verified.hunk.lineStart,
       verified.hunk.lineEnd,
       verified.sha,
+      verified.hunk.fingerprint,
       ack.note,
       timestamp
     )
@@ -315,27 +391,28 @@ interface MappingRow {
   file_path: string
   line_start: number
   line_end: number
+  diff_fingerprint: string | null
 }
 
 /**
  * Attribute every working-tree hunk. A hunk is accounted for when it
- * exactly matches a clause mapping or ack recorded AT THE CURRENT HEAD (older
- * mappings describe other code states), or when it edits `specs/**` markdown
- * — writing the spec back IS the attribution.
+ * exactly matches the coordinates and diff fingerprint of a clause mapping or
+ * ack recorded AT THE CURRENT HEAD (older mappings describe other code states),
+ * or when it edits `specs/**` markdown — writing the spec back IS the attribution.
  */
 export const detectUnmapped = (
   db: Database,
   workspaceRoot: string
 ): UnmappedReport | { error: string } => {
   ensureCodeMap(db)
-  const result = diffHunks(workspaceRoot)
+  const result = observedDiffHunks(workspaceRoot)
   if ('error' in result) return { error: result.error }
   const sha = headSha(workspaceRoot)
   if (sha === null) return { error: 'git rev-parse HEAD failed' }
 
   const rows = db
     .prepare(
-      `SELECT kind, file_path, line_start, line_end
+      `SELECT kind, file_path, line_start, line_end, diff_fingerprint
        FROM clause_code_map WHERE commit_sha = ?`
     )
     .all(sha) as MappingRow[]
@@ -349,10 +426,21 @@ export const detectUnmapped = (
       (row) =>
         row.file_path === hunk.filePath &&
         row.line_start === hunk.lineStart &&
-        row.line_end === hunk.lineEnd
+        row.line_end === hunk.lineEnd &&
+        row.diff_fingerprint === hunk.fingerprint
     )
   })
-  return { hunks: result.hunks, unmapped }
+  const publicHunks = result.hunks.map(({ filePath, lineStart, lineEnd }) => ({
+    filePath,
+    lineStart,
+    lineEnd,
+  }))
+  const publicUnmapped = unmapped.map(({ filePath, lineStart, lineEnd }) => ({
+    filePath,
+    lineStart,
+    lineEnd,
+  }))
+  return { hunks: publicHunks, unmapped: publicUnmapped }
 }
 
 /** Which clauses constrain this line? Reverse lookup over recorded mappings. */
