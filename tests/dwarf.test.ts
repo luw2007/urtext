@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -6,7 +7,14 @@ import { join } from 'node:path'
 import DatabaseConstructor, { type Database } from 'better-sqlite3'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 
-import { blame, detectUnmapped, diffHunks, recordAck, recordMapping } from '../src/dwarf.js'
+import {
+  blame,
+  detectUnmapped,
+  diffHunks,
+  ensureCodeMap,
+  recordAck,
+  recordMapping,
+} from '../src/dwarf.js'
 import { run } from '../src/cli.js'
 import { openRegistry } from '../src/registry.js'
 import { scanWorkspace } from '../src/scanner.js'
@@ -247,6 +255,30 @@ describe('detectUnmapped', () => {
     const result = detectUnmapped(db, root)
     expect('unmapped' in result && result.unmapped).toEqual([
       { filePath: 'src/current.ts', lineStart: 1, lineEnd: 1 },
+    ])
+  })
+
+  test('a pre-format legacy fingerprint cannot attribute a colliding upgraded hunk', () => {
+    const root = setupRepo()
+    const currentContent = Buffer.from('current content')
+    writeFileSync(join(root, 'src/legacy.bin'), currentContent)
+
+    const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' })
+    expect(head.status).toBe(0)
+    // The legacy algorithm hashed content without a domain or format version.
+    // This old content therefore collides with the domain-separated hash of currentContent.
+    const legacyContent = Buffer.concat([Buffer.from('regular\0'), currentContent])
+    const legacyFingerprint = createHash('sha256').update(legacyContent).digest('hex')
+    ensureCodeMap(db)
+    db.prepare(
+      `INSERT INTO clause_code_map
+         (kind, file_path, line_start, line_end, commit_sha, diff_fingerprint, note, created_at)
+       VALUES ('ack', ?, ?, ?, ?, ?, ?, ?)`
+    ).run('src/legacy.bin', 1, 1, head.stdout.trim(), legacyFingerprint, 'legacy row', 1)
+
+    const result = detectUnmapped(db, root)
+    expect('unmapped' in result && result.unmapped).toEqual([
+      { filePath: 'src/legacy.bin', lineStart: 1, lineEnd: 1 },
     ])
   })
 
