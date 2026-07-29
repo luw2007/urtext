@@ -67,6 +67,18 @@ describe('exportRequest', () => {
     db.prepare('UPDATE evidence SET invalidated_at = 1 WHERE id = ?').run(id)
     expect(exportRequest(db).items).toEqual([])
   })
+
+  test('evidence from an older clause revision is excluded from audit reads', () => {
+    const root = setupVerified('## C001 Always true <!-- oracle:cmd:true req:FR001 -->')
+    writeFileSync(
+      join(root, 'specs/x/spec.md'),
+      '## FR001 test intent\n## C001 Always true <!-- oracle:cmd:false req:FR001 -->'
+    )
+    scanWorkspace(db, root)
+
+    expect(latestEvidence(db)).toEqual([])
+    expect(exportRequest(db).items).toEqual([])
+  })
 })
 
 describe('importVerdicts + coverage', () => {
@@ -94,6 +106,23 @@ describe('importVerdicts + coverage', () => {
     importVerdicts(db, [{ evidenceId: id, auditor: 'a', verdict: 'disagree', note: 'oracle too weak' }], 2)
     const report = coverage(db)
     expect(report.counts).toEqual({ agree: 0, disagree: 1, unaudited: 0 })
+  })
+
+  test('an audit of older-revision evidence does not cover the current clause revision', () => {
+    const root = setupVerified('## C001 Always true <!-- oracle:cmd:true req:FR001 -->')
+    const id = evidenceIdFor('C001')
+    importVerdicts(db, [{ evidenceId: id, auditor: 'codex', verdict: 'agree' }], 1)
+    writeFileSync(
+      join(root, 'specs/x/spec.md'),
+      '## FR001 test intent\n## C001 Always true <!-- oracle:cmd:false req:FR001 -->'
+    )
+    scanWorkspace(db, root)
+
+    expect(coverage(db)).toEqual({
+      rows: [],
+      coverage: null,
+      counts: { agree: 0, disagree: 0, unaudited: 0 },
+    })
   })
 })
 
@@ -132,6 +161,24 @@ describe('adjudicate (risk-tier gate)', () => {
     expect(report.overall).toBe('human')
   })
 
+  test('older-revision evidence and audit never auto-pass the current clause revision', () => {
+    const root = setupVerified('## C001 Always true <!-- oracle:cmd:true req:FR001 -->')
+    auditAgree('C001')
+    writeFileSync(
+      join(root, 'specs/x/spec.md'),
+      '## FR001 test intent\n## C001 Always true <!-- oracle:cmd:false req:FR001 -->'
+    )
+    scanWorkspace(db, root)
+
+    const report = adjudicate(db)
+    expect(report.decisions[0]).toMatchObject({
+      evidenceVerdict: 'missing',
+      auditVerdict: 'unaudited',
+      decision: 'human',
+    })
+    expect(report.decisions[0]?.reasons).toContain('no evidence — run `urtext verify`')
+  })
+
   test('failing evidence forces a human', () => {
     setupVerified('## C001 Always false <!-- oracle:cmd:false req:FR001 -->')
     const report = adjudicate(db)
@@ -155,5 +202,46 @@ describe('adjudicate (risk-tier gate)', () => {
     const dirty = adjudicate(db, 2)
     expect(dirty.overall).toBe('human')
     expect(dirty.reasons).toContain('2 unmapped change(s) (P3: write back to spec or ack)')
+  })
+})
+
+describe('adjudicate scan blockers', () => {
+  const auditAgree = (clauseId: string) =>
+    importVerdicts(db, [{ evidenceId: evidenceIdFor(clauseId), auditor: 'codex', verdict: 'agree' }], 1)
+
+  test('a current building revision blocks an otherwise auto-pass gate', () => {
+    const root = setupVerified('## C001 Always true <!-- oracle:cmd:true req:FR001 -->')
+    auditAgree('C001')
+    writeFileSync(
+      join(root, 'specs/x/spec.md'),
+      '## FR001 test intent\n## C001 Always true <!-- req:FR001 -->'
+    )
+    const scanReport = scanWorkspace(db, root)
+    expect(scanReport.outcomes[0]?.outcome).toMatchObject({ status: 'building' })
+
+    const report = adjudicate(db, 0, undefined, { scanReport })
+    expect(report.overall).toBe('human')
+    expect(report.reasons).toContain(
+      '1 building revision(s) — fix `urtext check` failures before adjudicating'
+    )
+  })
+
+  test('a link error blocks an otherwise auto-pass gate', () => {
+    const root = setupVerified('## C001 Always true <!-- oracle:cmd:true req:FR001 -->')
+    auditAgree('C001')
+    writeFileSync(
+      join(root, 'specs/x/spec.md'),
+      '## FR001 test intent\n## C001 Always true <!-- oracle:cmd:true refs:specs/ghost/spec.md#C001 req:FR001 -->'
+    )
+    const scanReport = scanWorkspace(db, root)
+    expect(scanReport.linkErrors).toEqual([
+      expect.objectContaining({ code: 'unknown_ref', specPath: 'specs/x/spec.md' }),
+    ])
+
+    const report = adjudicate(db, 0, undefined, { scanReport })
+    expect(report.overall).toBe('human')
+    expect(report.reasons).toContain(
+      '1 unresolved link error(s) — fix `urtext check` failures before adjudicating'
+    )
   })
 })

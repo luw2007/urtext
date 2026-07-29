@@ -113,6 +113,26 @@ describe('brief-hash freshness semantics', () => {
     expect(currentBriefHash(db, root, KEY)).toBe(first)
   })
 
+  test('older-revision evidence and audit are absent from the current revision brief', () => {
+    const root = makeRepo('## C001 t <!-- oracle:cmd:true req:FR001 -->')
+    scanWorkspace(db, root)
+    verifyWorkspace(db, root)
+    const evidence = latestEvidence(db)[0]
+    if (!evidence) throw new Error('expected evidence')
+    importVerdicts(db, [{ evidenceId: evidence.id, auditor: 'codex', verdict: 'agree' }], 1)
+    writeFileSync(
+      join(root, 'specs/x/spec.md'),
+      '## FR001 test intent\n\n## C001 t <!-- oracle:cmd:false req:FR001 -->'
+    )
+    scanWorkspace(db, root)
+
+    const outcome = buildBrief(db, root, KEY)
+    if (outcome.kind !== 'built') throw new Error('expected a brief')
+    expect(outcome.brief.manifest.evidence).toBeNull()
+    expect(outcome.brief.manifest.auditVerdict).toBeNull()
+    expect(outcome.brief.evidenceOutput).toBeNull()
+  })
+
   test('an anchor-only risk change flips the hash (text_hash alone would not)', () => {
     const root = makeRepo('## C001 t <!-- oracle:cmd:true risk:high req:FR001 -->\nbody')
     scanWorkspace(db, root)
