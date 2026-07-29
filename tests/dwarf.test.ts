@@ -76,6 +76,17 @@ describe('diffHunks', () => {
     ])
   })
 
+  test('ignores tool-generated .urtext state even when the fixture does not gitignore it', () => {
+    const root = setupRepo()
+    mkdirSync(join(root, '.urtext'), { recursive: true })
+    writeFileSync(join(root, '.urtext/registry.sqlite'), 'tool state')
+    writeFileSync(join(root, '.urtext/registry.sqlite-wal'), 'tool state')
+
+    const result = diffHunks(root)
+
+    expect('hunks' in result && result.hunks).toEqual([])
+  })
+
   test('reports a sentinel range when a tracked binary diff has no textual hunk', () => {
     const root = setupRepo()
     writeFileSync(join(root, 'src/blob.bin'), Buffer.from([0, 1, 2]))
@@ -157,6 +168,18 @@ describe('detectUnmapped', () => {
     }
   })
 
+  test('CLI check --diff does not report its own unignored .urtext registry as a code change', () => {
+    const root = setupRepo()
+
+    const previous = process.cwd()
+    try {
+      process.chdir(root)
+      expect(run(['check', '--diff'])).toBe(0)
+    } finally {
+      process.chdir(previous)
+    }
+  })
+
   test('a mapped change is attributed and no longer unmapped', () => {
     const root = setupRepo()
     writeFileSync(join(root, 'src/impl.ts'), ['const a = 1', 'const b = 20', 'const c = 3', ''].join('\n'))
@@ -182,6 +205,44 @@ describe('detectUnmapped', () => {
     expect(ack.kind).toBe('acked')
     const result = detectUnmapped(db, root)
     expect('unmapped' in result && result.unmapped).toEqual([])
+  })
+
+  test('a later same-HEAD edit at identical coordinates invalidates a prior mapping', () => {
+    const root = setupRepo()
+    writeFileSync(join(root, 'src/impl.ts'), ['const a = 1', 'const b = 20', 'const c = 3', ''].join('\n'))
+    const mapped = recordMapping(
+      db,
+      { specPath: 'specs/x/spec.md', clauseId: 'C001', filePath: 'src/impl.ts', lineStart: 2, lineEnd: 2 },
+      root,
+      1
+    )
+    expect(mapped.kind).toBe('mapped')
+
+    writeFileSync(join(root, 'src/impl.ts'), ['const a = 1', 'const b = 200', 'const c = 3', ''].join('\n'))
+
+    const result = detectUnmapped(db, root)
+    expect('unmapped' in result && result.unmapped).toEqual([
+      { filePath: 'src/impl.ts', lineStart: 2, lineEnd: 2 },
+    ])
+  })
+
+  test('a later same-HEAD edit at identical coordinates invalidates a prior ack', () => {
+    const root = setupRepo()
+    writeFileSync(join(root, 'src/impl.ts'), ['const a = 1', 'const b = 20', 'const c = 3', ''].join('\n'))
+    const acked = recordAck(
+      db,
+      { filePath: 'src/impl.ts', lineStart: 2, lineEnd: 2, note: 'first edit only' },
+      root,
+      1
+    )
+    expect(acked.kind).toBe('acked')
+
+    writeFileSync(join(root, 'src/impl.ts'), ['const a = 1', 'const b = 200', 'const c = 3', ''].join('\n'))
+
+    const result = detectUnmapped(db, root)
+    expect('unmapped' in result && result.unmapped).toEqual([
+      { filePath: 'src/impl.ts', lineStart: 2, lineEnd: 2 },
+    ])
   })
 
   test('an oversized same-HEAD mapping does not swallow a later separate edit', () => {
