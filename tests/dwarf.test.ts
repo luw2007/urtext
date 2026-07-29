@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -205,6 +205,63 @@ describe('detectUnmapped', () => {
     expect(ack.kind).toBe('acked')
     const result = detectUnmapped(db, root)
     expect('unmapped' in result && result.unmapped).toEqual([])
+  })
+
+  test('retargeting an untracked symlink invalidates its same-HEAD ack', () => {
+    const root = setupRepo()
+    const link = join(root, 'src/current.ts')
+    symlinkSync('missing-first.ts', link)
+    const acked = recordAck(
+      db,
+      { filePath: 'src/current.ts', lineStart: 1, lineEnd: 1, note: 'first link target' },
+      root,
+      1
+    )
+    expect(acked.kind).toBe('acked')
+
+    rmSync(link)
+    symlinkSync('missing-second.ts', link)
+
+    const result = detectUnmapped(db, root)
+    expect('unmapped' in result && result.unmapped).toEqual([
+      { filePath: 'src/current.ts', lineStart: 1, lineEnd: 1 },
+    ])
+  })
+
+  test('rejects provenance when a status-only regular file cannot be read', () => {
+    const root = setupRepo()
+    const path = join(root, 'src/unreadable.bin')
+    writeFileSync(path, Buffer.from([0, 1, 2]))
+    chmodSync(path, 0o000)
+
+    try {
+      const outcome = recordAck(
+        db,
+        { filePath: 'src/unreadable.bin', lineStart: 1, lineEnd: 1, note: 'unreadable' },
+        root,
+        1
+      )
+      expect(outcome).toMatchObject({ kind: 'rejected', code: 'git_failed' })
+    } finally {
+      chmodSync(path, 0o600)
+    }
+  })
+
+  test('rejects provenance when a status-only path is missing at fingerprint time', () => {
+    const root = setupRepo()
+    writeFileSync(join(root, 'src/empty.bin'), '')
+    git(root, 'add', 'src/empty.bin')
+    git(root, 'commit', '-q', '-m', 'add empty fixture')
+    rmSync(join(root, 'src/empty.bin'))
+
+    const outcome = recordAck(
+      db,
+      { filePath: 'src/empty.bin', lineStart: 1, lineEnd: 1, note: 'missing' },
+      root,
+      1
+    )
+
+    expect(outcome).toMatchObject({ kind: 'rejected', code: 'git_failed' })
   })
 
   test('a later same-HEAD edit at identical coordinates invalidates a prior mapping', () => {
