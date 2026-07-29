@@ -275,11 +275,21 @@ describe('S4 acceptance — compiled server: eight stub-backed transport submiss
       await res.json()
     }
 
+    const stalePrerequisite = await fetch(`${server.url}/api/explain`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-csrf': csrf },
+      body: JSON.stringify({ key: 'specs/demo/spec.md#C001', auditor: 'codex' }),
+    })
+    expect(stalePrerequisite.status).toBe(409)
+    await expect(stalePrerequisite.json()).resolves.toEqual({
+      error: 'item is not in the current human queue',
+    })
+
     for (const auditor of auditors) {
       const res = await fetch(`${server.url}/api/explain`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-csrf': csrf },
-        body: JSON.stringify({ key: 'specs/demo/spec.md#C001', auditor }),
+        body: JSON.stringify({ scope: 'queue', auditor }),
       })
       expect(res.status).toBe(200)
       const body = (await res.json()) as { ok: true; text: string }
@@ -305,8 +315,9 @@ describe('S4 acceptance — compiled server: eight stub-backed transport submiss
       expect(Object.keys(stub).sort()).toEqual(['command', 'mode', 'pid'])
     }
 
-    // Request ledger: 1 console GET + 1 unauthorized audit-run + 4 audit-run + 4 explain = 10.
-    expect(finalResult.requests).toHaveLength(10)
+    // Request ledger: 1 console GET + 1 unauthorized audit-run + 4 audit-run +
+    // 1 rejected stale prerequisite explain + 4 queue explain = 11.
+    expect(finalResult.requests).toHaveLength(11)
     const rejectedNoCsrf = finalResult.requests.filter((r) => r.stage === 'csrf')
     expect(rejectedNoCsrf).toHaveLength(1)
     expect(rejectedNoCsrf[0]).toMatchObject({ status: 403, pathClass: 'audit-run' })

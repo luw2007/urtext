@@ -132,8 +132,16 @@ describe('buildStatus lanes', () => {
     writeFileSync(join(root, 'specs/x/spec.md'), spec('v2 body changed').join('\n'))
     scanWorkspace(db, root)
     const dep = statusOf(root).items.find((entry) => entry.key === 'specs/x/spec.md#C002')
-    expect(dep).toMatchObject({ lane: 'agent' })
-    expect(dep?.reasons).toContain('stale')
+    expect(dep).toMatchObject({
+      lane: 'agent',
+      primary: 'missing_evidence',
+      reasons: ['missing_evidence', 'stale', 'unaudited'],
+      invalidationSource: 'specs/x/spec.md#C001',
+    })
+
+    verifyWorkspace(db, root)
+    agreeAll()
+    expect(statusOf(root).items).toHaveLength(0)
   })
 })
 

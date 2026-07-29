@@ -109,8 +109,17 @@ describe('complete spec impact interactions', () => {
       config: DEFAULT_UI_RENDER_CONFIG,
     })
 
-    expect(result.body.view).toMatchObject({ risk: 'high', stale: true, mappings: [] })
-    expect(result.body.view.dependents).toContainEqual(expect.objectContaining({ clauseId: 'C002', stale: true }))
+    expect(result.body.view).toMatchObject({
+      risk: 'high',
+      stale: true,
+      hasEvidence: false,
+      mappings: [],
+    })
+    expect(result.body.view.dependents).toContainEqual(expect.objectContaining({
+      clauseId: 'C002',
+      stale: true,
+      evidenceVerdict: 'missing',
+    }))
     expect(result.body.view.impact.affectedClauses).toEqual([
       { specPath: 'specs/x/spec.md', clauseId: 'C002' },
     ])
