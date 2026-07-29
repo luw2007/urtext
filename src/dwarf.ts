@@ -109,8 +109,14 @@ interface ObservedDiffHunk extends DiffHunk {
 
 type FingerprintDomain = 'patch' | 'regular' | 'symlink'
 
+const FINGERPRINT_FORMAT = 'v1'
+
 const fingerprint = (domain: FingerprintDomain, content: string | Buffer): string =>
-  createHash('sha256').update(domain).update('\0').update(content).digest('hex')
+  `${FINGERPRINT_FORMAT}:${createHash('sha256')
+    .update(domain)
+    .update('\0')
+    .update(content)
+    .digest('hex')}`
 
 const isToolState = (filePath: string): boolean =>
   filePath === '.urtext' || filePath.startsWith('.urtext/')
