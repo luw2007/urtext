@@ -93,9 +93,11 @@ interface EvidenceRow {
 }
 
 /**
- * The latest evidence row per live clause (highest id). Evidence is
- * append-only, so the highest id is the most recent verify. Includes
- * `invalidated_at` so the gate can treat a stale row as needing re-verify.
+ * The latest evidence row per clause of the current ready revision (highest
+ * id). Evidence from an older revision cannot describe the current clause,
+ * even when it was not explicitly invalidated (for example, an oracle-only
+ * metadata edit). Includes `invalidated_at` so the gate can treat a stale row
+ * as needing re-verify.
  */
 export const latestEvidence = (db: Database): EvidenceRow[] =>
   db
@@ -103,9 +105,15 @@ export const latestEvidence = (db: Database): EvidenceRow[] =>
       `SELECT e.id, e.spec_path, e.clause_id, e.oracle_kind, e.verdict, e.output, e.invalidated_at
        FROM evidence e
        JOIN (
-         SELECT spec_path, clause_id, MAX(id) AS id
-         FROM evidence GROUP BY spec_path, clause_id
+         SELECT spec_path, MAX(revision) AS revision
+         FROM revisions WHERE file_kind = 'clauses' GROUP BY spec_path
+       ) current ON current.spec_path = e.spec_path AND current.revision = e.revision
+       JOIN revisions r ON r.spec_path = e.spec_path AND r.revision = e.revision
+       JOIN (
+         SELECT spec_path, revision, clause_id, MAX(id) AS id
+         FROM evidence GROUP BY spec_path, revision, clause_id
        ) latest ON latest.id = e.id
+       WHERE r.status = 'ready'
        ORDER BY e.spec_path, e.clause_id`
     )
     .all() as EvidenceRow[]

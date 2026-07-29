@@ -88,7 +88,7 @@ interface EvidenceState {
   invalidationSource: string | null
 }
 
-/** Latest evidence verdict + stale stamp facts per clause (highest evidence id). */
+/** Latest evidence verdict + stale stamp facts for each current clause revision. */
 const evidenceByClause = (db: Database): Map<string, EvidenceState> => {
   ensureEvidenceLedger(db)
   const rows = db
@@ -96,8 +96,12 @@ const evidenceByClause = (db: Database): Map<string, EvidenceState> => {
       `SELECT e.spec_path, e.clause_id, e.verdict, e.invalidated_at, e.invalidation_source
        FROM evidence e
        JOIN (
-         SELECT spec_path, clause_id, MAX(id) AS id
-         FROM evidence GROUP BY spec_path, clause_id
+         SELECT spec_path, MAX(revision) AS revision
+         FROM revisions WHERE file_kind = 'clauses' GROUP BY spec_path
+       ) current ON current.spec_path = e.spec_path AND current.revision = e.revision
+       JOIN (
+         SELECT spec_path, revision, clause_id, MAX(id) AS id
+         FROM evidence GROUP BY spec_path, revision, clause_id
        ) latest ON latest.id = e.id`
     )
     .all() as {

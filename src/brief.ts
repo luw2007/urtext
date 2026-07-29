@@ -220,9 +220,11 @@ export const buildBrief = (db: Database, workspaceRoot: string, target: ClauseTa
   const evidenceRow = db
     .prepare(
       `SELECT id, verdict, exit_code, oracle_ref, output, invalidated_at, invalidation_source
-       FROM evidence WHERE spec_path = ? AND clause_id = ? ORDER BY id DESC LIMIT 1`
+       FROM evidence
+       WHERE spec_path = ? AND revision = ? AND clause_id = ?
+       ORDER BY id DESC LIMIT 1`
     )
-    .get(target.specPath, target.clauseId) as
+    .get(target.specPath, clause.revision, target.clauseId) as
     | {
         id: number
         verdict: string
