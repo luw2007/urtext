@@ -45,7 +45,7 @@ const observedDiffFingerprint = (root: string, baselineSha: string, filePath: st
     .slice(header)
     .filter((line, index) => index === 0 || /^(?:[+-]|\\)/.test(line))
     .join('\n')
-  return createHash('sha256').update(fingerprintInput).digest('hex')
+  return `v1:${createHash('sha256').update('patch\0').update(fingerprintInput).digest('hex')}`
 }
 
 let repeatHandleA: FixtureHandle | undefined
