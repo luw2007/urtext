@@ -1,6 +1,6 @@
 # Plan: cut `urtext verify` from 595s to ~50s full / ~1s incremental
 
-**Author:** OpusPlanner · **Repo:** `/Users/luwei.will/ai/urtext` @ `c181008` · **Date:** 2026-07-27
+**Author:** OpusPlanner · **Repo:** `urtext` @ `c181008` · **Date:** 2026-07-27
 
 ---
 

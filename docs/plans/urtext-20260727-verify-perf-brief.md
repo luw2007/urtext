@@ -1,7 +1,7 @@
 # Brief: Cut `urtext verify` wall time (owner: fable-5)
 
 ## Problem (measured facts)
-- Repo: /Users/luwei.will/ai/urtext (TypeScript, node:sqlite registry, vitest).
+- Repo: urtext (TypeScript, node:sqlite registry, vitest).
 - `urtext verify` full run: 56 pass / 0 fail / 4 pending in ~597s wall.
 - Root causes located:
   1. `src/verifier.ts` iterates clauses serially (`for (const row of rows)`), each oracle via `spawnSync` (src/oracle-runner.ts:36) — fully sequential, blocking.
