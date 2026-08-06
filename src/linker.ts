@@ -9,10 +9,17 @@
 
 import type { Database } from 'better-sqlite3'
 
+import type { DecisionsDoc } from './decisions-doc.js'
 import { ensureEvidenceLedger } from './verifier.js'
 
 export interface LinkError {
-  code: 'unknown_ref' | 'unknown_req' | 'ambiguous_req'
+  code:
+    | 'unknown_ref'
+    | 'unknown_req'
+    | 'ambiguous_req'
+    | 'missing_decisions_doc'
+    | 'unknown_dec'
+    | 'decisions_doc_error'
   /** Clause file declaring the broken ref. */
   specPath: string
   clauseId: string
@@ -20,6 +27,16 @@ export interface LinkError {
   message: string
   /** Machine-readable unresolved or ambiguous edge target. */
   target?: string
+}
+
+export interface LinkWarning {
+  code: 'superseded_dec'
+  specPath: string
+  clauseId: string
+  line: number
+  message: string
+  target: string
+  replacement: string
 }
 
 export interface ClauseKey {
@@ -83,6 +100,13 @@ interface ReqEdge {
   /** '' = unit-local bare `FR<n>`; otherwise the target spec path. */
   to_spec: string
   to_req: string
+  line: number
+}
+
+interface DecEdge {
+  spec_path: string
+  clause_id: string
+  dec_id: string
   line: number
 }
 
@@ -220,6 +244,72 @@ export const linkWorkspace = (db: Database): LinkError[] => {
     })
   }
   return errors
+}
+
+/** Validate live clause `dec:` edges against the workspace decision register. */
+export const linkDecisions = (
+  db: Database,
+  doc: DecisionsDoc | null
+): { errors: LinkError[]; warnings: LinkWarning[] } => {
+  const edges: DecEdge[] = []
+  const decStmt = db.prepare(
+    `SELECT spec_path, clause_id, dec_id, line
+     FROM clause_decs WHERE spec_path = ? AND revision = ?`
+  )
+  for (const { spec_path, revision } of liveClauseRevisions(db)) {
+    edges.push(...(decStmt.all(spec_path, revision) as DecEdge[]))
+  }
+  if (edges.length === 0) return { errors: [], warnings: [] }
+
+  if (doc === null) {
+    return {
+      errors: edges.map((edge) => ({
+        code: 'missing_decisions_doc',
+        specPath: edge.spec_path,
+        clauseId: edge.clause_id,
+        line: edge.line,
+        message: `Clause "${edge.clause_id}" references decision "${edge.dec_id}", but docs/DECISIONS.md does not exist.`,
+        target: edge.dec_id,
+      })),
+      warnings: [],
+    }
+  }
+
+  const errors: LinkError[] = doc.errors.map((error) => ({
+    code: 'decisions_doc_error',
+    specPath: 'docs/DECISIONS.md',
+    clauseId: '',
+    line: error.line,
+    message: error.message,
+  }))
+  const warnings: LinkWarning[] = []
+  const entries = new Map(doc.entries.map((entry) => [entry.decId, entry]))
+  for (const edge of edges) {
+    const entry = entries.get(edge.dec_id)
+    if (entry === undefined) {
+      errors.push({
+        code: 'unknown_dec',
+        specPath: edge.spec_path,
+        clauseId: edge.clause_id,
+        line: edge.line,
+        message: `Clause "${edge.clause_id}" references decision "${edge.dec_id}" which does not exist.`,
+        target: edge.dec_id,
+      })
+      continue
+    }
+    if (entry.supersededBy !== null) {
+      warnings.push({
+        code: 'superseded_dec',
+        specPath: edge.spec_path,
+        clauseId: edge.clause_id,
+        line: edge.line,
+        message: `Clause "${edge.clause_id}" references superseded decision "${edge.dec_id}"; use "${entry.supersededBy}".`,
+        target: edge.dec_id,
+        replacement: entry.supersededBy,
+      })
+    }
+  }
+  return { errors, warnings }
 }
 
 /** Tasks citing any of `clauses`, preserving clause traversal and task sequence order. */

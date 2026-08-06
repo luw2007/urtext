@@ -33,6 +33,7 @@ const makeClause = (oracle: ParsedClause['oracle'], risk: 'low' | 'high' = 'low'
   oracle,
   risk,
   refs: [],
+  decs: [],
   reqs: [],
   body: null,
   line: 0,

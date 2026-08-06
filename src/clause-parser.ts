@@ -63,6 +63,8 @@ export interface ParsedClause {
   oracle: ClauseOracle | null
   risk: 'low' | 'high'
   refs: ClauseRef[]
+  /** Decisions this clause depends on. */
+  decs: string[]
   /** Requirements this clause defends. */
   reqs: ClauseReq[]
   /** Prose between this heading and the next heading; null when empty. */
@@ -79,6 +81,8 @@ export interface ClauseParseError {
     | 'duplicate_clause_id'
     | 'malformed_anchor'
     | 'malformed_ref'
+    | 'invalid_dec_ref'
+    | 'duplicate_dec_ref'
     | 'missing_requirement'
     | 'malformed_req'
     | 'duplicate_req_id'
@@ -220,6 +224,42 @@ const parseReqs = (
   return { reqs, errors }
 }
 
+const parseDecs = (
+  value: string | undefined,
+  line: number,
+  clauseId: string
+): { decs: string[]; errors: ClauseParseError[] } => {
+  if (value === undefined) return { decs: [], errors: [] }
+
+  const decs: string[] = []
+  const errors: ClauseParseError[] = []
+  const seen = new Set<string>()
+  for (const entry of value.split(',')) {
+    const decId = entry.trim()
+    if (!/^D[1-9][0-9]*$/.test(decId)) {
+      errors.push({
+        code: 'invalid_dec_ref',
+        clauseId,
+        line,
+        message: `Clause "${clauseId}" decision ref "${decId}" is not canonical "D<n>".`,
+      })
+      continue
+    }
+    if (seen.has(decId)) {
+      errors.push({
+        code: 'duplicate_dec_ref',
+        clauseId,
+        line,
+        message: `Clause "${clauseId}" references decision "${decId}" more than once.`,
+      })
+      continue
+    }
+    seen.add(decId)
+    decs.push(decId)
+  }
+  return { decs, errors }
+}
+
 /** Body = lines until the next heading (any level) or EOF. */
 const bodyAfter = (lines: string[], start: number): string | null => {
   const bodyLines: string[] = []
@@ -323,8 +363,9 @@ export const parseClauseFile = (content: string): ParsedClauseFile => {
     }
 
     const { refs, errors: refErrors } = parseRefs(fields.refs, i, clauseId)
+    const { decs, errors: decErrors } = parseDecs(fields.dec, i, clauseId)
     const { reqs, errors: reqErrors } = parseReqs(fields.req, i, clauseId)
-    errors.push(...refErrors, ...reqErrors)
+    errors.push(...refErrors, ...decErrors, ...reqErrors)
 
     if (seenIds.has(clauseId)) {
       errors.push({
@@ -344,6 +385,7 @@ export const parseClauseFile = (content: string): ParsedClauseFile => {
       oracle,
       risk,
       refs,
+      decs,
       reqs,
       body: bodyAfter(lines, i),
       line: i,

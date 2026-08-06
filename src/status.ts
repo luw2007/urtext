@@ -64,6 +64,8 @@ export interface StatusItem {
   clauseId?: string
   title?: string
   risk?: 'low' | 'high'
+  /** Declared interface surfaces this unmapped hunk touches (L2), sorted I-IDs. */
+  matchedInterfaces?: string[]
   /** Origin key for a stale stamp; absent for fresh and legacy rows. */
   invalidationSource?: string
   filePath?: string
@@ -201,8 +203,10 @@ const byRiskThenKey = (a: StatusItem, b: StatusItem): number => {
 
 export interface StatusInput {
   head: string | null
-  /** Working-tree hunks with no mapping/ack/spec write-back (dwarf.detectUnmapped). */
-  unmapped: DiffHunk[]
+  /** Working-tree hunks with no mapping/ack/spec write-back (dwarf.detectUnmapped), optionally classified against declared interface surfaces (contract-classify). */
+  unmapped: (DiffHunk & { matchedInterfaces?: string[] })[]
+  /** I-ID → interface title, for display hints on touched surfaces. */
+  interfaceTitles?: Record<string, string>
   /** Uncommitted worktree state (review.worktreeDirty) — re-queues approved high-risk clauses. */
   dirtyWorktree?: boolean
   wipLimit?: number
@@ -210,8 +214,12 @@ export interface StatusInput {
 
 export const buildStatus = (db: Database, input: StatusInput): StatusReport => {
   const dirty = input.dirtyWorktree ?? false
+  const touchingCount = input.unmapped.filter(
+    (hunk) => (hunk.matchedInterfaces?.length ?? 0) > 0
+  ).length
   const report = adjudicate(db, input.unmapped.length, input.head ?? undefined, {
     dirtyWorktree: dirty,
+    interfaceSurfaceUnmappedCount: touchingCount,
   })
   const staleness = projectEvidenceStaleness(db)
 
@@ -222,22 +230,33 @@ export const buildStatus = (db: Database, input: StatusInput): StatusReport => {
       staleness.get(`${decision.specPath}#${decision.clauseId}`)
     ))
     .filter((item): item is StatusItem => item !== null)
-  const unmappedItems: StatusItem[] = input.unmapped.map((hunk) => ({
-    key: `${hunk.filePath}:${hunk.lineStart}-${hunk.lineEnd}`,
-    kind: 'unmapped',
-    lane: 'human',
-    primary: 'unmapped',
-    reasons: ['unmapped'],
-    next: NEXT_HINT.unmapped,
-    filePath: hunk.filePath,
-    lineStart: hunk.lineStart,
-    lineEnd: hunk.lineEnd,
-  }))
+  const unmappedItems: StatusItem[] = input.unmapped.map((hunk) => {
+    const touched = hunk.matchedInterfaces ?? []
+    const touches = touched
+      .map((id) => {
+        const title = input.interfaceTitles?.[id]
+        return title === undefined ? id : `${id} (${title})`
+      })
+      .join(', ')
+    return {
+      key: `${hunk.filePath}:${hunk.lineStart}-${hunk.lineEnd}`,
+      kind: 'unmapped',
+      lane: 'human',
+      primary: 'unmapped',
+      reasons: ['unmapped'],
+      next: touched.length > 0 ? `touches ${touches} — ${NEXT_HINT.unmapped}` : NEXT_HINT.unmapped,
+      filePath: hunk.filePath,
+      lineStart: hunk.lineStart,
+      lineEnd: hunk.lineEnd,
+      // Interface-touch only upgrades risk, never downgrades (sol review #5).
+      ...(touched.length > 0 ? { risk: 'high' as const, matchedInterfaces: touched } : {}),
+    }
+  })
 
   // Human queue first (unmapped blocks the merge outright, then by risk),
   // agent lane after — the operator reads top-down.
   const human = [
-    ...unmappedItems,
+    ...unmappedItems.sort(byRiskThenKey),
     ...clauseItems.filter((item) => item.lane === 'human').sort(byRiskThenKey),
   ]
   const agent = clauseItems.filter((item) => item.lane === 'agent').sort(byRiskThenKey)

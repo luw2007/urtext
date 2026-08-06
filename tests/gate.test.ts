@@ -203,6 +203,71 @@ describe('adjudicate (risk-tier gate)', () => {
     expect(dirty.overall).toBe('human')
     expect(dirty.reasons).toContain('2 unmapped change(s) (P3: write back to spec or ack)')
   })
+
+  test('reports interface-surface unmapped changes as a conserved subset', () => {
+    setupVerified('## C001 Always true <!-- oracle:cmd:true req:FR001 -->')
+    auditAgree('C001')
+
+    const report = adjudicate(db, 2, undefined, { interfaceSurfaceUnmappedCount: 1 })
+
+    expect(report).toMatchObject({
+      unmappedCount: 2,
+      interfaceSurfaceUnmappedCount: 1,
+      overall: 'human',
+    })
+    expect(report.interfaceSurfaceUnmappedCount).toBeLessThanOrEqual(report.unmappedCount)
+    expect(report.reasons).toContain(
+      '2 unmapped change(s), 1 touching a declared interface surface (P3: write back to spec or ack)'
+    )
+  })
+
+  test('contract parse errors fail closed even when every clause is green', () => {
+    setupVerified('## C001 Always true <!-- oracle:cmd:true req:FR001 -->')
+    auditAgree('C001')
+
+    const report = adjudicate(db, 0, undefined, { contractErrorCount: 1 })
+
+    expect(report.overall).toBe('human')
+    expect(report.reasons).toContain(
+      '1 contract parse error(s) — fix `urtext check` failures before adjudicating'
+    )
+  })
+
+  test('decision reference errors fail closed even when every clause is green', () => {
+    setupVerified('## C001 Always true <!-- oracle:cmd:true req:FR001 -->')
+    auditAgree('C001')
+
+    const report = adjudicate(db, 0, undefined, {
+      scanReport: {
+        outcomes: [],
+        linkErrors: [],
+        decisionErrors: [
+          {
+            code: 'unknown_dec',
+            specPath: 'specs/x/spec.md',
+            clauseId: 'C001',
+            line: 1,
+            message: 'unknown decision',
+          },
+        ],
+      },
+    })
+
+    expect(report.overall).toBe('human')
+    expect(report.reasons).toContain(
+      '1 decision reference error(s) — fix `urtext check` failures before adjudicating'
+    )
+  })
+
+  test('omitting new options retains the legacy unmapped reason and zero surface count', () => {
+    setupVerified('## C001 Always true <!-- oracle:cmd:true req:FR001 -->')
+    auditAgree('C001')
+
+    const report = adjudicate(db, 2)
+
+    expect(report.interfaceSurfaceUnmappedCount).toBe(0)
+    expect(report.reasons).toContain('2 unmapped change(s) (P3: write back to spec or ack)')
+  })
 })
 
 // TDD RED checkpoint: scanner/check invalid states must participate in gate semantics.

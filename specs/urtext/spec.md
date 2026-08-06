@@ -112,7 +112,7 @@ strict + exactOptionalPropertyTypes 下 `tsc --noEmit` 干净。
 子句 text_hash（标题+正文）变更时，沿 `clause_refs` 反向闭包标记依赖子句 stale，
 其既有证据的作废戳（`invalidated_at` + `invalidation_source`）在同一事件中写入——证据唯一可变面，作废不删除（审计保留）。
 
-## C009 clause→code 映射由真实 diff 交叉验证 <!-- oracle:test:tests/dwarf.test.ts risk:high req:FR006 -->
+## C009 clause→code 映射由真实 diff 交叉验证 <!-- oracle:test:tests/dwarf.test.ts risk:high req:FR006 dec:D4 -->
 
 `urtext map` 声称的子句→代码范围必须与当时真实 `git diff` 相交才落库
 （provenance 不信 LLM 自述，信 diff，DECISIONS D4）。范围不相交即
@@ -123,7 +123,7 @@ strict + exactOptionalPropertyTypes 下 `tsc --noEmit` 干净。
 `urtext check --diff` 扫描工作区 hunk：无法归因到子句映射、显式 ack 或
 spec 回写的变更标记为 unmapped，退出码 1——事实源翻转的执法点（VISION P3）。
 
-## C011 元验证只读证据且异源、分歧不静默 <!-- oracle:test:tests/gate.test.ts risk:high refs:specs/urtext/spec.md#C004 req:FR007 -->
+## C011 元验证只读证据且异源、分歧不静默 <!-- oracle:test:tests/gate.test.ts risk:high refs:specs/urtext/spec.md#C004 req:FR007 dec:D3 -->
 
 `audit --export` 只导出已判定证据的覆盖包（stale/pending 排除），审计 verdict
 绑定具体 evidence_id（只读证据不重跑，异源 preset 见 DECISIONS D3）；
@@ -249,3 +249,12 @@ clause detail 渲染 defended FR ← 本条 → refs 目标 → 直接依赖的�
 approve/decide 控件旁常驻绑定 HEAD 短 sha 与失效规则的静态说明。
 AI 解释对每个人车道条款项、unmapped 项与每个成功 clause detail 可用，只读、fail-closed，
 其文本永不进入任何账本（R4 红线）。
+
+
+## C029 决策引用断链在 check 阶段被拒绝 <!-- oracle:test:tests/linker-decisions.test.ts risk:low req:FR004 dec:D11 -->
+
+`dec:` 引用必须解析到 `docs/DECISIONS.md` 中的决策；缺失文档或未知 D-ID 均为 check 阶段错误，fail-closed。
+
+## C030 命中接口 surface 的 unmapped hunk 升级并置顶 <!-- oracle:test:tests/contract-classify.test.ts risk:low req:FR009 dec:D12 -->
+
+`contract.md` 声明的 surface 命中的 unmapped hunk 升级为 `high` 并置顶；匹配表示 touches，而非 crosses。无 `contract.md` 时既有行为不变。

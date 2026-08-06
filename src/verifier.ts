@@ -318,6 +318,7 @@ export const verifyWorkspace = (
       oracle: oracleKind ? { kind: oracleKind, ref: row.oracle_ref } : null,
       risk: row.risk,
       refs: [],
+      decs: [],
       reqs: [],
       body: row.body,
       line: row.line,

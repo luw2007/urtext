@@ -11,6 +11,13 @@ export {
   type ParsedClauseFile,
 } from './clause-parser.js'
 export {
+  parseDecisionsDoc,
+  loadDecisionsDoc,
+  type DecisionEntry,
+  type DecisionsDocError,
+  type DecisionsDoc,
+} from './decisions-doc.js'
+export {
   parseTaskFile,
   serializeTaskFile,
   type ParsedTask,
@@ -30,12 +37,22 @@ export {
 } from './registry.js'
 export { discoverUnits, scanWorkspace, type FeatureUnit, type ScanReport } from './scanner.js'
 export {
+  parseContractFile,
+  loadContracts,
+  type InterfaceEntry,
+  type ContractParseError,
+  type FeatureContract,
+} from './contract-parser.js'
+export { matchSurface, classifyUnmapped } from './contract-classify.js'
+export {
+  linkDecisions,
   linkWorkspace,
   propagateStale,
   impact,
   impactRequirement,
   uncoveredRequirements,
   type LinkError,
+  type LinkWarning,
   type ClauseKey,
   type RequirementKey,
   type RequirementCoverage,

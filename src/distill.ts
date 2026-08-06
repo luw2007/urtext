@@ -591,6 +591,7 @@ const renderClause = (clause: ParsedClause): string => {
     `oracle:${clause.oracle!.kind}${clause.oracle!.ref ? `:${clause.oracle!.ref}` : ''}`,
     ...(clause.risk === 'high' ? ['risk:high'] : []),
     ...(clause.refs.length > 0 ? [`refs:${clause.refs.map((ref) => `${ref.path}#${ref.clauseId}`).join(',')}`] : []),
+    ...(clause.decs.length > 0 ? [`dec:${clause.decs.join(',')}`] : []),
     ...(clause.reqs.length > 0 ? [`req:${clause.reqs.map((req) => req.path === null ? req.reqId : `${req.path}#${req.reqId}`).join(',')}`] : []),
   ].join(' ')
   const body = stripReviewMarkers(clause.body)

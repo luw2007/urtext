@@ -32,7 +32,15 @@ export const parseAnchorFields = (raw: string): ParsedAnchor => {
       })
       continue
     }
-    fields[token.slice(0, colon)] = token.slice(colon + 1)
+    const key = token.slice(0, colon)
+    if (fields[key] !== undefined) {
+      issues.push({
+        token,
+        message: `Anchor key "${key}" appears more than once.`,
+      })
+      continue
+    }
+    fields[key] = token.slice(colon + 1)
   }
   return { fields, issues }
 }

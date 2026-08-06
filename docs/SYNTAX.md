@@ -15,8 +15,8 @@
 ```text
 specs/<feature>/
   spec.md        behavioural clauses (any `*.md` except `tasks.md` may contain clauses)
+  contract.md    optional interface-surface declarations
   tasks.md       acceptance checklist (tasks refer to clauses)
-```
 
 - Clause files and the checklist in one directory form a **feature unit**. A checklist's `clauses:` references resolve within that unit.
 - Cross-file clause references use `refs:<workspace-relative-path>#<clause-id>`; requirement bindings use bare `req:FR<n>` inside a feature or explicit `req:<workspace-relative-path>#FR<n>`.
@@ -61,6 +61,12 @@ An operator needs a mechanical answer for whether every live intent has a defend
 | `refs` | no | comma-separated `path#Cid` | Cross-spec dependencies; the linker builds its graph and stale propagation from them. |
 | `req` | **yes** | comma-separated `FR<n>` or `path#FR<n>` | Requirements this clause defends. Omission is `missing_requirement`; malformed present values are only `malformed_req`. |
 
+| `dec` | no | comma-separated `D<n>` | Addressable decisions this clause depends on. |
+
+### Decision references (`dec:`)
+
+`dec:D4,D11` declares a normative dependency on entries in `docs/DECISIONS.md`. Each token must use the canonical, case-sensitive form `D[1-9][0-9]*`; a malformed token is `invalid_dec_ref` and a repeated token is `duplicate_dec_ref`.
+
 ### The five oracle kinds
 
 | Kind | Reference form | Decision |
@@ -70,6 +76,27 @@ An operator needs a mechanical answer for whether every live intent has a defend
 | `metric` | probe expression, e.g. `p99<200ms` | **Not supported in v0: the runner returns `fail` (never a silent skip); planned for v1** |
 | `diff-scope` | allowed path glob | the violating-file set is empty |
 | `manual` | optional; or an explanation of the human check | human decision recorded in the Decision ledger; its share is a health metric (P9) |
+
+## Decision ledger (`docs/DECISIONS.md`)
+
+A machine-addressable decision heading is `## D<n> <title>`. A heading may carry `<!-- superseded-by:D<m> -->` to name its direct replacement. The ledger is append-only by convention, not enforced against repository history; superseding preserves an explicit evolution path without proving that history was not rewritten.
+
+`dec:` links resolve at check time. A referenced ID absent from the ledger is `unknown_dec`; a referenced ID with no `docs/DECISIONS.md` is `missing_decisions_doc`. Referencing a directly superseded entry emits the non-fatal `superseded_dec` warning.
+
+## Interface-surface contracts (`contract.md`)
+
+An optional `specs/<feature>/contract.md` declares named file-level surfaces:
+
+```markdown
+## I001 CLI command surface <!-- surface:src/cli.ts -->
+The command-line boundary remains coherent for callers.
+```
+
+- An interface heading is `## I<n> <title> <!-- surface:<path-or-glob>[,<path-or-glob>...] -->`. The body is free prose naming the boundary promise.
+- Each surface is a repo-root-relative POSIX path. Absolute paths, backslashes, and `..` segments are invalid.
+- `*` matches within one path segment; `**` matches zero or more complete path segments. Matching is against the whole path.
+- A matching unmapped hunk **touches** an interface surface. It does not prove that a semantic interface was crossed; it only upgrades risk and prioritisation.
+- A present but malformed contract is a fail-closed `check` and `gate` error. An absent `contract.md` declares no surfaces and preserves the prior unmapped-change behaviour.
 
 ## Checklists (`tasks.md`)
 
@@ -117,6 +144,8 @@ Any parse/index validation error leaves the file revision in `building`; it neve
 | `duplicate_file_id` | task ID repeats |
 | `self_dependency` / `unknown_dependency` | task dependency closure is invalid |
 | `unknown_clause` / `malformed_clause_ref` | a task references no clause in its feature unit, or a ref is not a `C<n>` ID |
+| `invalid_dec_ref` | a clause `dec` token is not canonical `D<n>` |
+| `duplicate_dec_ref` | a clause repeats a `dec` token |
 
 ### Check-time workspace errors
 
@@ -127,6 +156,17 @@ These errors are evaluated over all latest live revisions by `urtext check`. The
 | `unknown_ref` | a clause `refs` a missing file or clause ID |
 | `unknown_req` | a clause `req` target has no live requirement declaration |
 | `ambiguous_req` | a bare `req` target has multiple live declarations in its feature unit |
+| `missing_decisions_doc` | a clause has `dec` references but `docs/DECISIONS.md` is absent |
+| `unknown_dec` | a clause `dec` target has no decision ledger entry |
+| `missing_surface` | an interface declaration has no valid `surface` path |
+| `duplicate_interface_id` | an interface ID repeats within a contract file |
+| `invalid_surface_path` | an interface surface is not a repo-root-relative POSIX path |
+
+### Check-time warnings
+
+| Code | Meaning |
+|---|---|
+| `superseded_dec` | a clause references a decision with a direct `superseded-by` replacement |
 
 ## Registry
 

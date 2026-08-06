@@ -20,6 +20,7 @@ import type { Database } from 'better-sqlite3'
 import { coverage } from './audit.js'
 import { decisionsAtHead, type DecisionVerdict } from './decision.js'
 import { reviewsAtHead } from './review.js'
+import type { LinkError } from './linker.js'
 import type { ScanReport } from './scanner.js'
 import { ensureEvidenceLedger } from './verifier.js'
 
@@ -47,6 +48,8 @@ export interface ClauseDecision {
 export interface GateReport {
   decisions: ClauseDecision[]
   unmappedCount: number
+  /** Subset of `unmappedCount` whose hunks touch a declared interface surface (L2). */
+  interfaceSurfaceUnmappedCount: number
   overall: Decision
   /** Top-level triggers: per-clause escalations plus unmapped changes. */
   reasons: string[]
@@ -55,7 +58,11 @@ export interface GateReport {
 export interface GateOptions {
   dirtyWorktree?: boolean
   /** Current scanner/check outcomes that must block adjudication when invalid. */
-  scanReport?: Pick<ScanReport, 'outcomes' | 'linkErrors'>
+  scanReport?: Pick<ScanReport, 'outcomes' | 'linkErrors'> & { decisionErrors?: LinkError[] }
+  /** Subset of the caller's unmapped hunks that touch a declared interface surface. */
+  interfaceSurfaceUnmappedCount?: number
+  /** Malformed `contract.md` parse errors — fail-closed, never silently degraded. */
+  contractErrorCount?: number
 }
 
 interface LiveClauseRow {
@@ -215,8 +222,10 @@ export const adjudicate = (
   if (humanClauses.length > 0) {
     reasons.push(`${humanClauses.length} clause(s) require human adjudication`)
   }
+  const touching = opts.interfaceSurfaceUnmappedCount ?? 0
   if (unmappedCount > 0) {
-    reasons.push(`${unmappedCount} unmapped change(s) (P3: write back to spec or ack)`)
+    const touches = touching > 0 ? `, ${touching} touching a declared interface surface` : ''
+    reasons.push(`${unmappedCount} unmapped change(s)${touches} (P3: write back to spec or ack)`)
   }
   const buildingCount =
     opts.scanReport?.outcomes.filter(
@@ -233,9 +242,22 @@ export const adjudicate = (
       `${linkErrorCount} unresolved link error(s) — fix \`urtext check\` failures before adjudicating`
     )
   }
+  const decisionErrorCount = opts.scanReport?.decisionErrors?.length ?? 0
+  if (decisionErrorCount > 0) {
+    reasons.push(
+      `${decisionErrorCount} decision reference error(s) — fix \`urtext check\` failures before adjudicating`
+    )
+  }
+  const contractErrorCount = opts.contractErrorCount ?? 0
+  if (contractErrorCount > 0) {
+    reasons.push(
+      `${contractErrorCount} contract parse error(s) — fix \`urtext check\` failures before adjudicating`
+    )
+  }
   return {
     decisions,
     unmappedCount,
+    interfaceSurfaceUnmappedCount: touching,
     overall: reasons.length === 0 ? 'auto-pass' : 'human',
     reasons,
   }

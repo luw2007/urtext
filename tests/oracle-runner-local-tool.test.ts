@@ -22,6 +22,7 @@ const testClause = (ref: string): ParsedClause => ({
   oracle: { kind: 'test', ref },
   risk: 'low',
   refs: [],
+  decs: [],
   reqs: [],
   body: null,
   line: 0,

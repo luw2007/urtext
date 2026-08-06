@@ -57,7 +57,7 @@ export interface CrossRefError {
 const hashContent = (content: string): string =>
   `sha256:${createHash('sha256').update(content, 'utf8').digest('hex')}`
 
-export const REGISTRY_GRAMMAR_VERSION = 1
+export const REGISTRY_GRAMMAR_VERSION = 2
 
 export const REGISTRY_SCHEMA = `
 CREATE TABLE IF NOT EXISTS revisions (
@@ -140,6 +140,16 @@ CREATE TABLE IF NOT EXISTS clause_reqs (
   to_req      TEXT    NOT NULL,
   line        INTEGER NOT NULL,
   PRIMARY KEY (spec_path, revision, clause_id, to_spec, to_req),
+  FOREIGN KEY (spec_path, revision) REFERENCES revisions (spec_path, revision) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS clause_decs (
+  spec_path   TEXT    NOT NULL,
+  revision    INTEGER NOT NULL,
+  clause_id   TEXT    NOT NULL,
+  dec_id      TEXT    NOT NULL,
+  line        INTEGER NOT NULL,
+  PRIMARY KEY (spec_path, revision, clause_id, dec_id),
   FOREIGN KEY (spec_path, revision) REFERENCES revisions (spec_path, revision) ON DELETE CASCADE
 );
 `
@@ -244,6 +254,10 @@ export const indexClauseFile = (
       `INSERT OR IGNORE INTO clause_reqs (spec_path, revision, clause_id, to_spec, to_req, line)
        VALUES (?, ?, ?, ?, ?, ?)`
     )
+    const insertDecEdge = db.prepare(
+      `INSERT OR IGNORE INTO clause_decs (spec_path, revision, clause_id, dec_id, line)
+       VALUES (?, ?, ?, ?, ?)`
+    )
     // Duplicate clause ids keep the revision at `building`; insert first-wins
     // so the PK holds and the broken edit is recorded rather than crashing.
     const inserted = new Set<string>()
@@ -272,6 +286,9 @@ export const indexClauseFile = (
       }
       for (const req of clause.reqs) {
         insertReqEdge.run(specPath, nextRevision, clause.clauseId, req.path ?? '', req.reqId, clause.line)
+      }
+      for (const decId of clause.decs) {
+        insertDecEdge.run(specPath, nextRevision, clause.clauseId, decId, clause.line)
       }
     }
     // Removed clauses changed too — their dependents must re-verify.

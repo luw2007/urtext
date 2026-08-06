@@ -39,6 +39,8 @@ import { buildBrief, renderBriefText } from './brief.js'
 import { runAuditAgent, type AuditorId } from './audit-runner.js'
 import { listDecisions, recordDecision } from './decision.js'
 import { baseline, baselineValidation, cluster, coverage as distillCoverage, discover, distillUsage, l2IntentReview, l2IntentReviewValidation, promote, runBaseline, validate } from './distill.js'
+import { classifyUnmapped } from './contract-classify.js'
+import { loadContracts } from './contract-parser.js'
 import { blame, detectUnmapped, recordAck, recordMapping } from './dwarf.js'
 import { adjudicate } from './gate.js'
 import { impact, impactRequirement } from './linker.js'
@@ -367,7 +369,9 @@ export const run = (argv: string[]): number => {
 
     if (command === 'gate') {
       const scanReport = scanWorkspace(db, workspaceRoot)
+      const contractLoad = loadContracts(workspaceRoot)
       let unmappedCount = 0
+      let interfaceSurfaceUnmappedCount = 0
       if (argv.includes('--diff')) {
         const unmappedReport = detectUnmapped(db, workspaceRoot)
         if ('error' in unmappedReport) {
@@ -375,12 +379,18 @@ export const run = (argv: string[]): number => {
           return 1
         }
         unmappedCount = unmappedReport.unmapped.length
+        interfaceSurfaceUnmappedCount = classifyUnmapped(
+          unmappedReport.unmapped.map((hunk) => ({ ...hunk, file: hunk.filePath })),
+          contractLoad.contracts
+        ).filter((hunk) => hunk.matchedInterfaces.length > 0).length
       }
       const head = currentHead(workspaceRoot)
       const dirty = worktreeDirty(workspaceRoot) ?? false
       const report = adjudicate(db, unmappedCount, head ?? undefined, {
         dirtyWorktree: dirty,
         scanReport,
+        interfaceSurfaceUnmappedCount,
+        contractErrorCount: contractLoad.errors.length,
       })
       if (argv.includes('--json')) {
         console.log(
@@ -407,14 +417,30 @@ export const run = (argv: string[]): number => {
         return 1
       }
       scanWorkspace(db, workspaceRoot)
+      const contractLoad = loadContracts(workspaceRoot)
+      if (contractLoad.errors.length > 0) {
+        for (const error of contractLoad.errors) {
+          console.error(`${error.contractPath} line ${error.line + 1}: [${error.code}] ${error.message}`)
+        }
+        return 1
+      }
       const unmappedReport = detectUnmapped(db, workspaceRoot)
       if ('error' in unmappedReport) {
         console.error(unmappedReport.error)
         return 1
       }
+      const interfaceTitles: Record<string, string> = {}
+      for (const contract of contractLoad.contracts) {
+        for (const entry of contract.entries) interfaceTitles[entry.interfaceId] = entry.title
+      }
+      const classified = classifyUnmapped(
+        unmappedReport.unmapped.map((hunk) => ({ ...hunk, file: hunk.filePath })),
+        contractLoad.contracts
+      ).map(({ file: _file, ...hunk }) => hunk)
       const report = buildStatus(db, {
         head: currentHead(workspaceRoot),
-        unmapped: unmappedReport.unmapped,
+        unmapped: classified,
+        interfaceTitles,
         dirtyWorktree: worktreeDirty(workspaceRoot) ?? false,
         ...(wipLimit !== undefined ? { wipLimit } : {}),
       })
@@ -730,7 +756,7 @@ export const run = (argv: string[]): number => {
       if (jsonMode) {
         console.log(
           JSON.stringify(
-            { schema: 'urtext.check/1', failures: 0, building: [], linkErrors: [], stale: report.stale, clauselessUnits: [], unmapped: [] },
+            { schema: 'urtext.check/1', failures: 0, building: [], linkErrors: [], decisionErrors: [], decisionWarnings: [], contractErrors: [], stale: report.stale, clauselessUnits: [], unmapped: [] },
             null,
             2
           )
@@ -796,10 +822,26 @@ export const run = (argv: string[]): number => {
       }
     }
 
+    const contractLoad = loadContracts(workspaceRoot)
     if (!jsonMode) {
       for (const error of report.linkErrors) {
         console.log(
           `  ✗ ${error.specPath} line ${error.line + 1}: [${error.code}] ${error.message}`
+        )
+      }
+      for (const error of report.decisionErrors) {
+        console.log(
+          `  ✗ ${error.specPath} line ${error.line + 1}: [${error.code}] ${error.message}`
+        )
+      }
+      for (const warning of report.decisionWarnings) {
+        console.log(
+          `  ~ ${warning.specPath} line ${warning.line + 1}: [${warning.code}] ${warning.message}`
+        )
+      }
+      for (const error of contractLoad.errors) {
+        console.log(
+          `  ✗ ${error.contractPath} line ${error.line + 1}: [${error.code}] ${error.message}`
         )
       }
       if (report.stale.staleClauses.length > 0) {
@@ -817,11 +859,11 @@ export const run = (argv: string[]): number => {
       }
     }
 
-    let failures = buildingCount + report.linkErrors.length
+    let failures = buildingCount + report.linkErrors.length + report.decisionErrors.length + contractLoad.errors.length
 
     // check --diff: unmapped working-tree changes are a validation failure
     // (VISION P3 — source-of-truth flip is enforced, not prompt-disciplined).
-    let unmappedHunks: { filePath: string; lineStart: number; lineEnd: number }[] = []
+    let unmappedHunks: { filePath: string; lineStart: number; lineEnd: number; matchedInterfaces: string[] }[] = []
     if (command === 'check' && argv.includes('--diff')) {
       const unmappedReport = detectUnmapped(db, workspaceRoot)
       if ('error' in unmappedReport) {
@@ -832,15 +874,22 @@ export const run = (argv: string[]): number => {
         console.error(`\n${unmappedReport.error}`)
         return 1
       }
-      unmappedHunks = unmappedReport.unmapped
+      unmappedHunks = classifyUnmapped(
+        unmappedReport.unmapped.map((hunk) => ({ ...hunk, file: hunk.filePath })),
+        contractLoad.contracts
+      ).map(({ file: _file, ...hunk }) => hunk)
       if (!jsonMode) {
-        for (const hunk of unmappedReport.unmapped) {
+        for (const hunk of unmappedHunks) {
+          const touches =
+            hunk.matchedInterfaces.length > 0
+              ? ` — touches ${hunk.matchedInterfaces.join(', ')}`
+              : ''
           console.log(
-            `  ⚠ unmapped ${hunk.filePath}:${hunk.lineStart}-${hunk.lineEnd} — map to a clause, ack, or write back to spec`
+            `  ⚠ unmapped ${hunk.filePath}:${hunk.lineStart}-${hunk.lineEnd}${touches} — map to a clause, ack, or write back to spec`
           )
         }
       }
-      failures += unmappedReport.unmapped.length
+      failures += unmappedHunks.length
     }
 
     if (jsonMode) {
@@ -857,6 +906,29 @@ export const run = (argv: string[]): number => {
               code: error.code,
               message: error.message,
               ...(error.target !== undefined ? { target: error.target } : {}),
+            })),
+            decisionErrors: report.decisionErrors.map((error) => ({
+              specPath: error.specPath,
+              clauseId: error.clauseId,
+              line: error.line + 1,
+              code: error.code,
+              message: error.message,
+              ...(error.target !== undefined ? { target: error.target } : {}),
+            })),
+            decisionWarnings: report.decisionWarnings.map((warning) => ({
+              specPath: warning.specPath,
+              clauseId: warning.clauseId,
+              line: warning.line + 1,
+              code: warning.code,
+              message: warning.message,
+              target: warning.target,
+              replacement: warning.replacement,
+            })),
+            contractErrors: contractLoad.errors.map((error) => ({
+              contractPath: error.contractPath,
+              line: error.line + 1,
+              code: error.code,
+              message: error.message,
             })),
             stale: report.stale,
             clauselessUnits: report.clauselessUnits,

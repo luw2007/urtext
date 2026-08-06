@@ -164,6 +164,69 @@ describe('buildStatus unmapped + wip', () => {
     expect(report.counts.human).toBe(1)
   })
 
+  test('a hunk touching an interface surface is high risk with a titled next hint', () => {
+    const root = makeRepo(['## C001 label <!-- oracle:cmd:true req:FR001 -->'])
+    scanWorkspace(db, root)
+    verifyWorkspace(db, root)
+    agreeAll()
+
+    const report = buildStatus(db, {
+      head: currentHead(root),
+      unmapped: [{ filePath: 'src/registry.ts', lineStart: 3, lineEnd: 9, matchedInterfaces: ['I002'] }],
+      interfaceTitles: { I002: 'Registry schema' },
+    })
+
+    expect(report.items[0]).toMatchObject({
+      key: 'src/registry.ts:3-9',
+      risk: 'high',
+      matchedInterfaces: ['I002'],
+      next: 'touches I002 (Registry schema) — `urtext map <spec>#<clause> <range>` | `urtext ack <range> <reason>` | write back to spec',
+    })
+  })
+
+  test('interface-touching unmapped hunks sort before untouched hunks', () => {
+    const root = makeRepo(['## C001 label <!-- oracle:cmd:true req:FR001 -->'])
+    scanWorkspace(db, root)
+    verifyWorkspace(db, root)
+    agreeAll()
+
+    const report = buildStatus(db, {
+      head: currentHead(root),
+      unmapped: [
+        { filePath: 'src/a.ts', lineStart: 1, lineEnd: 2 },
+        { filePath: 'src/z.ts', lineStart: 1, lineEnd: 2, matchedInterfaces: ['I002'] },
+      ],
+    })
+
+    expect(report.items.map((item) => item.key)).toEqual(['src/z.ts:1-2', 'src/a.ts:1-2'])
+  })
+
+  test('an unclassified hunk retains the legacy item shape', () => {
+    const root = makeRepo(['## C001 label <!-- oracle:cmd:true req:FR001 -->'])
+    scanWorkspace(db, root)
+    verifyWorkspace(db, root)
+    agreeAll()
+
+    const report = buildStatus(db, {
+      head: currentHead(root),
+      unmapped: [{ filePath: 'src/a.ts', lineStart: 3, lineEnd: 9 }],
+    })
+
+    expect(report.items[0]).toEqual({
+      key: 'src/a.ts:3-9',
+      kind: 'unmapped',
+      lane: 'human',
+      primary: 'unmapped',
+      reasons: ['unmapped'],
+      next: '`urtext map <spec>#<clause> <range>` | `urtext ack <range> <reason>` | write back to spec',
+      filePath: 'src/a.ts',
+      lineStart: 3,
+      lineEnd: 9,
+    })
+    expect(report.items[0]).not.toHaveProperty('risk')
+    expect(report.items[0]).not.toHaveProperty('matchedInterfaces')
+  })
+
   test('a clause appears once — item-keyed, not reason-keyed', () => {
     const root = makeRepo(['## C001 pay <!-- oracle:cmd:true risk:high req:FR001 -->'])
     scanWorkspace(db, root)

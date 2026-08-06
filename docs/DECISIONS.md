@@ -76,3 +76,11 @@ This acknowledges the D6 risk from the ADR 0001 design, not repository decision 
 3. `tests/registry.test.ts:15` opens `new DatabaseConstructor(':memory:')`, so registry tests do not lock any on-disk registry.
 
 These static facts are sufficient to disprove the shared-file contention premise. No concurrent stress test was added: this conclusion is limited to the path-isolated worker and in-memory test architecture documented above.
+
+## D11 Addressable decision references (`dec:`)
+
+A normative clause that relies on a ledger conclusion names its canonical `D[1-9][0-9]*` ID in `dec:`. The linker resolves it from this document and fails closed for an unknown ID or missing ledger (`unknown_dec` / `missing_decisions_doc`). A record may name its direct replacement with `<!-- superseded-by:D<m> -->`; append-only is a convention, not history enforcement.
+
+## D12 Interface-surface contracts (`contract.md`)
+
+Each feature may declare file-level interface surfaces in `contract.md`. An unmapped hunk that touches a declared path or glob is risk-upgraded and prioritized, not declared to have crossed an interface; the upgrade never lowers risk. A malformed contract fails closed; absence preserves pre-contract behavior.

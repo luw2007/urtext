@@ -13,7 +13,15 @@ import { join } from 'node:path'
 import type { Database } from 'better-sqlite3'
 
 import { parseClauseFile } from './clause-parser.js'
-import { linkWorkspace, propagateStale, type LinkError, type StaleReport } from './linker.js'
+import { loadDecisionsDoc } from './decisions-doc.js'
+import {
+  linkDecisions,
+  linkWorkspace,
+  propagateStale,
+  type LinkError,
+  type LinkWarning,
+  type StaleReport,
+} from './linker.js'
 import { indexClauseFile, indexTaskFile, type IndexOutcome } from './registry.js'
 
 export interface FeatureUnit {
@@ -30,6 +38,10 @@ export interface ScanReport {
   outcomes: { specPath: string; outcome: IndexOutcome }[]
   /** Workspace-level `unknown_ref` errors (SYNTAX.md: check-stage, fail-closed). */
   linkErrors: LinkError[]
+  /** Workspace-level decision-document validation errors. */
+  decisionErrors: LinkError[]
+  /** Referenced decisions that have direct replacements. */
+  decisionWarnings: LinkWarning[]
   /** Dependents of text-changed clauses; their evidence was invalidated. */
   stale: StaleReport
   /**
@@ -123,9 +135,18 @@ const scanWorkspaceTransaction = (db: Database, workspaceRoot: string): ScanRepo
   // Link pass over the reconciled snapshot: cross-file ref validation, then
   // stale propagation from every clause whose normative text changed.
   const linkErrors = linkWorkspace(db)
+  const decisions = linkDecisions(db, loadDecisionsDoc(workspaceRoot))
   const stale = propagateStale(db, changed, timestamp, changedRequirements)
 
-  return { units, outcomes, linkErrors, stale, clauselessUnits }
+  return {
+    units,
+    outcomes,
+    linkErrors,
+    decisionErrors: decisions.errors,
+    decisionWarnings: decisions.warnings,
+    stale,
+    clauselessUnits,
+  }
 }
 
 /** Scan and reconcile one workspace atomically with stale invalidation. */

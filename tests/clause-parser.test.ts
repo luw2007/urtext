@@ -172,6 +172,39 @@ describe('parseClauseFile', () => {
     ])
   })
 
+  test('parses ordered decision references on clauses', () => {
+    const { clauses, errors } = parseClauseFile(
+      '## C001 X <!-- oracle:manual req:FR001 dec:D10,D1 -->'
+    )
+    expect(errors).toEqual([])
+    expect(clauses[0]?.decs).toEqual(['D10', 'D1'])
+  })
+
+  test('rejects malformed, empty, and duplicate decision references', () => {
+    for (const anchor of ['dec:D01', 'dec:d1', 'dec:D1,', 'dec:,D1', 'dec:']) {
+      expect(parseClauseFile(`## C001 X <!-- oracle:manual req:FR001 ${anchor} -->`).errors).toEqual([
+        expect.objectContaining({ code: 'invalid_dec_ref', clauseId: 'C001' }),
+      ])
+    }
+    expect(
+      parseClauseFile('## C001 X <!-- oracle:manual req:FR001 dec:D1,D1 -->').errors
+    ).toEqual([expect.objectContaining({ code: 'duplicate_dec_ref', clauseId: 'C001' })])
+  })
+
+  test('ignores decision anchors on requirements', () => {
+    const parsed = parseClauseFile(
+      '## FR001 intent <!-- dec:D1 -->\n## C001 X <!-- oracle:manual req:FR001 -->'
+    )
+    expect(parsed.errors).toEqual([])
+    expect(parsed.clauses[0]?.decs).toEqual([])
+  })
+
+  test('rejects repeated decision anchor fields as malformed', () => {
+    expect(
+      parseClauseFile('## C001 X <!-- oracle:manual req:FR001 dec:D1 dec:D2 -->').errors
+    ).toEqual([expect.objectContaining({ code: 'malformed_anchor', clauseId: 'C001' })])
+  })
+
   test('a malformed anchor token is surfaced with the clause id', () => {
     const { errors } = parseClauseFile('## C001 X <!-- oracle:manual junktoken req:FR001 -->')
     expect(errors).toEqual([expect.objectContaining({ code: 'malformed_anchor', clauseId: 'C001' })])

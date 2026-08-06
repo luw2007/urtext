@@ -53,6 +53,21 @@ describe('registry revision chain', () => {
     ])
   })
 
+  test('persists decision edges with the indexed clause revision', () => {
+    indexClauseFile(db, {
+      specPath: 'specs/x/spec.md',
+      content: '## FR001 intent\n## C001 lock <!-- oracle:manual req:FR001 dec:D10,D1 -->',
+      timestamp: 1,
+    })
+
+    expect(
+      db.prepare('SELECT clause_id, dec_id, line FROM clause_decs ORDER BY dec_id').all()
+    ).toEqual([
+      { clause_id: 'C001', dec_id: 'D1', line: 1 },
+      { clause_id: 'C001', dec_id: 'D10', line: 1 },
+    ])
+  })
+
   test('FR text edits and removals are changedRequirements without clause text churn', () => {
     const content = (body: string) =>
       ['## FR001 意图', body, '## C001 锁 <!-- oracle:manual req:FR001 -->'].join('\n')
@@ -112,7 +127,7 @@ describe('registry revision chain', () => {
       legacy.prepare('SELECT revision, status, grammar_version FROM revisions ORDER BY revision').all()
     ).toEqual([
       { revision: 1, status: 'ready', grammar_version: 0 },
-      { revision: 2, status: 'building', grammar_version: 1 },
+      { revision: 2, status: 'building', grammar_version: 2 },
     ])
     legacy.close()
   })
@@ -268,11 +283,29 @@ describe('scanWorkspace', () => {
     ])
     expect(report.outcomes.map(({ specPath, outcome }) => [specPath, outcome.kind])).toEqual([
       ['specs/coupon/spec.md', 'indexed'],
+
       ['specs/coupon/tasks.md', 'indexed'],
     ])
     for (const { outcome } of report.outcomes) {
       expect(outcome).toMatchObject({ status: 'ready' })
     }
+  })
+
+  test('reports decision links independently from ordinary workspace links', () => {
+    const root = mkdtempSync(join(tmpdir(), 'urtext-scan-'))
+    tempDirs.push(root)
+    mkdirSync(join(root, 'specs/x'), { recursive: true })
+    writeFileSync(
+      join(root, 'specs/x/spec.md'),
+      '## FR001 intent\n## C001 lock <!-- oracle:manual req:FR001 dec:D1 -->'
+    )
+
+    const report = scanWorkspace(db, root)
+    expect(report.linkErrors).toEqual([])
+    expect(report.decisionErrors).toEqual([
+      expect.objectContaining({ code: 'missing_decisions_doc', clauseId: 'C001' }),
+    ])
+    expect(report.decisionWarnings).toEqual([])
   })
 
   test('a checklist citing a clause missing from the unit stays building', () => {
@@ -296,6 +329,8 @@ describe('scanWorkspace', () => {
       units: [],
       outcomes: [],
       linkErrors: [],
+      decisionErrors: [],
+      decisionWarnings: [],
       stale: { staleClauses: [], invalidatedEvidence: 0 },
       clauselessUnits: [],
     })
