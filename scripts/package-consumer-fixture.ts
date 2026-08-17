@@ -2,10 +2,10 @@
  * Deterministic local tarball consumer fixture for I2.
  *
  * Builds the package, `npm pack`s it, and installs the tarball into a fresh
- * consumer project with `--ignore-scripts --offline` (I2 §Contract: "No
- * dynamic installation ... npm-based tools local or npx --no-install"). Since
- * `--ignore-scripts` also skips `better-sqlite3`'s own prebuild-install
- * script (which would otherwise reach the network), the fixture instead
+ * consumer project with `npm ci --ignore-scripts --offline`. The fixture
+ * packs each installed production dependency path into a local tarball and
+ * rewrites the workspace lockfile, avoiding registry metadata. `--ignore-scripts`
+ * also skips `better-sqlite3`'s own prebuild-install script (which would otherwise reach the network), so the fixture
  * copies the *already-built* native addon out of this workspace's own
  * `node_modules/better-sqlite3` — the exact artifact this repo's own tests
  * already run against — and proves the copy is byte-identical (hash-bound)
@@ -45,7 +45,7 @@ export const buildDist = (): void => {
 
 /** `npm pack` the workspace into `destDir`, returns the absolute tarball path. */
 export const packTarball = (destDir: string): string => {
-  const result = run('npm', ['pack', '--silent', '--pack-destination', destDir], REPO_ROOT)
+  const result = run('npm', ['pack', '--ignore-scripts', '--silent', '--pack-destination', destDir], REPO_ROOT)
   if (result.status !== 0) throw new Error(`npm pack failed:\n${result.stdout}\n${result.stderr}`)
   const name = result.stdout.trim().split('\n').pop()
   if (!name) throw new Error('npm pack produced no output filename')
@@ -53,17 +53,59 @@ export const packTarball = (destDir: string): string => {
 }
 
 /**
- * Installs `tarballPath` into a fresh consumer project at `consumerDir` with
- * `--ignore-scripts --offline` — no network, no arbitrary install scripts.
+ * Installs `tarballPath` with local tarballs for every installed production
+ * dependency path — no registry resolution, network, or install scripts.
  */
 export const installOffline = (consumerDir: string, tarballPath: string): void => {
   mkdirSync(consumerDir, { recursive: true })
-  writeFileSync(
-    join(consumerDir, 'package.json'),
-    JSON.stringify({ name: 'urtext-consumer-fixture', private: true, type: 'module', dependencies: { urtext: `file:${tarballPath}` } }, null, 2)
-  )
-  const result = run('npm', ['install', '--ignore-scripts', '--offline', '--no-audit', '--no-fund'], consumerDir)
-  if (result.status !== 0) throw new Error(`offline npm install failed:\n${result.stdout}\n${result.stderr}`)
+  const dependencyDir = join(consumerDir, '.dependency-tarballs')
+  mkdirSync(dependencyDir)
+
+  const pathsResult = run('npm', ['ls', '--omit=dev', '--parseable', '--all'], REPO_ROOT)
+  if (pathsResult.status !== 0) throw new Error(`production dependency listing failed:\n${pathsResult.stderr}`)
+  const dependencyPaths = pathsResult.stdout.trim().split('\n').filter((path) => path && path !== REPO_ROOT)
+  const lock = JSON.parse(readFileSync(join(REPO_ROOT, 'package-lock.json'), 'utf8'))
+  for (const dependencyPath of dependencyPaths) {
+    const lockPath = dependencyPath.slice(REPO_ROOT.length + 1)
+    const entry = lock.packages[lockPath]
+    if (!entry) throw new Error(`package-lock entry missing for installed dependency ${lockPath}`)
+    const result = run(
+      'npm',
+      ['pack', dependencyPath, '--ignore-scripts', '--silent', '--pack-destination', dependencyDir],
+      REPO_ROOT
+    )
+    if (result.status !== 0) throw new Error(`packing ${lockPath} failed:\n${result.stdout}\n${result.stderr}`)
+    const filename = result.stdout.trim().split('\n').pop()
+    if (!filename) throw new Error(`packing ${lockPath} produced no output filename`)
+    entry.resolved = `file:${join(dependencyDir, filename)}`
+    delete entry.integrity
+  }
+
+  const packageJson = {
+    name: 'urtext-consumer-fixture',
+    version: '1.0.0',
+    private: true,
+    type: 'module',
+    dependencies: { urtext: `file:${tarballPath}` },
+  }
+  writeFileSync(join(consumerDir, 'package.json'), JSON.stringify(packageJson, null, 2))
+  const workspacePackage = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8'))
+  lock.name = packageJson.name
+  lock.version = packageJson.version
+  lock.packages[''] = { name: packageJson.name, version: packageJson.version, dependencies: packageJson.dependencies }
+  lock.packages['node_modules/urtext'] = {
+    version: workspacePackage.version,
+    resolved: `file:${tarballPath}`,
+    license: workspacePackage.license,
+    dependencies: workspacePackage.dependencies,
+    bin: workspacePackage.bin,
+    engines: workspacePackage.engines,
+  }
+  writeFileSync(join(consumerDir, 'package-lock.json'), JSON.stringify(lock, null, 2))
+
+  const result = run('npm', ['ci', '--omit=dev', '--ignore-scripts', '--offline', '--no-audit', '--no-fund'], consumerDir)
+  if (result.status !== 0) throw new Error(`offline npm ci failed:\n${result.stdout}\n${result.stderr}`)
+  rmSync(dependencyDir, { recursive: true, force: true })
 }
 
 export interface NativeClosureProof {
